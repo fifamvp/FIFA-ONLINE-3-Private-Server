@@ -306,6 +306,17 @@ Added, passing the tests but not yet checked in the client:
   it, press Terapkan ke game (runs `tools/fo4_season.py install` in the background), then start
   `play.bat`. The tab also replaces a club's crest in the client's cache (the original kept in
   `gamedata/crest_backup`). Kits and new clubs are not done.
+- **Classic FO3 world** (issue #38): the Database tab's *Dunia game* picks Modern (the AI clubs, the
+  club picker and This Season packs use 26 LIVE cards, as before; own seasons also show in the Market
+  search) or Classic FO3: every club plays FO3's own 2017 squad, This Season is '17, and the added seasons
+  (25 / 26 LIVE, WC18, own seasons) are in no pack, Market, trade or virtual manager's squad: only the
+  admin page gives them. Your club and collection stay as they are, and FO3's own cards are never
+  overwritten (new seasons are added next to them). Saved in `gamedata/world.json`; counts after a
+  restart (`play.bat`).
+- **New virtual managers on demand**: the admin page's Chat AI tab has *Generate ulang*: a new crowd of
+  virtual managers (names, levels, clubs, squads, styles, Rank ratings, regions, AI clubs) at once, with
+  the same ids so friends, clubs and history keep working; *Kembalikan ke awal* brings the first crowd
+  back. Only this button changes the crowd: it stays the same on every start (`gamedata/vm_gen.json`).
 - **Own team colors on the admin page**: the Team color tab makes new team colors. A color's cards are
   picked by filters (seasons, clubs now or before, nations, players, minimum OVR, best N Market cards; a
   card meets every filter set) and it has one boost (OVR or a stat, for every position or FW / MF / DF /

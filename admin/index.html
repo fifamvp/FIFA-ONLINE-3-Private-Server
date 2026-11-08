@@ -359,6 +359,13 @@
         <label class="f"><span data-i18n="chat_lang"></span><select id="chatLang"></select></label>
         <button class="b primary" id="chatSave" data-i18n="save"></button>
       </div>
+      <h3 data-i18n="vm_title"></h3>
+      <p class="lead" data-i18n="vm_lead"></p>
+      <div class="row">
+        <button class="b primary" id="vmRegen" data-i18n="vm_regen"></button>
+        <button class="b" id="vmReset" data-i18n="vm_reset"></button>
+        <span class="muted" id="vmGen"></span>
+      </div>
     </section>
 
     <section id="notice" hidden>
@@ -394,6 +401,13 @@
       <h2 data-i18n="db_title"></h2>
       <p class="lead" id="dbLead"></p>
       <div class="row"><button class="b primary" id="dbApply" data-i18n="db_apply"></button><span class="muted" id="dbState"></span></div>
+      <h3 data-i18n="world_title"></h3>
+      <p class="lead" data-i18n="world_lead"></p>
+      <div class="row">
+        <label class="f"><span data-i18n="world_label"></span><select id="worldSel"></select></label>
+        <button class="b primary" id="worldSave" data-i18n="save"></button>
+        <span class="muted" id="worldNote"></span>
+      </div>
       <pre class="log" id="dbLog" hidden></pre>
       <h3 data-i18n="db_search"></h3>
       <form class="row" id="dbForm">
@@ -672,6 +686,7 @@ const loaders = {
     $("#chatLead").textContent = t("chat_lead", d.file);
     $("#chatOn").checked = d.enabled;
     $("#chatLang").innerHTML = Object.entries(d.langs).map(([k, v]) => `<option value="${k}"${k === d.lang ? " selected" : ""}>${esc(v)}</option>`).join("");
+    showVmGen(await api("vm_gen"));
   },
   async missions() {
     const d = await api("missions");
@@ -718,6 +733,7 @@ const loaders = {
         <button class="b small danger" data-revert="${r.spid}" data-name="${esc(r.name)}">${esc(t("restore"))}</button></td></tr>`).join("")
       || `<tr><td colspan="5" class="muted">${esc(t("db_none"))}</td></tr>`;
     await loadSeasons();
+    showWorld(await api("world"));
     await dbJob();
   },
   async log() {
@@ -1105,6 +1121,14 @@ $("#pmSave").addEventListener("click", () => act(async () => {
                              halfLength: v("#pmLength"), ball: v("#pmBall")});
   await loaders.prematch();
 }, t("pm_saved")));
+// the virtual managers' generation: a new crowd (or the first one again) from the server's next start
+function showVmGen(g) {
+  $("#vmGen").textContent = t("vm_gen_now", g.gen, fmt(g.count));
+}
+$("#vmRegen").addEventListener("click", () => {
+  if (confirm(t("vm_confirm"))) act(async () => showVmGen(await api("vm_regenerate", {})), t("vm_regen_done"));
+});
+$("#vmReset").addEventListener("click", () => act(async () => showVmGen(await api("vm_regenerate", {reset: true})), t("vm_reset_done")));
 $("#chatSave").addEventListener("click", () => act(async () => {
   await api("vm_chat_set", {enabled: $("#chatOn").checked, lang: $("#chatLang").value});
   await loaders.chat();
@@ -1185,6 +1209,13 @@ async function dbJob() {  // the install's state and output (the Aset tab's one 
 }
 setInterval(() => { if (dbBusy && !$("#db").hidden) dbJob().catch(() => {}); }, 2000);
 $("#dbApply").addEventListener("click", () => act(async () => { await api("db_install", {}); await dbJob(); }, t("db_started")));
+
+// the game world (modern / classic FO3): saved now, counts from the server's next start
+function showWorld(w) {
+  $("#worldSel").innerHTML = ["modern", "classic"].map(k => `<option value="${k}"${k === w.world ? " selected" : ""}>${esc(t("world_" + k))}</option>`).join("");
+  $("#worldNote").textContent = w.world !== w.running ? t("world_restart") : "";
+}
+$("#worldSave").addEventListener("click", () => act(async () => showWorld(await api("world_set", {world: $("#worldSel").value})), t("world_saved")));
 
 function renderDb() {
   const own = new Set(SEASONS.map(s => s.code));

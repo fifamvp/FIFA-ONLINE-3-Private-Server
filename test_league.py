@@ -1911,6 +1911,53 @@ def main():
         # the Rank opponents' chat: on/off and language (gamedata/vm_chat.json)
         assert A("vm_chat")["enabled"] and A("vm_chat")["lang"] == "id" and refused("vm_chat_set", enabled=True, lang="xx")
         assert A("vm_chat_set", enabled=False, lang="vi") == hc.vm_chat_cfg() == {"enabled": False, "lang": "vi"}
+        # Generate ulang (the virtual managers' generation): only the admin page changes it, at once;
+        # a new crowd with the same ids, generation 0 is the crowd as it always was
+        kept_gen = (hc.VM_GEN_FILE, hc.VM_GEN)
+        hc.VM_GEN_FILE = os.path.join(tmp, "vm_gen.json")
+        crowd = lambda: {m["_id"]: (m["name"], m["teamid"]) for m in hc.virtual_managers()}
+        try:
+            hc.vm_set_generation(0)
+            first = crowd()
+            assert A("vm_gen") == {"gen": 0, "count": len(first)} and hc.vm_generation() == 0
+            assert A("vm_regenerate")["gen"] == 1 == hc.VM_GEN == hc.vm_generation()  # saved and in use
+            second = crowd()
+            assert set(second) - set(first) <= {k for k in second if k.startswith("vm0")}  # ids: the same ranges
+            assert sum(first[k][0] != second[k][0] for k in set(first) & set(second)) > 0.9 * len(set(first) & set(second))
+            assert A("vm_regenerate")["gen"] == 2 and crowd() != second
+            assert A("vm_regenerate", reset=True)["gen"] == 0 and crowd() == first  # back to the first crowd exactly
+        finally:
+            hc.vm_set_generation(kept_gen[1])
+            hc.VM_GEN_FILE = kept_gen[0]
+        # the game world (issue #38): classic FO3 = 2017 squads, the added seasons only to collect
+        import gen_teams
+        kept_world, gen_teams.WORLD_FILE = gen_teams.WORLD_FILE, os.path.join(tmp, "world.json")
+        kept_season, kept_running = gen_teams.CURRENT_SEASON, gen_teams.WORLD
+        try:
+            assert A("world") == {"world": "modern", "running": gen_teams.WORLD} and refused("world_set", world="retro")
+            assert A("world_set", world="classic")["world"] == gen_teams.world() == "classic"
+            assert gen_teams._current_season() == gen_teams.LEGACY_SEASON
+            gen_teams.WORLD = gen_teams.world()  # as after a restart
+            classic = {c.spid // 1000000 for cs in hc.vm_card_pool.__wrapped__().values() for c in cs}
+            assert classic and not classic & hc.ADDED_SEASONS and 88 in classic
+            # no added season in packs, the Market or trades (all of them go through market_spids),
+            # nor in the client's Market search seasons
+            sold = {s // 1000000 for s in hc.market_spids.__wrapped__()}
+            assert not sold & hc.ADDED_SEASONS and 88 in sold
+            raw = open(os.path.join(hc.RESPONSES, "static_roster.json"), "rb").read()
+            assert not {v for s in json.loads(hc.roster_seasons(raw))["seasons"] for v in s["value"]} & hc.ADDED_SEASONS
+            gen_teams.CURRENT_SEASON = gen_teams._current_season()
+            with hc.closing(hc._db()) as c:
+                madrid = gen_teams.team(c, 243)
+            assert {int(p["spid"]) // 1000000 for p in madrid["team"]["players"]} == {gen_teams.LEGACY_SEASON}
+            A("world_set", world="modern")
+            gen_teams.WORLD = gen_teams.world()
+            modern = {c.spid // 1000000 for cs in hc.vm_card_pool.__wrapped__().values() for c in cs}
+            assert modern > classic and (300 in modern) == (300 in hc.ADDED_SEASONS and gen_teams._current_season() == 300)
+            assert {s // 1000000 for s in hc.market_spids.__wrapped__()} >= sold
+            assert json.loads(hc.roster_seasons(raw))["seasons"] == json.loads(raw)["seasons"]  # no own season here
+        finally:
+            gen_teams.WORLD_FILE, gen_teams.CURRENT_SEASON, gen_teams.WORLD = kept_world, kept_season, kept_running
         # King of the Hill's region set (issue #36): Indonesia, Singapore / Malaysia, Thailand, Vietnam
         kept_koth, hc.KOTH_FILE = hc.KOTH_FILE, os.path.join(tmp, "koth_admin.json")
         try:

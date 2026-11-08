@@ -326,6 +326,17 @@ Sudah ditambahkan dan lolos tes, tapi belum dicek di client:
   sendiri: tutup game, tekan Terapkan ke game (menjalankan `tools/fo4_season.py install` di latar), lalu
   jalankan `play.bat`. Tab ini juga mengganti logo klub di cache client (logo asli disimpan di
   `gamedata/crest_backup`). Jersey dan klub baru belum ada.
+- **Dunia FO3 klasik** (issue #38): *Dunia game* di tab Database memilih Modern (klub AI, pilihan klub
+  dan pak This Season memakai kartu 26 LIVE, seperti sebelumnya; musim buatan juga muncul di pencarian
+  Market) atau Klasik FO3: semua klub memakai skuad 2017 asli FO3, This Season = '17, dan musim tambahan
+  (25 / 26 LIVE, WC18, musim buatan) tidak ada di pak, Market, Tukar maupun skuad manajer virtual: hanya
+  halaman admin yang bisa memberikannya. Klub dan koleksimu tidak berubah, dan kartu asli FO3 tidak pernah
+  ditimpa (musim baru ditambahkan di sampingnya). Tersimpan di `gamedata/world.json`; berlaku setelah
+  restart (`play.bat`).
+- **Manajer virtual baru kapan saja**: tab Chat AI di halaman admin punya *Generate ulang*: kerumunan
+  manajer virtual baru (nama, level, klub, skuad, gaya, rating Rank, region, klub AI) langsung, dengan id
+  yang sama sehingga teman, klub dan riwayat tetap jalan; *Kembalikan ke awal* memunculkan lagi kerumunan
+  pertama. Hanya tombol ini yang mengubahnya: setiap start kerumunan tetap sama (`gamedata/vm_gen.json`).
 - **Team color buatan di halaman admin**: tab Team color membuat team color baru. Kartu anggotanya dipilih
   dengan filter (musim, klub sekarang atau dulu, negara, pemain, OVR minimal, N kartu Market terbaik;
   kartu harus memenuhi semua filter yang diisi) dan ada satu boost (OVR atau satu atribut, untuk semua

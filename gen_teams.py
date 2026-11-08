@@ -57,10 +57,27 @@ LEGACY_SEASON = 88  # spid // 1e6 of the "2017" cards (fifaaddict season badge y
 FO4_SEASON = 300  # FIFA Online 4's 26 LIVE (tools/fo4_season.py)
 
 
+# The game world (issue #38: "keep all original FIFA Online 3 teams, squads, players, and card
+# seasons unchanged ... new players and card seasons added separately"): the admin page's
+# Database tab picks it, the server reads it when it starts. "modern": clubs play their 26 LIVE
+# cards once installed; "classic": FO3's own 2017 squads everywhere, the added seasons (25 / 26
+# LIVE, WC18, own seasons) only to collect (packs, Market, admin page).
+WORLD_FILE = os.path.join(HERE, "gamedata", "world.json")
+
+
+def world():
+    try:
+        with open(WORLD_FILE, encoding="utf-8") as f:
+            return "classic" if json.load(f).get("world") == "classic" else "modern"
+    except (OSError, ValueError, AttributeError):
+        return "modern"
+
+
 def _current_season():
     """26 LIVE once tools/fo4_season.py has put it in fifadb (user: "nanti ganti default session
-    ke 26"), else 2017. Clubs take their 26 LIVE cards first and fill up with 2017 ones."""
-    if not os.path.exists(DB):
+    ke 26"), else 2017; always 2017 in the classic world. Clubs take their 26 LIVE cards first and
+    fill up with 2017 ones."""
+    if world() == "classic" or not os.path.exists(DB):
         return LEGACY_SEASON
     c = sqlite3.connect(DB)
     try:
@@ -73,6 +90,7 @@ def _current_season():
     return FO4_SEASON if hit else LEGACY_SEASON
 
 
+WORLD = world()  # as the server started (the admin page tells a newer choice apart)
 CURRENT_SEASON = _current_season()
 # fifadb leagueid of the national teams ("International"). A national team's squad is its
 # players' nationalteamid: most of them are at clubs (teamid = the club), so building it from

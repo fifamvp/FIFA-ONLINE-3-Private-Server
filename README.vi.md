@@ -298,6 +298,16 @@ Item saya, Gudang bên dưới là tên màn hình trong game, được giữ ng
   sang server khác bằng một tệp JSON. Game đọc bản sao CSDL riêng: đóng game, bấm Terapkan ke game (chạy
   `tools/fo4_season.py install` ở chế độ nền), rồi chạy `play.bat`. Tab này cũng thay logo CLB trong bộ nhớ
   đệm của client (logo gốc giữ trong `gamedata/crest_backup`). Chưa có áo đấu và CLB mới.
+- **Thế giới FO3 cổ điển** (issue #38): *Dunia game* trong tab Database chọn Hiện đại (CLB AI, phần chọn CLB
+  và gói This Season dùng thẻ 26 LIVE, như trước; mùa tự tạo cũng hiện trong tìm kiếm Market) hoặc Cổ điển FO3:
+  mọi CLB dùng đội hình 2017 gốc của FO3, This Season = '17, còn các mùa thêm vào (25 / 26 LIVE, WC18, mùa tự tạo)
+  không có trong gói, Market, giao dịch hay đội hình quản lý ảo: chỉ trang quản trị mới trao được. CLB và bộ sưu
+  tập của bạn giữ nguyên, thẻ gốc FO3 không bao giờ bị ghi đè (mùa mới được thêm bên cạnh). Lưu trong
+  `gamedata/world.json`; có hiệu lực sau khi khởi động lại (`play.bat`).
+- **Tạo lại quản lý ảo bất cứ lúc nào**: tab Chat AI trên trang quản trị có *Generate ulang*: một nhóm quản
+  lý ảo mới (tên, cấp, CLB, đội hình, lối chơi, điểm Rank, khu vực, CLB AI) ngay lập tức, cùng ID nên bạn bè,
+  CLB và lịch sử vẫn hoạt động; *Kembalikan ke awal* đưa nhóm đầu tiên trở lại. Chỉ nút này đổi nhóm: mỗi lần
+  chạy vẫn như cũ (`gamedata/vm_gen.json`).
 - **Màu đội tự tạo trên trang quản trị**: tab Team color tạo màu đội mới. Thẻ thành viên được chọn bằng bộ lọc
   (mùa, CLB hiện tại hoặc cũ, quốc gia, cầu thủ, OVR tối thiểu, N thẻ Market tốt nhất; thẻ phải thỏa mọi bộ lọc
   đã điền) và có một mức cộng (OVR hoặc một chỉ số, cho mọi vị trí hoặc FW / MF / DF / GK), các bậc giống màu đội

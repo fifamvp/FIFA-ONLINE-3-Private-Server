@@ -956,11 +956,13 @@ def market_spids():
     show (TransferUtil: permid.transferable = 1 and a namesind row; season 0 = engine cards) plus
     each one fifaaddict lists. fifaaddict alone left out 6,599 cards, 4,313 of them '17 (user:
     "jangan sampai ada pemain yang tidak ada di pack, trade, dan market"); prices come from the
-    rating either way (card_price)."""
+    rating either way (card_price). In the classic world none of the added seasons (user: "Jika
+    classic tidak ada session tambahan di pack market trading"): only the admin page gives them."""
     with closing(_db()) as c:
         own = {s for (s,) in c.execute("""SELECT p.spid FROM players p JOIN permid m ON m.spid = p.spid
             AND m.transferable = 1 WHERE p.spid >= 1000000 AND p.playerid IN (SELECT playerid FROM namesind)""")}
-    return frozenset(own | set(fa_prices()))
+    added = ADDED_SEASONS if gen_teams.WORLD == "classic" else ()
+    return frozenset(s for s in own | set(fa_prices()) if s // 1000000 not in added)
 
 
 def on_market(spid):
@@ -4470,6 +4472,9 @@ try:
     CUSTOM_SEASON_CODES = tuple(int(code) for code, _ in _own)
 except (OSError, ValueError, KeyError, AttributeError):
     pass
+# the seasons this server added to FO3's own (tools/fo4_season.py: 26 LIVE 300, 25 LIVE 325, WC18 78;
+# the admin page's own): in the classic world (gen_teams.world) the virtual managers leave them out
+ADDED_SEASONS = frozenset((300, 325, 78, *CUSTOM_SEASON_CODES))
 # each one the season's 200 best cards (user: "all session pack  top 50 ganti menjadi top 200")
 PACKS.update({92000000 + codes[0]: (f"{label} Top 200", {"seasons": codes, "icon": icon, "top": 200, "all": True})
               for label, codes, icon in FA_SEASONS})
@@ -6295,6 +6300,40 @@ VM_TAGS = ("FC", "10", "99", "07", "Gol", "Striker", "Juara", "Master", "Pro", "
 # manager's squad changes day by day (vm_team). All of it is seeded by manager and day: nothing
 # is stored, every server run sees the same crowd on the same day.
 VM_EPOCH = calendar.timegm((2026, 11, 1, 0, 0, 0))
+# The crowd's generation (user: "Di admin panel tambah untuk generate ulang virtual manager"): the
+# admin page's Generate ulang counts it up (VM_GEN_FILE {"gen": n}); every crowd seed takes it in
+# (vmseed), so names, tiers, clubs, squads, styles, ratings, regions and the AI clubs are new while
+# the ids stay (what the save refers to by id keeps working). 0 = the crowd as it always was; it
+# counts from the server's next start.
+VM_GEN_FILE = os.path.join(HERE, "gamedata", "vm_gen.json")
+
+
+def vm_generation():
+    try:
+        with open(VM_GEN_FILE, encoding="utf-8") as f:
+            return max(0, int(json.load(f).get("gen") or 0))
+    except (OSError, ValueError, TypeError, AttributeError):
+        return 0
+
+
+VM_GEN = vm_generation()  # the crowd in use: the saved one, changed only by the admin page
+
+
+def vmseed(s):
+    return s if not VM_GEN else f"{s}#g{VM_GEN}"
+
+
+def vm_set_generation(gen):
+    """Save the crowd's generation and use it at once: every crowd cache is dropped."""
+    global VM_GEN
+    os.makedirs(os.path.dirname(VM_GEN_FILE), exist_ok=True)
+    with open(VM_GEN_FILE, "w", encoding="utf-8") as f:
+        json.dump({"gen": gen}, f)
+    VM_GEN = gen
+    for f in (vm_crowd, vm_skill, vm_thirds, vm_base, vm_extra, vm_newcomers, vm_theme, vm_squad, vm_ratings,
+              vm_value, club_vm_points, ai_clubs):
+        f.cache_clear()
+    VM_SEASON.clear()
 VM_MAX = 2000  # the crowd stops growing here (user: "max player ai online 1000"; issue #36: doubled)
 # The rest of the population beside the first crowd (VM_EXTRA): there from day 0 with this
 # season's record so far, like the first crowd, so the rankings and the Rank searches hold some
@@ -6400,7 +6439,7 @@ def vm_crowd_start(sid, day):
 
 @functools.lru_cache(maxsize=None)
 def vm_skill(vid):
-    return random.Random(f"{vid}/skill").randint(-60, 60)
+    return random.Random(vmseed(f"{vid}/skill")).randint(-60, 60)
 
 
 def vm_play(vm, sid, d, first, joined=None, hour=None):
@@ -6408,7 +6447,7 @@ def vm_play(vm, sid, d, first, joined=None, hour=None):
     record): a game before his join hour on his join day (joined = (crowd day, hour UTC)) never
     happened. With `hour` (today's) the later ones are drawn but not played yet, and today's 1on1 /
     VS Manager hours are kept: his presence (vm_status)."""
-    rnd, skill = random.Random(f"{vm['_id']}/{sid}/{d}"), vm_skill(vm["_id"])
+    rnd, skill = random.Random(vmseed(f"{vm['_id']}/{sid}/{d}")), vm_skill(vm["_id"])
     jd, jh = joined or (None, 0)
     for i in range(LADDER_COUNT):
         for _ in range(rnd.choice(VM_GAMES)):
@@ -6457,7 +6496,7 @@ def vm_make(rnd, n, name, tier, played=True):
 @functools.lru_cache(maxsize=None)
 def vm_base():
     """The first crowd (VM_COUNT managers, VM_TIERS shares) at the start of a season."""
-    rnd = random.Random(VM_SEED)
+    rnd = random.Random(vmseed(VM_SEED))
     names = rnd.sample([w + t for w in VM_WORDS for t in VM_TAGS], VM_COUNT)
     out = []
     for tier, (share, *_) in enumerate(VM_TIERS):
@@ -6478,7 +6517,7 @@ def vm_extra():
 
 def vm_group(seed, n, first_id, pool):
     """n managers from first_id, named from pool, VM_TIERS shares (seeded by seed)."""
-    rnd = random.Random(f"{VM_SEED}/{seed}")
+    rnd = random.Random(vmseed(f"{VM_SEED}/{seed}"))
     names = rnd.sample(pool, n)
     out = []
     for tier, (share, *_) in enumerate(VM_TIERS):
@@ -6496,7 +6535,7 @@ def vm_newcomers(day):
     free = sorted(w + t for w in VM_WORDS for t in VM_TAGS if w + t not in taken)
     out = []
     for d in range(1, day + 1):
-        rnd = random.Random(f"vmjoin/{d}")
+        rnd = random.Random(vmseed(f"vmjoin/{d}"))
         for _ in range(rnd.choice(VM_JOIN)):
             if VM_COUNT + VM_EXTRA + VM_EXTRA2 + len(out) >= VM_MAX:
                 return out
@@ -6512,10 +6551,10 @@ VmCard = collections.namedtuple("VmCard", "ovr spid pid team nation height born 
 
 @functools.lru_cache(maxsize=None)
 def vm_card_pool():
-    """{role (POS_ROLE of preferredposition1): [VmCard]} of every Market card, any season: what a
-    virtual manager's squad is drawn from (rating, ids, club, nation, height, birth year, reputation
-    and the stat groups the squad themes rank by)."""
-    pool = {}
+    """{role (POS_ROLE of preferredposition1): [VmCard]} of every Market card, any season (in the
+    classic world FO3's own seasons only): what a virtual manager's squad is drawn from (rating,
+    ids, club, nation, height, birth year, reputation and the stat groups the squad themes rank by)."""
+    pool, added = {}, ADDED_SEASONS if gen_teams.WORLD == "classic" else ()
     born = "CAST(substr(p.birthdate, instr(p.birthdate, ' ') - 4, 4) AS INTEGER)"
     with closing(_db()) as c:
         for r in c.execute(f"""SELECT p.spid, p.playerid, p.preferredposition1, {POSOVR}, p.teamid, p.nationality,
@@ -6524,7 +6563,7 @@ def vm_card_pool():
                 (p.shortpassing + p.vision + p.longpassing) / 3, (p.standingtackle + p.marking + p.interceptions) / 3,
                 (p.finishing + p.shotpower + p.longshots) / 3, (p.gkreflexes + p.gkdiving) / 2, p.stamina FROM players p"""):
             spid, pid, pos, *rest = r
-            if 0 <= pos < POS_SUB and on_market(spid):
+            if 0 <= pos < POS_SUB and on_market(spid) and spid // 1000000 not in added:
                 pool.setdefault(POS_ROLE[pos], []).append(VmCard(rest[0], spid, pid, *rest[1:]))
     return pool
 
@@ -6608,7 +6647,7 @@ def vm_theme_cover(kind, key, roles, centre):
 def vm_theme(vid, centre, roles, teamid):
     """(theme, key) of a manager's squad (VM_THEMES), seeded by his id: drawn by his tier (by his
     rating centre) until one fits his XI roles near his rating; else free."""
-    rnd = random.Random(f"{vid}/theme")
+    rnd = random.Random(vmseed(f"{vid}/theme"))
     tier = 0 if centre < 69 else 1 if centre < 76 else 2
     keys = vm_theme_keys()
     fills = lambda kind, key: vm_theme_cover(kind, key, roles, centre) >= VM_THEME_MIN
@@ -6671,7 +6710,7 @@ VM_STYLES = {  # (bus speed, pass, positioning, cc pass, cross, shoot, positioni
 
 
 def vm_style(vm):
-    return random.Random(f"{vm['_id']}/style").choice(sorted(VM_STYLES))
+    return random.Random(vmseed(f"{vm['_id']}/style")).choice(sorted(VM_STYLES))
 
 
 def style_tactic(name, i=0):
@@ -6714,7 +6753,7 @@ def vm_squad(vid, day):
     +ENHANCE_DROP_FROM drops a grade; at most his grade + 2), and each starter may gain a level
     (at most 3 over his range)."""
     joined, vm = vm_origin(vid, day)
-    rnd, rc = random.Random(vid), random.Random(f"{vid}/cards")
+    rnd, rc = random.Random(vmseed(vid)), random.Random(vmseed(f"{vid}/cards"))
     club = roster_team(vm["teamid"])
     slots = style_slots(vm_style(vm))
     formation = next((f["formationid"] for f in formation_table()["common"]
@@ -6754,7 +6793,7 @@ def vm_squad(vid, day):
                 if b[3] == star:
                     b[1:4] = out
     for d in range(joined + 1, day + 1):
-        r = random.Random(f"{vid}/life/{d}")
+        r = random.Random(vmseed(f"{vid}/life/{d}"))
         if r.random() < VM_LIFE[0]:  # a transfer: one out, one in (the Market); never his star
             k = r.randrange(len(chosen))
             if chosen[k][3] != star:
@@ -6785,7 +6824,7 @@ def vm_staff(vm):
     frame more every 12 levels (VM_STAFF_ORDER: an FW coach at level 1, all 7 from level 72), each a
     staff of that position of about grade 1 + level / 12 (+-1 half star; 5 stars near level 100),
     seeded by his id, always under contract. The staff fields of a raw team (staff_team)."""
-    rng, level = random.Random(f"{vm['_id']}/staff"), vm["level"]
+    rng, level = random.Random(vmseed(f"{vm['_id']}/staff")), vm["level"]
     staffs, slots = [], [None] * len(STAFF_SLOTS)
     for k, pos in enumerate(VM_STAFF_ORDER[:min(len(VM_STAFF_ORDER), 1 + level // 12)]):
         sid = rng.choice([i for i, c in STAFF_CATALOGUE.items() if c[0] == pos and c[1]])
@@ -7269,7 +7308,7 @@ def room_join(roomid, vid):
             room["side"]["right"].update(players=[room_vm(vm)], ready=True)
             if room_kind(room["type"]) == "exhibition":  # his own pick of the recommended clubs
                 mine = room["side"]["left"].get("authTeamId")
-                room["side"]["right"]["authTeamId"] = random.Random(vid).choice([t for t in EXHIBITION_TEAMS if t != mine])
+                room["side"]["right"]["authTeamId"] = random.Random(vmseed(vid)).choice([t for t in EXHIBITION_TEAMS if t != mine])
             _save(st)
             messenger_push(f"/room/{roomid}", room)
 
@@ -7627,7 +7666,7 @@ def vm_chat_cfg():
 
 
 def vm_personality(vm):
-    return random.Random(vm["_id"]).choice(VM_PERSONALITIES)
+    return random.Random(vmseed(vm["_id"])).choice(VM_PERSONALITIES)
 
 
 def vm_chat_line(vm, trigger, used=()):
@@ -7787,7 +7826,7 @@ def club_line(vm, trigger, seed=None):
 
 
 def club_vm_day(vid, day, keen):
-    r = random.Random(f"clubpts:{vid}:{day}")
+    r = random.Random(vmseed(f"clubpts:{vid}:{day}"))
     return (10 if r.random() < 0.8 else 0) + 2 * round(keen * r.choice((0, 1, 2, 3, 4, 6)))
 
 
@@ -7795,7 +7834,7 @@ def club_vm_day(vid, day, keen):
 def club_vm_points(vid, d0, d1):
     """Points manager vid earned on club days d0..d1: day by day for the last week, his average before
     (a club's history goes back before the crowd's VM_EPOCH)."""
-    keen = random.Random("clubkeen" + vid).uniform(0.5, 1.5)
+    keen = random.Random(vmseed("clubkeen" + vid)).uniform(0.5, 1.5)
     exact = max(d0, d1 - 7)
     return max(0, exact - d0) * round(8 + 6 * keen) + sum(club_vm_day(vid, d, keen) for d in range(exact, d1 + 1))
 
@@ -7816,18 +7855,18 @@ def ai_clubs(day, lang):
     which club is drawn once per manager (seeded by his id), the first clubs the biggest; grades
     by level."""
     names = [f"{w} {s}" for w in VM_WORDS2 for s in CLUB_SUFFIX]
-    random.Random("clubnames").shuffle(names)
+    random.Random(vmseed("clubnames")).shuffle(names)
     weights = [1 / (k + 10) for k in range(CLUB_AI)]
     clubs = {}
     for k in range(CLUB_AI):
-        r = random.Random(f"club{k}")
+        r = random.Random(vmseed(f"club{k}"))
         created = VM_EPOCH - r.randint(20, 700) * 86400
         clubs[f"club{k + 1:04d}"] = {
             "_id": f"club{k + 1:04d}", "name": names[k], "created": created, "color": r.choice(CLUB_COLORS),
             "allowjoin": r.random() < 0.85, "skipjudgement": True, "limit": CLUB_LIMIT + CLUB_EXPAND * (k < 8),
             "seed": k, "members": []}
     for m in sorted(virtual_managers(), key=lambda m: (-m["level"], m["_id"])):
-        r = random.Random("clubof" + m["_id"])
+        r = random.Random(vmseed("clubof" + m["_id"]))
         if r.random() < CLUB_IN:
             c = clubs[f"club{r.choices(range(CLUB_AI), weights)[0] + 1:04d}"]
             if len(c["members"]) < c["limit"] - 2:  # two seats left: I can always join
@@ -7909,7 +7948,7 @@ def club_points(st, v, member):
         else:
             d0 = club_day(m["joined"])
             pts = (club_vm_points(m["id"], d0, today), club_vm_points(m["id"], max(d0, week0), today) if today >= d0 else 0,
-                   club_vm_day(m["id"], today, random.Random("clubkeen" + m["id"]).uniform(0.5, 1.5)) if today >= d0 else 0)
+                   club_vm_day(m["id"], today, random.Random(vmseed("clubkeen" + m["id"])).uniform(0.5, 1.5)) if today >= d0 else 0)
         out = [a + b for a, b in zip(out, pts)]
     return out
 
@@ -7922,7 +7961,7 @@ def club_member_row(st, m):
         div, status = ladder_division(my_ladder(st)["elo"][0]), "online"
     else:
         div, status = ladder_division(m["vm"]["elo"][0]), vm_status(m["vm"])
-    seen = time.time() if status != "offline" else time.time() - random.Random(f"seen:{m['id']}:{club_day()}").randint(3600, 20 * 3600)
+    seen = time.time() if status != "offline" else time.time() - random.Random(vmseed(f"seen:{m['id']}:{club_day()}")).randint(3600, 20 * 3600)
     return {"_id": m["id"], "coachid": m["id"], "name": m["name"], "level": m["level"],
             "division": f"DIVISION_{div}", "currdivision": f"DIVISION_{div}", "actpoints": {"weekly": weekly, "total": total},
             "joinedat": w3c(m["joined"]), "connectedat": w3c(seen), "donates": None, "grade": m["grade"],
@@ -8305,7 +8344,7 @@ def club_board(st):
         if m["vm"] is None:
             continue
         for d in range(max(club_day(m["joined"]), today - 6), today + 1):
-            r = random.Random(f"board:{m['id']}:{d}")
+            r = random.Random(vmseed(f"board:{m['id']}:{d}"))
             if r.random() < 0.12:
                 at = d * 86400 - WIB + r.randint(9, 23) * 3600
                 if at < time.time():
@@ -8458,7 +8497,7 @@ def koth_leaves(key):
 
 
 def vm_region(vid, key=None):
-    return random.Random("region" + vid).choice(sorted(koth_leaves(key or koth_set())))
+    return random.Random(vmseed("region" + vid)).choice(sorted(koth_leaves(key or koth_set())))
 
 
 def koth_season(sid):
@@ -8845,7 +8884,21 @@ def from_file(path):
         return None  # gen_teams.py's files hold 2017 squads: ep_recommendation / roster build them
     if os.path.isfile(f):
         with open(f, "rb") as fh:
-            return ("application/json", fh.read())
+            data = fh.read()
+        return ("application/json", roster_seasons(data) if path == "/static/roster" else data)
+
+
+def roster_seasons(raw):
+    """/static/roster with the seasons of the client's Market search (TransferUtil): the classic
+    world leaves the added ones out, the modern one adds the admin page's own seasons."""
+    d = json.loads(raw)
+    if gen_teams.WORLD == "classic":
+        d["seasons"] = [s for s in d["seasons"] if not set(s["value"]) & ADDED_SEASONS]
+    else:
+        frame = {k: v for k, v in d["seasons"][0].items() if k in ("open", "close")}
+        d["seasons"] += [{"season": label, "value": list(codes), **frame}
+                         for label, codes, _ in FA_SEASONS if codes[0] in CUSTOM_SEASON_CODES]
+    return json.dumps(d).encode()
 
 
 class H(http.server.BaseHTTPRequestHandler):
