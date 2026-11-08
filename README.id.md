@@ -302,7 +302,8 @@ Sudah ditambahkan dan lolos tes, tapi belum dicek di client:
 - **Gambar pengumuman saat login** (issue #36): tab Pengumuman di halaman admin mengunggah JPG atau PNG
   (disesuaikan ke popup 800×720, dengan pratinjau) untuk popup Pemberitahuan saat login, atau
   menghapusnya.
-- **Unduh gambar yang belum ada lewat halaman admin** (issue #36): tab Aset mengunduh wajah pemain, logo
+- **Unduh gambar yang belum ada lewat halaman admin** (issue #36): tab Aset mengunduh wajah pemain (foto musim
+  tiap kartu dan foto pemainnya), logo
   klub, logo liga, dan foto staff yang belum ada dari fifaaddict.com di latar belakang (satu jenis dalam
   satu waktu; bisa dihentikan dan dilanjutkan kapan saja). Tab ini menjalankan `tools/fa_faces.py`, yang
   sekarang juga menerima `--leagues`. "Default ball" di layar pengaturan game menampilkan bola EA SPORTS,
@@ -326,7 +327,8 @@ Sudah ditambahkan dan lolos tes, tapi belum dicek di client:
   Impor mod memindahkan semuanya ke server lain dalam satu file JSON. Game membaca salinan DB-nya
   sendiri: tutup game, tekan Terapkan ke game (menjalankan `tools/fo4_season.py install` di latar), lalu
   jalankan `play.bat`. Tab ini juga mengganti logo klub di cache client (logo asli disimpan di
-  `gamedata/crest_backup`) dan, di dialog kartu, foto pemain dengan PNG/JPG sendiri untuk semua kartunya
+  `gamedata/crest_backup`) dan, di dialog kartu, foto pemain dengan PNG/JPG sendiri atau foto spid / player id
+  lain (dari cache atau fifaaddict.com) untuk semua kartunya
   atau satu kartu saja (issue #36; `gamedata/faces/p<id>.png`, disajikan sebelum foto cache; kolom Wajah
   3D juga mencari kepala dengan nama pemain). Jersey dan klub baru belum ada.
 - **Dunia FO3 klasik** (issue #38): *Dunia game* di tab Database memilih Modern (klub AI, pilihan klub

@@ -283,7 +283,8 @@ Added, passing the tests but not yet checked in the client:
 - **Login notice image** (issue #36): the admin page's Pengumuman tab uploads a JPG or PNG (fitted
   to the 800×720 popup, with a preview) for the Notice popup at login, or deletes it.
 - **Missing pictures from the admin page** (issue #36): the Aset tab downloads the missing player
-  faces, club crests, league logos and staff pictures from fifaaddict.com in the background (one
+  faces (each card's season picture and the player's), club crests, league logos and staff pictures
+  from fifaaddict.com in the background (one
   kind at a time; stop and resume at any time). It runs `tools/fa_faces.py`, which also takes
   `--leagues` now. The game setting screen's "Default ball" shows the EA SPORTS ball, small flags
   use the big ones, and the cup screens get their trophy and skin.
@@ -306,7 +307,8 @@ Added, passing the tests but not yet checked in the client:
   mod moves all of it to another server in one JSON file. The game reads its own copy of the DB: close
   it, press Terapkan ke game (runs `tools/fo4_season.py install` in the background), then start
   `play.bat`. The tab also replaces a club's crest in the client's cache (the original kept in
-  `gamedata/crest_backup`) and, in the card dialog, the player's picture with your own PNG/JPG for every
+  `gamedata/crest_backup`) and, in the card dialog, the player's picture with your own PNG/JPG or another spid / player id's picture (from the
+  cache or fifaaddict.com) for every
   card of his or one card only (issue #36; `gamedata/faces/p<id>.png`, served before the cache's; the
   3D Face field also finds heads by player name). Kits and new clubs are not done.
 - **Classic FO3 world** (issue #38): the Database tab's *Dunia game* picks Modern (the AI clubs, the

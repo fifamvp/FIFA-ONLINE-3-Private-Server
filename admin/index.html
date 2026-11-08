@@ -558,6 +558,10 @@
         <label class="f"><span data-i18n="notice_file"></span><input type="file" id="faceFile" accept="image/png,image/jpeg"></label>
         <button class="b primary" type="button" id="faceSave" data-i18n="face_save"></button>
         <button class="b danger" type="button" id="faceRevert" data-i18n="face_revert" hidden></button>
+      </div>
+      <div class="row">
+        <label class="f"><span data-i18n="face_from"></span><input type="number" id="faceFrom" min="1"></label>
+        <button class="b" type="button" id="faceUse" data-i18n="face_use"></button>
         <span class="muted" id="faceMsg" role="status"></span>
       </div>
       <div class="crests">
@@ -1483,7 +1487,7 @@ async function openCard(spid) {
   $("#cardErr").textContent = "";
   $("#faceFor").innerHTML = [[cardNow.playerid, t("face_player", cardNow.playerid)], ...(cardNow.spid !== cardNow.playerid
     ? [[cardNow.spid, t("face_card", cardNow.spid)]] : [])].map(([v, l]) => `<option value="${v}">${esc(l)}</option>`).join("");
-  faceImg = null; $("#faceFile").value = ""; $("#faceMsg").textContent = ""; drawFace();
+  faceImg = null; $("#faceFile").value = ""; $("#faceMsg").textContent = ""; $("#faceFrom").value = cardNow.spid; drawFace();
   await showFace();
   $("#cardDlg").showModal();
 }
@@ -1532,6 +1536,11 @@ $("#faceSave").addEventListener("click", () => {
   if (!faceImg) return void ($("#cardErr").textContent = t("face_pick"));
   faceDo(async () => { await api("face_set", {id: Number($("#faceFor").value), png: $("#faceNew").toDataURL("image/png").split(",")[1]}); await showFace(); },
          t("face_saved"));
+});
+// another id's picture (a card of another season, another player), from the cache or fifaaddict.com
+$("#faceUse").addEventListener("click", () => {
+  const from = Number($("#faceFrom").value);
+  faceDo(async () => { await api("face_from", {id: Number($("#faceFor").value), from}); await showFace(); }, t("face_used", from));
 });
 $("#faceRevert").addEventListener("click", () => {
   if (confirm(t("face_confirm"))) faceDo(async () => { await api("face_revert", {id: Number($("#faceFor").value)}); await showFace(); }, t("face_reverted"));

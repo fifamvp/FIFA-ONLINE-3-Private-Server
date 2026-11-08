@@ -2423,6 +2423,10 @@ def main():
         man = json.load(open(fa.MANIFESTS["crests"]))
         assert man == {"added": ["crests/large/s4.png"], "failed": {"crests/large/s2.png": "404", "crests/large/s3.png": "404"}}
         assert waits == [0, 10, 0, 0, 10, 20, 30, 40] and open(os.path.join(fa.EXT, "crests", "large", "s4.png"), "rb").read() == b"\x89PNG crest"
+        # faces: each card's season picture (fifaaddict has p<spid>.png) and its player's, none of the added seasons
+        w = dict(fa.wanted_faces())
+        assert w["players/p91031432.png"] == fa.FA + "players/p91031432.png" and "players/p31432.png" in w
+        assert not [r for r in w if re.fullmatch(r"players/p(78|300|325)\d{6}\.png", r)]
         # issue #38: the Database tab edits cards in a copy of fifadb (the real one stays as it is)
         # and club crests in a stand-in cache; tools/fo4_season.py build puts the edits back
         import gen_teams, sqlite3, importlib.util
@@ -2573,6 +2577,25 @@ def main():
             assert hc.cdn_file("externalAssets/players/p31432.png")[1] == png(128, 128)
             assert not A("face_revert", id=31432)["custom"] and open(hc.asset_path("externalAssets/players/p31432.png"), "rb").read() == b"the cache's own face"
             assert not A("face_revert", id=drogba)["has"] and os.listdir(hc.FACES) == []
+            # a card's picture = another id's (issue #36: per season): the cache's, else fifaaddict.com's
+            open(os.path.join(os.path.dirname(cached), "p8031432.png"), "wb").write(png(128, 128))
+            assert A("face_from", id=drogba, **{"from": 8031432})["custom"]
+            assert open(os.path.join(hc.FACES, "p91031432.png"), "rb").read() == png(128, 128)
+            asked = []
+            def fa_answer(req, timeout):
+                asked.append(req.full_url)
+                if "p10031432" in req.full_url:
+                    return io.BytesIO(png(128, 128))
+                raise urllib.error.HTTPError(req.full_url, 404, "Not Found", {}, None)
+            real_urlopen, admin.urllib.request.urlopen = admin.urllib.request.urlopen, fa_answer
+            try:
+                assert A("face_from", id=31432, **{"from": 10031432})["custom"]
+                assert refused("face_from", id=31432, **{"from": 11031432})  # fifaaddict has none
+            finally:
+                admin.urllib.request.urlopen = real_urlopen
+            assert asked == [admin.FA_FACE.format(10031432), admin.FA_FACE.format(11031432)]
+            A("face_revert", id=31432); A("face_revert", id=drogba)
+            assert os.listdir(hc.FACES) == []
             # the Face field's name search: engine rows of the players found, a scan or a generic head
             h = A("heads", q="Drogba")["rows"]
             assert h and all(k % 1000000 == 31432 and n == "Didier Drogba" and isinstance(scan, bool) for k, n, _, scan in h)

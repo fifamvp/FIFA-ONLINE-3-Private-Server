@@ -5,9 +5,10 @@ client shows its default one).
 
 The client shows faces from its cache (_cache/games/fo3id/externalAssets/players, served by
 http_config /cdn/): p<spid>.png for a season face, else p<player id>.png. fifaaddict serves
-the same 128x128 PNGs at fo3img/players/p<player id>.png (byte-identical to the cached ones;
-it has no per-season PNGs), so this adds the missing p<player id>.png files. Order: my club's
-players, faces the game already asked for, then every Market card, dearest first.
+the same 128x128 PNGs at fo3img/players/p<spid>.png and p<player id>.png (byte-identical to the
+cached ones; most FO3 cards have a season picture, often shared by some seasons of a player:
+issue #36, every Drogba season showed his one p31432.png), so this adds both kinds the cache
+lacks. Order: my club's cards, faces the game already asked for, then every Market card, dearest first.
 Crests are crests/large/s<teamid>.png (256x256) and crests/small/s<teamid>.png (128x128);
 fifaaddict has both sizes (fo3img/crests/large/s<id>.png and fo3img/crests/s<id>.png). Order:
 crests the game already asked for, then every club with a 2017 squad (the club picker's).
@@ -52,13 +53,18 @@ def _rel(entry):
 
 
 def wanted_faces():
-    """[(path under externalAssets, url)] of faces in download order (club, asked, Market by price)."""
+    """[(path under externalAssets, url)] of faces in download order (club, asked, Market by price):
+    each card's own picture p<spid>.png (the game asks for it first) and its player's p<player id>.png
+    (its fallback). fifaaddict has no picture of its own for a 2017 card (gen_teams.LEGACY_SEASON: its
+    page shows the player's) nor for the seasons the server adds (FO4 LIVE, WC18, own): only their
+    player's; nor for players FO3 does not have (fo4_season.NEW_PID, 700000 up): none."""
     st = hc._state()
-    club = [int(p["spid"]) % 1000000 for t in st["teams"].values() for p in t["players"]]
-    asked = [p % 1000000 for p in _asked(r"players/p(\d+)\.png")]
+    club = [int(p["spid"]) for t in st["teams"].values() for p in t["players"]]
     fa = hc.fa_prices()
-    market = [s % 1000000 for s in sorted(fa, key=lambda s: -fa[s])]
-    return [(f"players/p{pid}.png", f"{FA}players/p{pid}.png") for pid in dict.fromkeys(club + asked + market)]
+    skip = {*hc.ADDED_SEASONS, hc.gen_teams.LEGACY_SEASON}
+    ids = lambda s: [] if s % 1000000 >= 700000 else ([s] if s >= 1000000 and s // 1000000 not in skip else []) + [s % 1000000]
+    cards = club + _asked(r"players/p(\d+)\.png") + sorted(fa, key=lambda s: -fa[s])
+    return [(f"players/p{i}.png", f"{FA}players/p{i}.png") for i in dict.fromkeys(i for s in cards for i in ids(s))]
 
 
 def wanted_crests():

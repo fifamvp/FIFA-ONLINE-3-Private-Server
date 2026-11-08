@@ -244,7 +244,7 @@ Gudang 등은 게임에 표시되는 화면 이름이라, 게임에서 찾기 �
   추가)으로 바꿀 수 있음.
 - **로그인 공지 이미지**(issue #36): 관리자 페이지의 Pengumuman(공지) 탭에서 로그인할 때 뜨는 공지 팝업의 JPG 또는 PNG
   이미지를 올리거나(800×720 팝업에 맞춰지며 미리 보기가 있음) 지울 수 있음.
-- **관리자 페이지에서 없는 이미지 받기**(issue #36): Aset(이미지) 탭이 없는 선수 얼굴, 구단 엠블럼, 리그 로고, 스태프
+- **관리자 페이지에서 없는 이미지 받기**(issue #36): Aset(이미지) 탭이 없는 선수 얼굴(카드마다 시즌 사진과 선수 사진), 구단 엠블럼, 리그 로고, 스태프
   사진을 fifaaddict.com에서 백그라운드로 내려받음(한 번에 한 종류씩, 언제든 멈추고 이어서 받을 수 있음). 이 탭은
   `tools/fa_faces.py`를 실행하며, 이 도구는 이제 `--leagues`도 받음. 경기 설정 화면의 "Default ball"에 EA SPORTS 공이
   나오고, 작은 국기는 큰 국기 이미지를 쓰며, Cup 화면에 트로피와 스킨이 나옴.
@@ -263,7 +263,8 @@ Gudang 등은 게임에 표시되는 화면 이름이라, 게임에서 찾기 �
   `tools/fo4_season.py build`가 다시 적용), 시즌은 `gamedata/seasons.json`에 저장; Ekspor / Impor mod로 전부를
   JSON 파일 하나로 다른 서버에 옮김. 게임은 자체 DB 사본을 읽음: 게임을 닫고 Terapkan ke game(백그라운드에서
   `tools/fo4_season.py install` 실행)을 누른 뒤 `play.bat` 실행. 이 탭은 클라이언트 캐시의 클럽 엠블럼도 바꿈(원본은
-  `gamedata/crest_backup`), 카드 창에서는 선수 사진을 내 PNG/JPG로 바꿈(모든 카드 또는 이 카드만; issue #36;
+  `gamedata/crest_backup`), 카드 창에서는 선수 사진을 내 PNG/JPG나 다른 spid / 선수 ID의 사진(캐시
+  또는 fifaaddict.com)으로 바꿈(모든 카드 또는 이 카드만; issue #36;
   `gamedata/faces/p<id>.png`, 캐시보다 먼저 제공; 3D 얼굴 칸은 선수 이름으로 머리를 찾음). 유니폼과 새 클럽은 아직 없음.
 - **클래식 FO3 세계**(issue #38): Database 탭의 *Dunia game*에서 모던(AI 클럽, 클럽 선택, This Season 팩이
   26 LIVE 카드 사용, 기존과 같음; 직접 만든 시즌도 마켓 검색에 표시) 또는 클래식 FO3를 고름: 모든 클럽이 FO3 원래의

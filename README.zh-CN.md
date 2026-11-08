@@ -222,7 +222,7 @@
   管理后台的比赛设置页可以把地区换成印度尼西亚、新加坡/马来西亚、泰国或越南（越南语名称）的城市，或在那里按每行“区域: 城市, 城市”写的自定义地区（例如在 Miền Bắc 加上 Sa Pa）。
 - **登录公告图片**（issue #36）：管理后台的 Pengumuman（公告）页可以为登录时的"公告"弹窗上传 JPG 或 PNG 图片（适配
   800×720 的弹窗，带预览），也可以删除它。
-- **在管理后台下载缺失的图片**（issue #36）：Aset（图片）页会在后台从 fifaaddict.com 下载缺失的球员头像、
+- **在管理后台下载缺失的图片**（issue #36）：Aset（图片）页会在后台从 fifaaddict.com 下载缺失的球员头像（每张卡的赛季头像和球员头像）、
   俱乐部队徽、联赛标志和教练照片（一次一种；可随时停止、随时继续）。它运行的是 `tools/fa_faces.py`，
   该工具现在也支持 `--leagues`。比赛设置界面的 "Default ball" 会显示 EA SPORTS 的球，小国旗改用大国旗图片，
   Cup 界面也有了奖杯和皮肤。
@@ -239,7 +239,7 @@
   可恢复，`tools/fo4_season.py build` 会重新应用），赛季写入 `gamedata/seasons.json`；Ekspor / Impor mod 用一个 JSON
   文件把这些全部搬到另一台服务器。游戏读取自己的数据库副本：关闭游戏，点击 Terapkan ke game（在后台运行
   `tools/fo4_season.py install`），然后运行 `play.bat`。该页还能替换客户端缓存中的俱乐部队徽（原队徽保存在
-  `gamedata/crest_backup`），并可在球员卡窗口用自己的 PNG/JPG 替换球员头像，作用于该球员所有卡或仅本卡（issue #36；
+  `gamedata/crest_backup`），并可在球员卡窗口用自己的 PNG/JPG 或其他 spid / 球员 ID 的头像（来自缓存或 fifaaddict.com）替换球员头像，作用于该球员所有卡或仅本卡（issue #36；
   `gamedata/faces/p<id>.png`，优先于缓存中的头像；3D 脸型栏也可按球员名字查找头部）。球衣和新俱乐部还没有做。
 - **经典 FO3 世界**（issue #38）：Database 页的 *Dunia game* 可选现代（AI 俱乐部、俱乐部选择和 This Season
   卡包使用 26 LIVE 卡，与之前相同；自建赛季也会出现在市场搜索中）或经典 FO3：所有俱乐部使用 FO3 原版 2017 阵容，

@@ -277,7 +277,8 @@ Item saya, Gudang bên dưới là tên màn hình trong game, được giữ ng
   "Vùng: thành phố, thành phố" (ví dụ thêm Sa Pa vào Miền Bắc).
 - **Ảnh thông báo lúc đăng nhập** (issue #36): tab Pengumuman (Thông báo) trên trang quản trị tải lên ảnh JPG
   hoặc PNG (chỉnh theo popup 800×720, có xem trước) cho popup Thông báo lúc đăng nhập, hoặc xóa ảnh đó.
-- **Tải ảnh còn thiếu từ trang quản trị** (issue #36): tab Aset (Hình ảnh) tải ảnh mặt cầu thủ, logo CLB, logo
+- **Tải ảnh còn thiếu từ trang quản trị** (issue #36): tab Aset (Hình ảnh) tải ảnh mặt cầu thủ (ảnh mùa của từng thẻ và ảnh
+  của cầu thủ), logo CLB, logo
   giải đấu và ảnh staff còn thiếu từ fifaaddict.com ở chế độ nền (mỗi lần một loại; dừng và tải tiếp lúc nào cũng
   được). Tab này chạy `tools/fa_faces.py`, công cụ này giờ nhận thêm `--leagues`. "Default ball" trên màn hình
   cài đặt trận hiện quả bóng EA SPORTS, cờ nhỏ dùng ảnh cờ lớn, và các màn hình Cup có cúp và skin riêng.
@@ -299,7 +300,7 @@ Item saya, Gudang bên dưới là tên màn hình trong game, được giữ ng
   sang server khác bằng một tệp JSON. Game đọc bản sao CSDL riêng: đóng game, bấm Terapkan ke game (chạy
   `tools/fo4_season.py install` ở chế độ nền), rồi chạy `play.bat`. Tab này cũng thay logo CLB trong bộ nhớ
   đệm của client (logo gốc giữ trong `gamedata/crest_backup`) và, trong hộp thoại thẻ, ảnh cầu thủ bằng PNG/JPG
-  của bạn cho mọi thẻ của cầu thủ hoặc chỉ một thẻ (issue #36; `gamedata/faces/p<id>.png`, được phục vụ trước
+  của bạn hoặc ảnh của spid / player id khác (từ bộ nhớ đệm hoặc fifaaddict.com) cho mọi thẻ của cầu thủ hoặc chỉ một thẻ (issue #36; `gamedata/faces/p<id>.png`, được phục vụ trước
   ảnh trong bộ nhớ đệm; ô Khuôn mặt 3D cũng tìm đầu theo tên cầu thủ). Chưa có áo đấu và CLB mới.
 - **Thế giới FO3 cổ điển** (issue #38): *Dunia game* trong tab Database chọn Hiện đại (CLB AI, phần chọn CLB
   và gói This Season dùng thẻ 26 LIVE, như trước; mùa tự tạo cũng hiện trong tìm kiếm Market) hoặc Cổ điển FO3:
