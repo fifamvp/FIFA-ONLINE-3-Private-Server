@@ -324,6 +324,13 @@ Sudah ditambahkan dan lolos tes, tapi belum dicek di client:
   sendiri: tutup game, tekan Terapkan ke game (menjalankan `tools/fo4_season.py install` di latar), lalu
   jalankan `play.bat`. Tab ini juga mengganti logo klub di cache client (logo asli disimpan di
   `gamedata/crest_backup`). Jersey dan klub baru belum ada.
+- **Team color buatan di halaman admin**: tab Team color membuat team color baru. Kartu anggotanya dipilih
+  dengan filter (musim, klub sekarang atau dulu, negara, pemain, OVR minimal, N kartu Market terbaik;
+  kartu harus memenuhi semua filter yang diisi) dan ada satu boost (OVR atau satu atribut, untuk semua
+  posisi atau FW / MF / DF / GK), dengan tingkat seperti team color spesial bawaan (5-6 / 7-8 / 9-11
+  pemain di XI). Tersimpan di `gamedata/teamcolors.json`; tampil di daftar Team colour game mulai login
+  berikutnya, tanpa restart. Skuad manajer virtual tidak memakai team color dan musim buatan, dan file
+  mod ikut membawanya.
 - **Staff** (Tim > Manajemen Staff): sistem staff FO3 aktif lagi. *Rekrut*: pak staff dengan EP (Basic
   FW / MF / DF / GK / ALL, Pro, Premium, Direktur Teknik, Premium Medical) dan, tiap hari, pak ALL gratis
   untuk login dan satu lagi untuk main 3 match. *Staff yang dimiliki*: 7 frame peran (FW, MF, DF, pelatih

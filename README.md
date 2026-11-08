@@ -304,6 +304,12 @@ Added, passing the tests but not yet checked in the client:
   it, press Terapkan ke game (runs `tools/fo4_season.py install` in the background), then start
   `play.bat`. The tab also replaces a club's crest in the client's cache (the original kept in
   `gamedata/crest_backup`). Kits and new clubs are not done.
+- **Own team colors on the admin page**: the Team color tab makes new team colors. A color's cards are
+  picked by filters (seasons, clubs now or before, nations, players, minimum OVR, best N Market cards; a
+  card meets every filter set) and it has one boost (OVR or a stat, for every position or FW / MF / DF /
+  GK), in the tiers of the built-in special colors (5-6 / 7-8 / 9-11 players in the XI). Saved in
+  `gamedata/teamcolors.json`; it shows in the game's Team colour list from the next login, no restart.
+  The virtual managers' squads leave own colors and seasons out, and the mod file carries them too.
 - **Staff** (Tim > Manajemen Staff): FO3's staff system works again. *Rekrut*: staff packs for EP
   (Basic FW / MF / DF / GK / ALL, Pro, Premium, Technical Director, Premium Medical) and, each day, a
   free ALL pack for logging in and another for playing 3 matches. *Staff yang dimiliki*: 7 role frames

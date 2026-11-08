@@ -262,6 +262,11 @@ Gudang 등은 게임에 표시되는 화면 이름이라, 게임에서 찾기 �
   JSON 파일 하나로 다른 서버에 옮김. 게임은 자체 DB 사본을 읽음: 게임을 닫고 Terapkan ke game(백그라운드에서
   `tools/fo4_season.py install` 실행)을 누른 뒤 `play.bat` 실행. 이 탭은 클라이언트 캐시의 클럽 엠블럼도 바꿈(원본은
   `gamedata/crest_backup`). 유니폼과 새 클럽은 아직 없음.
+- **관리자 페이지의 직접 만든 팀 컬러**: 팀 컬러 탭에서 새 팀 컬러를 만듦. 카드는 필터(시즌, 현재 또는 과거
+  클럽, 국가, 선수, 최소 OVR, 마켓 최고 N장; 입력한 모든 필터를 만족)로 고르고 부스트 하나(OVR 또는 능력치 하나,
+  모든 포지션 또는 FW / MF / DF / GK)를 가지며, 단계는 기본 스페셜 팀 컬러와 같음(XI의 5-6 / 7-8 / 9-11명).
+  `gamedata/teamcolors.json`에 저장되고 재시작 없이 다음 로그인부터 게임의 Team colour 목록에 보임. 가상 감독
+  스쿼드는 직접 만든 팀 컬러와 시즌을 쓰지 않고, 모드 파일에도 포함됨.
 - **스태프**(Tim > Manajemen Staff): FO3 스태프 시스템이 다시 작동함. *Rekrut*(영입): EP로 사는 스태프 팩(Basic
   FW / MF / DF / GK / ALL, Pro, Premium, 기술 이사, Premium Medical)과 매일 로그인하면 무료 ALL 팩 하나, 3경기를
   하면 하나 더. *Staff yang dimiliki*(보유 스태프): 역할 칸 7개(FW, MF, DF, 수석 코치, GK, 피지컬 코치, 기술 이사);

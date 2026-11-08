@@ -239,6 +239,10 @@
   文件把这些全部搬到另一台服务器。游戏读取自己的数据库副本：关闭游戏，点击 Terapkan ke game（在后台运行
   `tools/fo4_season.py install`），然后运行 `play.bat`。该页还能替换客户端缓存中的俱乐部队徽（原队徽保存在
   `gamedata/crest_backup`）。球衣和新俱乐部还没有做。
+- **管理后台的自建团队色**：Team color 页可以新建团队色。成员卡用筛选条件选择（赛季、现在或曾经的俱乐部、国家、
+  球员、最低 OVR、市场最佳 N 张卡；卡必须满足所有已填写的条件），并带一个加成（OVR 或一项属性，作用于所有位置或
+  FW / MF / DF / GK），等级与内置特殊团队色相同（首发 5-6 / 7-8 / 9-11 人）。保存在 `gamedata/teamcolors.json`；
+  下次登录起出现在游戏的 Team colour 列表中，无需重启。虚拟经理的阵容不使用自建团队色和自建赛季，模组文件也会带上它们。
 - **教练团队（Staff）**（Tim > Manajemen Staff）：FO3 的教练系统重新启用。*Rekrut*（招募）：用 EP 购买教练包
   （Basic FW / MF / DF / GK / ALL、Pro、Premium、技术总监、Premium 体能），每天登录可免费领取一个 ALL 包，再踢
   3 场比赛可再领一个。*Staff yang dimiliki*（已有教练）：7 个职位框（FW、MF、DF、主教练、GK、体能教练、技术总监）；

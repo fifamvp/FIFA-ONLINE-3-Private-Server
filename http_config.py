@@ -1361,6 +1361,45 @@ TC_NAMED_SPECIALS = (  # (TEAM<id>, description, SQL condition on players p, boo
 )
 TC_KEYS = {34024: "TEAMCOLOR_ATTRIBUTES_EVOLVE34024",  # every other name is TEAMCOLOR_ATTRIBUTES_TEAM<id>
            **{TC_WC18 + n: f"18 WC {name}" for n, name in TC_WC18_NATIONS.items()}}  # names of ours, shown as given
+# The admin page's own colors (user: "bisa tambahkan team color baru"): gamedata/teamcolors.json,
+# [{id (TC_CUSTOM + n), name, desc, seasons, clubs, nations, players (player ids), min_ovr, best,
+# target (fw/mf/df/gk, "" = all), stat ("ovr" or a stat), amount}]; a card belongs when it meets
+# every filter given (best N: of the Market cards, by rating), its tiers are a named special's
+# (_tc_special_groups). A new or changed one counts from the next login.
+CUSTOM_COLORS = os.path.join(HERE, "gamedata", "teamcolors.json")
+TC_CUSTOM = 81000
+
+
+def tc_condition(c):
+    """SQL on players p of an own color's filters (all must hold; none = every card)."""
+    ints = lambda k: [int(x) for x in c.get(k) or ()]
+    parts = ([_S(*ints("seasons"))] if ints("seasons") else []) + ([_CLUB(*ints("clubs"))] if ints("clubs") else [])
+    parts += [f"p.nationality IN ({_in(ints('nations'))})"] if ints("nations") else []
+    parts += [_PIDS(*ints("players"))] if ints("players") else []
+    parts += [f"{POSOVR} >= {int(c['min_ovr'])}"] if c.get("min_ovr") else []
+    return " AND ".join(parts) or "1"
+
+
+def tc_custom():
+    """[(id, name, description, SQL condition, boost, best N)] of the admin page's colors."""
+    try:
+        with open(CUSTOM_COLORS, encoding="utf-8") as f:
+            rows = json.load(f)
+    except (OSError, ValueError):
+        return []
+    out = []
+    for c in rows if isinstance(rows, list) else ():
+        try:
+            out.append((int(c["id"]), str(c["name"]), str(c.get("desc") or c["name"]), tc_condition(c),
+                        (str(c.get("target") or ""), str(c["stat"]), int(c["amount"])), int(c.get("best") or 0) or None))
+        except (KeyError, TypeError, ValueError):
+            continue
+    return out
+
+
+def tc_specials():
+    """TC_NAMED_SPECIALS and the admin page's colors: (id, description, condition, boost, best N)."""
+    return TC_NAMED_SPECIALS + tuple((cid, desc, cond, b, best) for cid, _, desc, cond, b, best in tc_custom())
 
 
 def _tc_boost(groups, boost):
@@ -1389,7 +1428,7 @@ def tc_special_sets():
         rows = c.execute("SELECT spid, playerid FROM players").fetchall()
         for _, codes in tc_seasons():
             sets[TC_SEASON + codes[0]] = [(s, p) for s, p in rows if s // 1000000 in codes]
-        for cid, _, cond, _, best in TC_NAMED_SPECIALS:
+        for cid, _, cond, _, best in tc_specials():
             got = c.execute(f"SELECT p.spid, p.playerid FROM players p WHERE {cond} ORDER BY {POSOVR} DESC").fetchall()
             sets[cid] = [r for r in got if on_market(r[0])][:best] if best else got
     return {cid: (frozenset(s for s, _ in got), len({p for _, p in got})) for cid, got in sets.items()}
@@ -1400,7 +1439,8 @@ def tc_colors():
     """Every color (GET /static/info/teamcolor teamColors): the generic club / nation ones, the
     upgrade ones, the named clubs and nations, the season colors and the named specials (one
     with no card in fifadb is left out)."""
-    key = lambda cid: TC_KEYS.get(cid, f"TEAMCOLOR_ATTRIBUTES_TEAM{cid}")
+    own = {cid: name for cid, name, *_ in tc_custom()}
+    key = lambda cid: own.get(cid) or TC_KEYS.get(cid, f"TEAMCOLOR_ATTRIBUTES_TEAM{cid}")
     club = {"teamcolorid": TC_CLUB, "type": "club", "teamid": -1, "name": key(TC_CLUB),
             "description": "Pemain dari klub yang sama", "boostgroups": TC_CLUB_GROUPS}
     nation = {"teamcolorid": TC_NATION, "type": "nation", "teamid": -1, "name": key(TC_NATION),
@@ -1422,7 +1462,7 @@ def tc_colors():
         name = tid if isinstance(tid, str) else key(tid) if tid else f"Season {label}"
         specials.append({"teamcolorid": cid, "type": "special", "teamid": str(cid), "name": name,
                          "description": f"Pemain season {label}", "boostgroups": _tc_special_groups(b) if b else TC_GROUPS})
-    for cid, desc, _, b, _ in TC_NAMED_SPECIALS:
+    for cid, desc, _, b, _ in tc_specials():
         if sets[cid][1]:
             specials.append({"teamcolorid": cid, "type": "special", "teamid": str(cid), "name": key(cid),
                              "description": desc, "boostgroups": _tc_special_groups(b, min(5, sets[cid][1]))})
@@ -4422,10 +4462,13 @@ FA_SEASONS = (
 # the admin page's own seasons (issue #38: gamedata/seasons.json, tools/fo4_season.py install adds
 # their badges): a Top 200 pack and a season color each, from the next start
 CUSTOM_SEASONS = os.path.join(HERE, "gamedata", "seasons.json")
+CUSTOM_SEASON_CODES = ()
 try:
     with open(CUSTOM_SEASONS, encoding="utf-8") as _f:
-        FA_SEASONS += tuple((s["name"], (int(code),), 45011) for code, s in sorted(json.load(_f).items(), key=lambda kv: int(kv[0])))
-except (OSError, ValueError, KeyError):
+        _own = sorted(json.load(_f).items(), key=lambda kv: int(kv[0]))
+    FA_SEASONS += tuple((s["name"], (int(code),), 45011) for code, s in _own)
+    CUSTOM_SEASON_CODES = tuple(int(code) for code, _ in _own)
+except (OSError, ValueError, KeyError, AttributeError):
     pass
 # each one the season's 200 best cards (user: "all session pack  top 50 ganti menjadi top 200")
 PACKS.update({92000000 + codes[0]: (f"{label} Top 200", {"seasons": codes, "icon": icon, "top": 200, "all": True})
@@ -6538,10 +6581,11 @@ def vm_score(c, role, kind):
 @functools.lru_cache(maxsize=None)
 def vm_theme_keys():
     """{theme: candidate keys}: the top clubs and nations, the special team colors with 40 or more
-    Market cards."""
+    Market cards (not the admin page's colors and seasons: they would change every crowd squad)."""
     sets = tc_special_sets()
+    own = {cid for cid, *_ in tc_custom()} | {TC_SEASON + code for code in CUSTOM_SEASON_CODES}
     return {"club": list(VM_TOP_CLUBS), "nation": list(VM_TOP_NATIONS),
-            "color": sorted(cid for cid, (spids, _) in sets.items() if len(spids & market_spids()) >= 40)}
+            "color": sorted(cid for cid, (spids, _) in sets.items() if len(spids & market_spids()) >= 40 and cid not in own)}
 
 
 @functools.lru_cache(maxsize=512)

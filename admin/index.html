@@ -134,6 +134,8 @@
   .crests figure { margin: 0; }
   .crests figcaption { margin-bottom: 4px; color: var(--mute); font-size: 13px; }
   .crests img, .crests canvas { display: block; background: #11181f; border: 1px solid var(--line); }
+  .picker { display: grid; align-content: start; gap: 3px; font-size: 13px; color: var(--mute); }
+  .picker .listbox { margin: 0; }
   .badge-prev, img.badge { width: 48px; height: 48px; object-fit: contain; background: #11181f; border: 1px solid var(--line); }
 
   @media (max-width: 760px) {
@@ -172,6 +174,7 @@
     <button role="tab" data-tab="notice" data-i18n="nav_notice"></button>
     <button role="tab" data-tab="assets" data-i18n="nav_assets"></button>
     <button role="tab" data-tab="db" data-i18n="nav_db"></button>
+    <button role="tab" data-tab="tc" data-i18n="nav_tc"></button>
     <button role="tab" data-tab="missions" data-i18n="nav_missions"></button>
     <button role="tab" data-tab="scout" data-i18n="nav_scout"></button>
     <button role="tab" data-tab="log" data-i18n="nav_log"></button>
@@ -434,6 +437,31 @@
         <figure><figcaption>128 × 128</figcaption><canvas id="crestSmall" width="128" height="128"></canvas></figure>
       </div>
       <datalist id="clubList"></datalist>
+    </section>
+
+    <section id="tc" hidden>
+      <h2 data-i18n="tc_title"></h2>
+      <p class="lead" id="tcLead"></p>
+      <div class="table-wrap"><table>
+        <thead><tr><th data-i18n="f_name"></th><th data-i18n="tc_members"></th><th data-i18n="tc_boost"></th><th class="num" data-i18n="th_cards"></th><th></th></tr></thead>
+        <tbody id="tcRows"></tbody>
+      </table></div>
+      <h3 id="tcFormTitle"></h3>
+      <div class="grid2">
+        <label class="f"><span data-i18n="f_name"></span><input id="tcName" maxlength="30"></label>
+        <label class="f"><span data-i18n="f_desc"></span><input id="tcDesc" maxlength="80"></label>
+        <div class="picker" data-k="seasons"><span data-i18n="f_seasons"></span><div class="listbox"></div><input list="tcSeasonList" data-i18n-ph="ph_pick"></div>
+        <div class="picker" data-k="clubs"><span data-i18n="f_club"></span><div class="listbox"></div><input list="tcClubList" data-i18n-ph="ph_pick"></div>
+        <div class="picker" data-k="nations"><span data-i18n="tc_nations"></span><div class="listbox"></div><input list="tcNationList" data-i18n-ph="ph_pick"></div>
+        <div class="picker" data-k="players"><span data-i18n="tc_players"></span><div class="listbox"></div><input list="tcPlayerList" data-i18n-ph="ph_player"></div>
+        <label class="f"><span data-i18n="tc_min_ovr"></span><input type="number" id="tcMinOvr" min="0" max="200" value="0"></label>
+        <label class="f"><span data-i18n="tc_best"></span><input type="number" id="tcBest" min="0" max="1000" value="0"></label>
+        <label class="f"><span data-i18n="th_pos"></span><select id="tcTarget"></select></label>
+        <label class="f"><span data-i18n="f_stats"></span><select id="tcStat"></select></label>
+        <label class="f"><span data-i18n="amount"></span><input type="number" id="tcAmount" min="1" max="20" value="3"></label>
+      </div>
+      <div class="row"><button class="b primary" id="tcSave" data-i18n="save"></button><button class="b" id="tcNew" data-i18n="tc_new"></button></div>
+      <datalist id="tcSeasonList"></datalist><datalist id="tcClubList"></datalist><datalist id="tcNationList"></datalist><datalist id="tcPlayerList"></datalist>
     </section>
 
     <section id="missions" hidden>
@@ -1219,6 +1247,88 @@ $("#dbRows").addEventListener("click", e => {
       dbFound = dbFound.filter(r => r.spid !== Number(tg.dataset.drop));
       await loaders.db();
     }, t("sn_removed", tg.dataset.drop));
+});
+
+/* ---------- Own team colors: members by season / club / nation / player / rating, one boost ---------- */
+let TC = null, tcEditing = null, tcTimer = null;
+const tcPick = {seasons: [], clubs: [], nations: [], players: []};  // kind -> [[id, label]]
+const tcLabel = (k, id) => k === "players" ? (TC.player_names[id] ?? String(id)) : (new Map(TC[k]).get(id) ?? String(id));
+loaders.tc = async () => {
+  TC = await api("teamcolors");
+  $("#tcLead").textContent = t("tc_lead", TC.file);
+  const opts = rows => rows.map(([id, n]) => `<option value="${esc(n)} · ${id}"></option>`).join("");
+  $("#tcSeasonList").innerHTML = opts(TC.seasons); $("#tcClubList").innerHTML = opts(TC.clubs); $("#tcNationList").innerHTML = opts(TC.nations);
+  $("#tcTarget").innerHTML = ["", "fw", "mf", "df", "gk"].map(v => `<option value="${v}">${v ? v.toUpperCase() : esc(t("tc_all_pos"))}</option>`).join("");
+  $("#tcStat").innerHTML = TC.stats.map(k => `<option value="${k}">${k === "ovr" ? "OVR" : STAT_NAME[k]}</option>`).join("");
+  $("#tcRows").innerHTML = TC.colors.map(c => `<tr><td>${esc(c.name)}<br><span class="muted">${esc(c.desc)}</span></td>
+    <td class="muted">${esc(tcMembers(c))}</td><td>${esc(tcBoost(c))}</td><td class="num">${fmt(c.cards)} (${fmt(c.nplayers)})</td>
+    <td><button class="b small" data-tcedit="${c.id}">${esc(t("edit"))}</button>
+      <button class="b small danger" data-tcdel="${c.id}" data-name="${esc(c.name)}">${esc(t("delete"))}</button></td></tr>`).join("")
+    || `<tr><td colspan="5" class="muted">${esc(t("tc_none"))}</td></tr>`;
+  tcForm(tcEditing && TC.colors.find(c => c.id === tcEditing.id));
+};
+function tcMembers(c) {
+  const list = k => c[k].map(id => tcLabel(k, id)).join(", ");
+  return [c.seasons.length && `${t("f_seasons")}: ${list("seasons")}`, c.clubs.length && `${t("f_club")}: ${list("clubs")}`,
+          c.nations.length && `${t("tc_nations")}: ${list("nations")}`, c.players.length && `${t("tc_players")}: ${list("players")}`,
+          c.min_ovr && `OVR ≥ ${c.min_ovr}`, c.best && `${t("tc_best")}: ${c.best}`].filter(Boolean).join("; ") || t("tc_all_cards");
+}
+const tcBoost = c => `${c.stat === "ovr" ? "OVR" : STAT_NAME[c.stat]} +${c.amount}${c.target ? ` (${c.target.toUpperCase()})` : ""}`;
+function tcForm(c) {
+  tcEditing = c || null;
+  $("#tcFormTitle").textContent = c ? t("tc_edit", c.name) : t("tc_new");
+  $("#tcName").value = c?.name ?? ""; $("#tcDesc").value = c?.desc ?? "";
+  for (const k of Object.keys(tcPick)) tcPick[k] = (c?.[k] ?? []).map(id => [id, tcLabel(k, id)]);
+  $("#tcMinOvr").value = c?.min_ovr ?? 0; $("#tcBest").value = c?.best ?? 0;
+  $("#tcTarget").value = c?.target ?? ""; $("#tcStat").value = c?.stat ?? "ovr"; $("#tcAmount").value = c?.amount ?? 3;
+  renderPicks();
+}
+function renderPicks() {
+  $$("#tc .picker").forEach(box => {
+    box.querySelector(".listbox").innerHTML = tcPick[box.dataset.k].map(([, label], i) =>
+      `<span class="tag">${esc(label)}<button type="button" data-unpick="${i}" aria-label="${esc(t("remove"))} ${esc(label)}">×</button></span>`).join("");
+  });
+}
+function tcTake(input, any) {  // "name · id" from the list (any: also typed by hand) becomes a chip
+  const box = input.closest(".picker"), v = input.value.trim(), m = /^(.*?)\s*·\s*(\d+)$/.exec(v);
+  if (!m || (!any && ![...input.list.options].some(o => o.value === v))) return;
+  const k = box.dataset.k, id = Number(m[2]);
+  if (!tcPick[k].some(([x]) => x === id)) tcPick[k].push([id, m[1]]);
+  input.value = ""; renderPicks();
+}
+$$("#tc .picker input").forEach(el => {
+  el.addEventListener("input", () => tcTake(el, false));
+  el.addEventListener("change", () => tcTake(el, true));
+});
+$("#tc .picker[data-k=players] input").addEventListener("input", e => {  // the search's players as the list
+  const q = e.target.value.trim();
+  clearTimeout(tcTimer);
+  if (q.length < 2 || /·\s*\d+$/.test(q)) return;
+  tcTimer = setTimeout(async () => {
+    const {rows} = await api("search?q=" + encodeURIComponent(q));
+    $("#tcPlayerList").innerHTML = [...new Map(rows.map(r => [r.spid % 1000000, r.name]))]
+      .map(([pid, n]) => `<option value="${esc(n)} · ${pid}"></option>`).join("");
+  }, 300);
+});
+$("#tc").addEventListener("click", e => {
+  const tg = e.target;
+  if (tg.dataset.unpick !== undefined) { tcPick[tg.closest(".picker").dataset.k].splice(Number(tg.dataset.unpick), 1); renderPicks(); }
+  if (tg.dataset.tcedit) tcForm(TC.colors.find(c => c.id === Number(tg.dataset.tcedit)));
+  if (tg.dataset.tcdel && confirm(t("tc_confirm_delete", tg.dataset.name)))
+    act(async () => { await api("teamcolor_delete", {id: Number(tg.dataset.tcdel)}); tcEditing = null; await loaders.tc(); }, t("tc_deleted", tg.dataset.name));
+});
+$("#tcNew").addEventListener("click", () => tcForm(null));
+$("#tcSave").addEventListener("click", () => {
+  const body = {id: tcEditing?.id ?? null, name: $("#tcName").value.trim(), desc: $("#tcDesc").value.trim(),
+                ...Object.fromEntries(Object.entries(tcPick).map(([k, v]) => [k, v.map(([id]) => id)])),
+                min_ovr: Number($("#tcMinOvr").value) || 0, best: Number($("#tcBest").value) || 0,
+                target: $("#tcTarget").value, stat: $("#tcStat").value, amount: Number($("#tcAmount").value)};
+  act(async () => {
+    const r = await api("teamcolor_set", body), c = r.colors.find(x => x.id === r.id);
+    tcEditing = null;
+    await loaders.tc();
+    say(t("tc_saved", body.name, fmt(c.cards), fmt(c.nplayers)), "ok");
+  });
 });
 
 // mods: every season, copied card and edit of this tab in one JSON file, for another server

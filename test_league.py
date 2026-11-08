@@ -2330,7 +2330,9 @@ def main():
         # issue #38: the Database tab edits cards in a copy of fifadb (the real one stays as it is)
         # and club crests in a stand-in cache; tools/fo4_season.py build puts the edits back
         import gen_teams, sqlite3, importlib.util
-        kept = (gen_teams.DB, admin.CARD_EDITS, admin.CREST_BACKUP, admin.INSTALL_CMD, hc.ASSETS, admin.CUSTOM_SEASONS, admin.SEASON_ICONS)
+        kept = (gen_teams.DB, admin.CARD_EDITS, admin.CREST_BACKUP, admin.INSTALL_CMD, hc.ASSETS, admin.CUSTOM_SEASONS, admin.SEASON_ICONS,
+                hc.CUSTOM_COLORS)
+        hc.CUSTOM_COLORS = os.path.join(tmp, "teamcolors.json")
         gen_teams.DB = shutil.copyfile(gen_teams.DB, os.path.join(tmp, "fifadb38.sqlite"))
         admin.CARD_EDITS, admin.CREST_BACKUP = os.path.join(tmp, "card_edits.json"), os.path.join(tmp, "crest_backup")
         admin.CUSTOM_SEASONS, admin.SEASON_ICONS = os.path.join(tmp, "seasons.json"), os.path.join(tmp, "season_icons")
@@ -2414,6 +2416,32 @@ def main():
             assert refused("mod_import", mod={"something": "else"})
             A("season_card_remove", spid=50158023); A("season_delete", code=50); A("card_revert", spid=messi)
             assert row(messi) == before and A("card_edits")["rows"] == []
+            # own team colors (user: "bisa tambahkan team color baru"): members by filters, one boost;
+            # the server lists them at once (next login), the crowd's themes leave them out
+            def color(**p):  # refused() takes "name" itself
+                try:
+                    return admin.API["teamcolor_set"](p)
+                except admin.AdminError:
+                    return None
+            assert color(name="Bad", nations=[999], amount=3) is None and color(name="Bad", players=[699999], amount=3) is None
+            assert color(name="Bad", stat="speed", amount=3) is None and color(name="Bad", clubs=[424242], amount=3) is None
+            r = color(name="Trio MSN", players=[158023, 176580, 190871], stat="ovr", amount=3)
+            msn = next(c for c in r["colors"] if c["id"] == r["id"] == hc.TC_CUSTOM)
+            assert msn["nplayers"] == 3 and msn["cards"] > 3 and messi in hc.tc_special_sets()[hc.TC_CUSTOM][0]
+            tc = next(c for c in hc.tc_colors() if c["teamcolorid"] == hc.TC_CUSTOM)
+            assert (tc["type"], tc["teamid"], tc["name"], tc["description"]) == ("special", str(hc.TC_CUSTOM), "Trio MSN", "Trio MSN")
+            assert tc["boostgroups"] == [{"count_min": 3, "count_max": 11, "boosts": [{"type": "ovr", "amount": 3}]}]
+            r = color(name="Samba", nations=[54], target="fw", stat="sprintspeed", amount=4, min_ovr=80)
+            samba = next(c for c in r["colors"] if c["id"] == hc.TC_CUSTOM + 1)
+            assert samba["nplayers"] >= 5 and all(hc.card_ovr(s) >= 80 for s in hc.tc_special_sets()[samba["id"]][0])
+            hc.vm_theme_keys.cache_clear()
+            assert not {hc.TC_CUSTOM, hc.TC_CUSTOM + 1} & set(hc.vm_theme_keys()["color"])
+            assert color(id=hc.TC_CUSTOM, name="MSN", players=[158023, 176580, 190871], amount=2)["colors"][0]["amount"] == 2
+            mod = A("mod_export")
+            assert [c["name"] for c in mod["teamcolors"]] == ["MSN", "Samba"] and "id" not in mod["teamcolors"][0]
+            assert A("teamcolor_delete", id=hc.TC_CUSTOM)["colors"][0]["name"] == "Samba"
+            assert A("mod_import", mod={"fo3id_mod": 1, "teamcolors": mod["teamcolors"]}) == {"done": 2, "failed": []}
+            assert [(c["id"], c["name"]) for c in A("teamcolors")["colors"]] == [(hc.TC_CUSTOM + 1, "Samba"), (hc.TC_CUSTOM + 2, "MSN")]
             # Terapkan ke game: fo4_season.py install in the background, its output on the page
             a = A("db_install")
             assert a["running"] == "install" and refused("db_install")
@@ -2436,7 +2464,9 @@ def main():
             assert not c["custom"] and c["has"] == {"large": True, "small": False}
             assert open(crest("large"), "rb").read() == b"the cache's own crest"
         finally:
-            gen_teams.DB, admin.CARD_EDITS, admin.CREST_BACKUP, admin.INSTALL_CMD, hc.ASSETS, admin.CUSTOM_SEASONS, admin.SEASON_ICONS = kept
+            (gen_teams.DB, admin.CARD_EDITS, admin.CREST_BACKUP, admin.INSTALL_CMD, hc.ASSETS, admin.CUSTOM_SEASONS, admin.SEASON_ICONS,
+             hc.CUSTOM_COLORS) = kept
+            hc.tc_special_sets.cache_clear(); hc.tc_colors.cache_clear(); hc.vm_theme_keys.cache_clear()
             hc._OVR.clear(); hc._STATS.clear()
         # the game setting screen's "Default ball" (ball 0, "NOT FOUND") shows ball 6's picture, and a
         # small flag (none cached) is the nation's big one

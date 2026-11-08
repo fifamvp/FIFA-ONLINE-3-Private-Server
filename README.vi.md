@@ -296,6 +296,12 @@ Item saya, Gudang bên dưới là tên màn hình trong game, được giữ ng
   sang server khác bằng một tệp JSON. Game đọc bản sao CSDL riêng: đóng game, bấm Terapkan ke game (chạy
   `tools/fo4_season.py install` ở chế độ nền), rồi chạy `play.bat`. Tab này cũng thay logo CLB trong bộ nhớ
   đệm của client (logo gốc giữ trong `gamedata/crest_backup`). Chưa có áo đấu và CLB mới.
+- **Màu đội tự tạo trên trang quản trị**: tab Team color tạo màu đội mới. Thẻ thành viên được chọn bằng bộ lọc
+  (mùa, CLB hiện tại hoặc cũ, quốc gia, cầu thủ, OVR tối thiểu, N thẻ Market tốt nhất; thẻ phải thỏa mọi bộ lọc
+  đã điền) và có một mức cộng (OVR hoặc một chỉ số, cho mọi vị trí hoặc FW / MF / DF / GK), các bậc giống màu đội
+  đặc biệt có sẵn (5-6 / 7-8 / 9-11 cầu thủ trong đội hình chính). Lưu trong `gamedata/teamcolors.json`; hiện trong
+  danh sách Team colour của game từ lần đăng nhập sau, không cần khởi động lại. Đội hình của quản lý ảo không dùng màu
+  đội và mùa tự tạo, và tệp mod cũng mang theo chúng.
 - **Staff** (Tim > Manajemen Staff): hệ thống staff của FO3 hoạt động trở lại. *Rekrut* (tuyển): gói staff
   bằng EP (Basic FW / MF / DF / GK / ALL, Pro, Premium, Giám đốc kỹ thuật, Premium Medical) và mỗi ngày một
   gói ALL miễn phí khi đăng nhập, thêm một gói khi chơi đủ 3 trận. *Staff yang dimiliki* (staff đang có): 7 ô
