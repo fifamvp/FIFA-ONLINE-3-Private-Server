@@ -2300,6 +2300,33 @@ def main():
             assert set(a["counts"]) == set(admin.ASSET_KINDS) and not os.path.exists(admin.ASSET_STOP)
         finally:
             admin.ASSET_CMD, admin.ASSET_LOG = cmd, log
+        # issue #36 (a user's 1,049 crests all "failed" and a rerun fetched none): only a 404 is final; a
+        # refusal is not recorded, waits longer each time and stops the run after TRIES in a row
+        import importlib.util, io, types, urllib.error
+        spec = importlib.util.spec_from_file_location("fa_faces", os.path.join(os.path.dirname(os.path.abspath(admin.__file__)), "tools", "fa_faces.py"))
+        fa = importlib.util.module_from_spec(spec); spec.loader.exec_module(fa)
+        fa.EXT, fa.MANIFESTS = os.path.join(tmp, "ext36"), {**fa.MANIFESTS, "crests": os.path.join(tmp, "fa_crests.json")}
+        json.dump({"added": [], "failed": {"crests/large/s1.png": "403", "crests/large/s2.png": "404"}}, open(fa.MANIFESTS["crests"], "w"))
+        jobs = [(f"crests/large/s{i}.png", f"https://example.invalid/{i}") for i in range(1, 12)]
+        fa.wanted_crests = lambda: jobs
+        waits = []
+        fa.time = types.SimpleNamespace(sleep=waits.append)
+        def answer(req, timeout):
+            i = int(req.full_url.rsplit("/", 1)[1])
+            if i == 3:
+                raise urllib.error.HTTPError(req.full_url, 404, "Not Found", {}, None)
+            if i == 4:
+                return io.BytesIO(b"\x89PNG crest")
+            raise urllib.error.HTTPError(req.full_url, 403, "Forbidden", {}, None)
+        real_urlopen, fa.urllib.request.urlopen = fa.urllib.request.urlopen, answer
+        try:
+            fa.ARGS[:] = ["--crests", "--delay", "0"]
+            fa.main()
+        finally:
+            fa.urllib.request.urlopen = real_urlopen
+        man = json.load(open(fa.MANIFESTS["crests"]))
+        assert man == {"added": ["crests/large/s4.png"], "failed": {"crests/large/s2.png": "404", "crests/large/s3.png": "404"}}
+        assert waits == [0, 10, 0, 0, 10, 20, 30, 40] and open(os.path.join(fa.EXT, "crests", "large", "s4.png"), "rb").read() == b"\x89PNG crest"
         # issue #38: the Database tab edits cards in a copy of fifadb (the real one stays as it is)
         # and club crests in a stand-in cache; tools/fo4_season.py build puts the edits back
         import gen_teams, sqlite3, importlib.util

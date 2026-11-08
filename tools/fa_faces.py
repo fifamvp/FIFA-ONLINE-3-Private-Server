@@ -17,7 +17,7 @@ the server's staff, fifaaddict has them all at fo3img/staffs/<its id>.png (its 1
 With --leagues, the league logos of the league and cup selection screens (league/ca/l<id>.png;
 issue #36: the cache has one) from fifaaddict's fo3img/league/l<id>.png.
 One request every --delay seconds; existing files are never touched; gamedata/fa_faces.json
-(fa_crests.json, ...) records what was added or failed so a rerun resumes, and --remove deletes
+(fa_crests.json, ...) records what was added or is not there (404) so a rerun resumes, and --remove deletes
 only the added files. The admin page's Aset tab runs this in the background; its Stop button
 creates gamedata/assets_fetch.stop, and the run saves its record and quits.
 
@@ -31,6 +31,7 @@ ARGS, sys.argv = sys.argv[1:], sys.argv[:1]  # http_config reads a port from arg
 import http_config as hc
 
 EXT = os.path.join(hc.ASSETS, "externalAssets")
+TRIES = 5  # errors in a row (other than 404) before a run gives up; none of them is recorded
 FA = "https://fifaaddict.com/fo3img/"
 MANIFESTS = {"faces": os.path.join(ROOT, "gamedata", "fa_faces.json"),
              "crests": os.path.join(ROOT, "gamedata", "fa_crests.json"),
@@ -96,7 +97,9 @@ def main():
     kind = "crests" if a.crests else "staffs" if a.staffs else "leagues" if a.leagues else "faces"
     manifest = MANIFESTS[kind]
     man = json.load(open(manifest)) if os.path.isfile(manifest) else {"added": [], "failed": {}}
-    man = {"added": [_rel(e) for e in man["added"]], "failed": {_rel(k): v for k, v in man["failed"].items()}}
+    # only "not there" (404) is final: a refusal, a timeout or a busy server is tried again (issue #36:
+    # fifaaddict.com refused one user's run after 2 crests and the other 1,049 were never asked again)
+    man = {"added": [_rel(e) for e in man["added"]], "failed": {_rel(k): v for k, v in man["failed"].items() if v == "404"}}
     if a.remove:
         for rel in man["added"]:
             f = os.path.join(EXT, rel)
@@ -115,20 +118,29 @@ def main():
         os.makedirs(os.path.dirname(manifest), exist_ok=True)
         with open(manifest, "w") as f:
             json.dump(man, f)
-    done = 0
+    done = errors = 0
     for i, (rel, url) in enumerate(todo):
         if os.path.isfile(STOP):
             print("stopped", flush=True)
             break
-        time.sleep(a.delay)
+        time.sleep(a.delay + 10 * errors)  # wait longer after each error in a row
         req = urllib.request.Request(url, headers={"User-Agent": f"Mozilla/5.0 (FO3 private server {kind} sync)"})
         try:
             body = urllib.request.urlopen(req, timeout=60).read()
             if not body.startswith(b"\x89PNG"):
                 raise ValueError("not a PNG")
         except Exception as e:
-            man["failed"][rel] = str(getattr(e, "code", e))[:40]
+            if getattr(e, "code", None) == 404:  # an answer: not there
+                man["failed"][rel] = "404"
+                errors = 0
+            else:
+                errors += 1
+                print(f"{rel}: {str(getattr(e, 'code', '') or e)[:80]}", flush=True)
+                if errors == TRIES:
+                    print(f"fifaaddict.com did not answer {TRIES} times in a row: stopped, press Download again later", flush=True)
+                    break
         else:
+            errors = 0
             path = os.path.join(EXT, rel)
             os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path, "wb") as f:
@@ -137,9 +149,9 @@ def main():
             done += 1
         if i % 10 == 9:
             save()
-            print(f"{i + 1}/{len(todo)} fetched {done}, failed {len(man['failed'])}", flush=True)
+            print(f"{i + 1}/{len(todo)} fetched {done}, not there {len(man['failed'])}", flush=True)
     save()
-    print("done:", done, "added,", len(man["failed"]), "failed in total")
+    print("done:", done, "added,", len(man["failed"]), "not on fifaaddict.com in total")
 
 
 if __name__ == "__main__":
