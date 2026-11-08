@@ -297,7 +297,8 @@ Sudah ditambahkan dan lolos tes, tapi belum dicek di client:
   mempertemukanmu dengan salah satu dari mereka yang rating-nya dekat dengan rating King of the Hill-mu.
   Layar hadiah menampilkan poin yang didapat atau hilang. Item hadiah mingguan dan musiman belum ada.
   Tab Pengaturan match di halaman admin mengganti region ke kota-kota Indonesia, Singapura / Malaysia,
-  Thailand atau Vietnam (nama berbahasa Vietnam).
+  Thailand atau Vietnam (nama berbahasa Vietnam), atau wilayah kustom yang ditulis di sana, satu baris
+  "Region: kota, kota" per region (misalnya Sa Pa ditambahkan ke Miền Bắc).
 - **Gambar pengumuman saat login** (issue #36): tab Pengumuman di halaman admin mengunggah JPG atau PNG
   (disesuaikan ke popup 800×720, dengan pratinjau) untuk popup Pemberitahuan saat login, atau
   menghapusnya.

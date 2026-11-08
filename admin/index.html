@@ -134,6 +134,7 @@
   .crests figure { margin: 0; }
   .crests figcaption { margin-bottom: 4px; color: var(--mute); font-size: 13px; }
   .crests img, .crests canvas { display: block; background: #11181f; border: 1px solid var(--line); }
+  textarea.koth-text { display: block; width: 100%; min-height: 10em; line-height: 1.5; }
   .picker { display: grid; align-content: start; gap: 3px; font-size: 13px; color: var(--mute); }
   .picker .listbox { margin: 0; }
   .badge-prev, img.badge { width: 48px; height: 48px; object-fit: contain; background: #11181f; border: 1px solid var(--line); }
@@ -335,6 +336,14 @@
         <button class="b primary" id="kothSave" data-i18n="save"></button>
       </div>
       <p class="muted" id="kothList"></p>
+      <h3 data-i18n="koth_custom_title"></h3>
+      <p class="lead" id="kothCustomLead"></p>
+      <div class="row">
+        <label class="f"><span data-i18n="koth_copy"></span><select id="kothCopyFrom"></select></label>
+        <button class="b" id="kothCopy" data-i18n="koth_copy_btn"></button>
+      </div>
+      <textarea id="kothCustom" class="koth-text" rows="8" spellcheck="false" aria-labelledby="kothCustomLead"></textarea>
+      <div class="row"><button class="b primary" id="kothCustomSave" data-i18n="koth_custom_save"></button></div>
     </section>
 
     <section id="economy" hidden>
@@ -673,6 +682,9 @@ const loaders = {
     $("#pmBall").innerHTML = opts(d.balls.map(b => [b.id, b.name]), d.ball);
     KOTH = await api("koth");
     $("#kothSet").innerHTML = opts(Object.keys(KOTH.sets).map(k => [k, t("koth_" + k)]), KOTH.set);
+    $("#kothCopyFrom").innerHTML = opts(Object.keys(KOTH.sets).filter(k => k !== "custom").map(k => [k, t("koth_" + k)]), "vn");
+    $("#kothCustomLead").textContent = t("koth_custom_lead", KOTH.file);
+    $("#kothCustom").value = KOTH.texts.custom;
     kothList();
   },
   async economy() {
@@ -1111,6 +1123,13 @@ $("#ecoSave").addEventListener("click", () => act(async () => {
 let KOTH = null;
 const kothList = () => { $("#kothList").textContent = KOTH.sets[$("#kothSet").value].map(([r, cities]) => `${r}: ${cities.join(", ")}`).join(" · "); };
 $("#kothSet").addEventListener("change", kothList);
+$("#kothCopy").addEventListener("click", () => { $("#kothCustom").value = KOTH.texts[$("#kothCopyFrom").value]; });
+$("#kothCustomSave").addEventListener("click", () => act(async () => {
+  KOTH = await api("koth_custom_set", {text: $("#kothCustom").value});
+  $("#kothCustom").value = KOTH.texts.custom;
+  kothList();
+  say(t("koth_custom_saved", KOTH.sets.custom.length, KOTH.sets.custom.reduce((n, [, cities]) => n + cities.length, 0)), "ok");
+}));
 $("#kothSave").addEventListener("click", () => act(async () => {
   KOTH = await api("koth_set", {set: $("#kothSet").value});
   kothList();

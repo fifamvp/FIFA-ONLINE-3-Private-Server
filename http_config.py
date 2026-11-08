@@ -8480,24 +8480,61 @@ KOTH_GOALS = {"weekly_winning_reward_condition": 10, "weekly_match_reward_condit
               "weekly_grade_reward_condition": 20, "season_grade_reward_condition": 50}  # the head tab's gauges
 
 
+# The admin page's own set (user: "buatkan untuk custom area king of hill di admin page"; issue
+# #36 asked for Sa Pa in Miền Bắc): KOTH_CUSTOM_FILE [{id, name, cities [{id, name}]}], region ids
+# from 41, a city's id its region's + 01..99 (the admin page keeps the ids of names it already had).
+KOTH_CUSTOM_FILE = os.path.join(HERE, "gamedata", "koth_custom.json")
+_KOTH_CUSTOM = {}  # (file, mtime, size) -> its tree: an edit counts at once
+
+
+def koth_custom():
+    """The custom set as a KOTH_SETS tree, () while there is none."""
+    try:
+        st = os.stat(KOTH_CUSTOM_FILE)
+    except OSError:
+        return ()
+    key = (KOTH_CUSTOM_FILE, st.st_mtime_ns, st.st_size)
+    if key not in _KOTH_CUSTOM:
+        try:
+            with open(KOTH_CUSTOM_FILE, encoding="utf-8") as f:
+                tree = tuple((str(r["id"]), str(r["name"]), tuple((str(c["id"]), str(c["name"])) for c in r["cities"]))
+                             for r in json.load(f))
+        except (OSError, ValueError, KeyError, TypeError):
+            tree = ()
+        _KOTH_CUSTOM.clear()
+        _KOTH_CUSTOM[key] = tree
+    return _KOTH_CUSTOM[key]
+
+
 def koth_set():
-    """The region set in use (a KOTH_SETS key)."""
+    """The region set in use (a KOTH_SETS key, or "custom" while it has a city)."""
     try:
         with open(KOTH_FILE, encoding="utf-8") as f:
             key = json.load(f).get("regions")
     except (OSError, ValueError, AttributeError):
         key = None
-    return key if key in KOTH_SETS else "id"
+    return key if key in KOTH_SETS or key == "custom" and any(subs for _, _, subs in koth_custom()) else "id"
 
 
-@functools.lru_cache(maxsize=None)
+def koth_tree(key=None):
+    """((major id, name, ((city id, name), ...)), ...) of a region set (the one in use)."""
+    key = key or koth_set()
+    return koth_custom() if key == "custom" else KOTH_SETS[key]
+
+
+@functools.lru_cache(maxsize=16)
+def _koth_leaves(tree):
+    leaves = {sid: (name, mid, mname) for mid, mname, subs in tree for sid, name in subs}
+    return leaves, tuple(sorted(leaves))
+
+
 def koth_leaves(key):
     """{city id: (name, major id, major name)} of a region set."""
-    return {sid: (name, mid, mname) for mid, mname, subs in KOTH_SETS[key] for sid, name in subs}
+    return _koth_leaves(koth_tree(key))[0]
 
 
 def vm_region(vid, key=None):
-    return random.Random(vmseed("region" + vid)).choice(sorted(koth_leaves(key or koth_set())))
+    return random.Random(vmseed("region" + vid)).choice(_koth_leaves(koth_tree(key))[1])
 
 
 def koth_season(sid):
@@ -8525,7 +8562,7 @@ def ep_koth_presently(query, body):
     nxt = sid + 1 if sid % 100 < 12 else sid + 89
     # keyed by name: the region pickers list the keys (RegionalLeagueProxy.mainRegionList / subRegionList)
     tree = {mname: {"id": mid, "name": mname, "rewardgroupid": 1,
-                    "children": {n: {"id": s, "name": n, "parent": mname} for s, n in subs}} for mid, mname, subs in KOTH_SETS[koth_set()]}
+                    "children": {n: {"id": s, "name": n, "parent": mname} for s, n in subs}} for mid, mname, subs in koth_tree()}
     return _json({"seasons": [koth_season(sid), koth_season(nxt)], "regiongrouptrees": {KOTH_GROUP: tree}, "prev": []})
 
 

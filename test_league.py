@@ -1959,12 +1959,36 @@ def main():
         finally:
             gen_teams.WORLD_FILE, gen_teams.CURRENT_SEASON, gen_teams.WORLD = kept_world, kept_season, kept_running
         # King of the Hill's region set (issue #36): Indonesia, Singapore / Malaysia, Thailand, Vietnam
-        kept_koth, hc.KOTH_FILE = hc.KOTH_FILE, os.path.join(tmp, "koth_admin.json")
+        kept_koth = (hc.KOTH_FILE, hc.KOTH_CUSTOM_FILE)
+        hc.KOTH_FILE, hc.KOTH_CUSTOM_FILE = os.path.join(tmp, "koth_admin.json"), os.path.join(tmp, "koth_custom.json")
         try:
-            assert A("koth")["set"] == "id" and set(A("koth")["sets"]) == {"id", "sgmy", "th", "vn"} and refused("koth_set", set="xx")
+            assert A("koth")["set"] == "id" and set(A("koth")["sets"]) == {"id", "sgmy", "th", "vn", "custom"} and refused("koth_set", set="xx")
             assert A("koth_set", set="th")["set"] == hc.koth_set() == "th"
+            # the custom area (issue #36 asked for Sa Pa in Miền Bắc): the editor's lines, ids kept by name
+            assert refused("koth_set", set="custom") and A("koth")["texts"]["custom"] == ""  # nothing yet
+            vn = A("koth")["texts"]["vn"]
+            assert vn.startswith("Miền Bắc: Hà Nội, Hải Phòng, Quảng Ninh, Bắc Ninh\n")
+            k = A("koth_custom_set", text=vn.replace("Bắc Ninh\n", "Bắc Ninh, Sa Pa\n", 1))
+            assert k["sets"]["custom"][0] == ["Miền Bắc", ["Hà Nội", "Hải Phòng", "Quảng Ninh", "Bắc Ninh", "Sa Pa"]]
+            assert A("koth_set", set="custom")["set"] == hc.koth_set() == "custom"
+            leaves = hc.koth_leaves("custom")
+            sapa = next(i for i, x in leaves.items() if x[0] == "Sa Pa")
+            assert (sapa, leaves[sapa][2]) == ("4105", "Miền Bắc") and len(leaves) == 19
+            tree = body(hc.ENDPOINTS["/esports2/region/seasons/presently"]("", b""))["regiongrouptrees"][hc.KOTH_GROUP]
+            assert "Sa Pa" in tree["Miền Bắc"]["children"] and tree["Miền Bắc"]["id"] == "41"
+            assert {hc.vm_region(f"vm{n:04d}", "custom") for n in range(1, 100)} <= set(leaves)
+            # a new region first, a renamed city: every other id stays
+            k = A("koth_custom_set", text="Tây Bắc：Điện Biên，Lai Châu\n" + vn.replace("Bắc Ninh\n", "Bắc Ninh, Sa Pa\n", 1).replace("Huế", "Cố đô Huế"))
+            again = hc.koth_leaves("custom")
+            assert {i: x[0] for i, x in again.items() if x[0] in ("Sa Pa", "Hà Nội", "Đà Nẵng")} == {
+                i: x[0] for i, x in leaves.items() if x[0] in ("Sa Pa", "Hà Nội", "Đà Nẵng")}
+            assert next(x[1] for x in again.values() if x[0] == "Điện Biên") not in {x[1] for x in leaves.values()}
+            hue = next(i for i, x in leaves.items() if x[0] == "Huế")  # a renamed city takes the free id: its slot
+            assert next(i for i, x in again.items() if x[0] == "Cố đô Huế") == hue
+            for bad in ("Miền Bắc Hà Nội", "A: x\nB: x", "A:", "A" * 25 + ": x", "\n".join(f"R{i}: c{i}" for i in range(21))):
+                assert refused("koth_custom_set", text=bad), bad
         finally:
-            hc.KOTH_FILE = kept_koth
+            hc.KOTH_FILE, hc.KOTH_CUSTOM_FILE = kept_koth
         # issue #33, Info Manager: the record tab draws once /coach/me has createdat, playtime, career and
         # statistics with every object it reads (one missing stopped it at "-")
         me = hc.coach_me(hc._state(), 0)
