@@ -2300,6 +2300,73 @@ def main():
             assert set(a["counts"]) == set(admin.ASSET_KINDS) and not os.path.exists(admin.ASSET_STOP)
         finally:
             admin.ASSET_CMD, admin.ASSET_LOG = cmd, log
+        # issue #38: the Database tab edits cards in a copy of fifadb (the real one stays as it is)
+        # and club crests in a stand-in cache; tools/fo4_season.py build puts the edits back
+        import gen_teams, sqlite3, importlib.util
+        kept = (gen_teams.DB, admin.CARD_EDITS, admin.CREST_BACKUP, admin.INSTALL_CMD, hc.ASSETS)
+        gen_teams.DB = shutil.copyfile(gen_teams.DB, os.path.join(tmp, "fifadb38.sqlite"))
+        admin.CARD_EDITS, admin.CREST_BACKUP = os.path.join(tmp, "card_edits.json"), os.path.join(tmp, "crest_backup")
+        admin.INSTALL_CMD = [sys.executable, "-c", "import sys; print('stand-in', *sys.argv[1:])"]
+        try:
+            row = lambda spid: tuple(sqlite3.connect(gen_teams.DB).execute("SELECT * FROM players WHERE spid = ?", (spid,)).fetchone())
+            messi, before = 91158023, row(91158023)
+            found = {r["spid"] for r in A("search", q="158023")["rows"]}  # a player id: every card of his
+            assert {158023, messi} <= found and {s % 1000000 for s in found} == {158023}
+            assert {r["spid"] for r in A("search", q="91158023")["rows"]} == {messi}
+            meta = A("card_meta")
+            assert len(meta["traits"]) == 30 and len(meta["clubs"]) > 500 and [1, "Arsenal", 13] in meta["clubs"]
+            c = A("card", spid=messi)
+            assert (c["name"], c["season"], c["playerid"], c["orig"]) == ("Lionel Messi", 91, 158023, {}) and len(c["fields"]) == len(admin.CARD_FIELDS)
+            assert refused("card_set", spid=messi, fields={"finishing": 151}) and refused("card_set", spid=messi, fields={"overallrating": 99})
+            assert refused("card_set", spid=messi, fields={"teamid": 424242}) and refused("card_set", spid=1, fields={})
+            ovr = hc.card_ovr(messi)
+            c = A("card_set", spid=messi, fields={**c["fields"], "finishing": 99, "teamid": 1, "weakfootabilitytypecode": 5, "trait1": 3})
+            assert c["club"] == "Arsenal" and c["leagueid"] == 13 and c["fields"]["finishing"] == 99 and c["ovr"] > ovr == c["ovr"] - 1
+            assert hc.card_ovr(messi) == c["ovr"]  # the server's cached rating follows
+            assert set(c["orig"]) == {"finishing", "teamid", "leagueid", "weakfootabilitytypecode", "trait1"}
+            assert A("card_edits")["rows"] == [{"spid": messi, "name": "Lionel Messi", "season": 91, "changed": sorted(c["orig"])}]
+            c = A("card_set", spid=messi, fields={"weakfootabilitytypecode": c["orig"]["weakfootabilitytypecode"]})  # set back by hand
+            assert "weakfootabilitytypecode" not in c["orig"]
+            assert A("card_revert", spid=messi)["orig"] == {} and row(messi) == before and A("card_edits")["rows"] == []
+            assert refused("card_revert", spid=messi) and hc.card_ovr(messi) == ovr
+            # build: a rebuilt season card gets its edit back (the rebuilt values become its originals);
+            # other seasons' edited cards are not touched
+            spec = importlib.util.spec_from_file_location("fo4_season", os.path.join(os.path.dirname(os.path.abspath(admin.__file__)), "tools", "fo4_season.py"))
+            fo4 = importlib.util.module_from_spec(spec); spec.loader.exec_module(fo4)
+            fo4.CARD_EDITS = admin.CARD_EDITS
+            db = sqlite3.connect(gen_teams.DB); db.row_factory = sqlite3.Row
+            live = db.execute("SELECT spid, finishing FROM players WHERE spid / 1000000 = 300 LIMIT 1").fetchone()
+            json.dump({str(live["spid"]): {"orig": {"finishing": 1}, "new": {"finishing": 77}},
+                       str(messi): {"orig": {"finishing": 90}, "new": {"finishing": 50}}}, open(admin.CARD_EDITS, "w"))
+            assert fo4.apply_card_edits(db, (300,)) == 1
+            assert db.execute("SELECT finishing FROM players WHERE spid = ?", (live["spid"],)).fetchone()[0] == 77
+            assert row(messi) == before  # not rebuilt: left alone (not committed either)
+            assert json.load(open(admin.CARD_EDITS))[str(live["spid"])]["orig"] == {"finishing": live["finishing"]}
+            db.rollback(); db.close(); os.remove(admin.CARD_EDITS)
+            # Terapkan ke game: fo4_season.py install in the background, its output on the page
+            a = A("db_install")
+            assert a["running"] == "install" and refused("db_install")
+            admin.ASSET_JOB["proc"].wait(30)
+            a = A("assets")
+            assert (a["running"], a["last"], a["exit"], a["lines"]) == (None, "install", 0, [f"stand-in --game {hc.GAME}"])
+            # club crests: both sizes into the cache, the cache's own pair kept for Kembalikan
+            hc.ASSETS = os.path.join(tmp, "cache38")
+            crest = lambda size, root=None: admin.crest_file(size, 241, root)
+            os.makedirs(os.path.dirname(crest("large")))
+            open(crest("large"), "wb").write(b"the cache's own crest")
+            b64 = lambda *size: base64.b64encode(png(*size)).decode()
+            assert refused("crest_set", teamid=241, large=b64(128, 128), small=b64(128, 128))  # not 256 x 256
+            assert refused("crest_set", teamid=424242, large=b64(256, 256), small=b64(128, 128))  # no such club
+            c = A("crest_set", teamid=241, large=b64(256, 256), small=b64(128, 128))
+            assert c["custom"] and c["has"] == {"large": True, "small": True}
+            assert (open(crest("large"), "rb").read(), open(crest("small"), "rb").read()) == (png(256, 256), png(128, 128))
+            assert os.path.getsize(crest("small", admin.CREST_BACKUP)) == 0  # there was none: Kembalikan removes it
+            c = A("crest_revert", teamid=241)
+            assert not c["custom"] and c["has"] == {"large": True, "small": False}
+            assert open(crest("large"), "rb").read() == b"the cache's own crest"
+        finally:
+            gen_teams.DB, admin.CARD_EDITS, admin.CREST_BACKUP, admin.INSTALL_CMD, hc.ASSETS = kept
+            hc._OVR.clear(); hc._STATS.clear()
         # the game setting screen's "Default ball" (ball 0, "NOT FOUND") shows ball 6's picture, and a
         # small flag (none cached) is the nation's big one
         assert hc.asset_path("externalAssets/balls/ball_0.png") == hc.asset_path("externalAssets/balls/ball_6.png") is not None

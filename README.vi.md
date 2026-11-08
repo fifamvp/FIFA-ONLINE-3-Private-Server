@@ -285,6 +285,14 @@ Item saya, Gudang bên dưới là tên màn hình trong game, được giữ ng
   hoặc Pilih Team, mời bạn từ danh sách (HLV ảo, vào phòng với CLB tự chọn và sẵn sàng ngay), rồi Siap để
   đá với đội hình thật của hai CLB. Mỗi ngày 5 trận; thẻ của bạn không nhận EXP từ các trận này. Live Center
   mở được mà không còn hai lỗi UI.
+- **Cơ sở dữ liệu thẻ và CLB trên trang quản trị** (issue #38): tab Database sửa từng thẻ cầu thủ theo mùa
+  (spid = mùa × 1.000.000 + player id; tìm theo tên, spid hoặc player id): 33 chỉ số, vị trí, chân thuận và
+  chân không thuận, kỹ năng, tỷ lệ công/thủ, đặc điểm và CLB (chuyển nhượng). Thay đổi được ghi vào
+  `gamedata/fifadb.sqlite` và `gamedata/card_edits.json` (giá trị gốc và mới: Kembalikan khôi phục thẻ, và
+  `tools/fo4_season.py build` áp dụng lại cho các thẻ được dựng lại). Game đọc bản sao CSDL riêng: đóng game,
+  bấm Terapkan ke game (chạy `tools/fo4_season.py install` ở chế độ nền), rồi chạy `play.bat`. Tab này cũng thay
+  logo CLB trong bộ nhớ đệm của client (hai kích thước, logo gốc giữ trong `gamedata/crest_backup`). Chưa có
+  mặt, tóc, áo đấu theo từng thẻ và chưa thêm được CLB mới.
 - **Staff** (Tim > Manajemen Staff): hệ thống staff của FO3 hoạt động trở lại. *Rekrut* (tuyển): gói staff
   bằng EP (Basic FW / MF / DF / GK / ALL, Pro, Premium, Giám đốc kỹ thuật, Premium Medical) và mỗi ngày một
   gói ALL miễn phí khi đăng nhập, thêm một gói khi chơi đủ 3 trận. *Staff yang dimiliki* (staff đang có): 7 ô

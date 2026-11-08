@@ -311,6 +311,15 @@ Sudah ditambahkan dan lolos tes, tapi belum dicek di client:
   dengan tombol panah atau Pilih Team, undang teman dari daftar (manajer virtual, yang masuk dengan klub
   pilihannya sendiri dan langsung siap), lalu Siap memainkan skuad asli kedua klub. Lima match sehari;
   kartumu tidak mendapat EXP dari match ini. Live Center terbuka tanpa dua error UI yang dulu muncul.
+- **Database kartu dan klub di halaman admin** (issue #38): tab Database mengubah satu kartu pemain per
+  musim (spid = musim × 1.000.000 + player id; cari dengan nama, spid atau player id): 33 atribut,
+  posisi, kaki utama dan kaki lemah, skill move, work rate, karakteristik dan klub (transfer). Perubahan
+  masuk ke `gamedata/fifadb.sqlite` dan `gamedata/card_edits.json` (nilai asli dan baru: Kembalikan
+  memulihkan kartu, dan `tools/fo4_season.py build` memasangnya lagi di kartu yang dibangun ulang). Game
+  membaca salinan DB-nya sendiri: tutup game, tekan Terapkan ke game (menjalankan
+  `tools/fo4_season.py install` di latar), lalu jalankan `play.bat`. Tab ini juga mengganti logo klub di
+  cache client (dua ukuran, logo asli disimpan di `gamedata/crest_backup`). Wajah, rambut dan jersey per
+  kartu, serta klub baru, belum ada.
 - **Staff** (Tim > Manajemen Staff): sistem staff FO3 aktif lagi. *Rekrut*: pak staff dengan EP (Basic
   FW / MF / DF / GK / ALL, Pro, Premium, Direktur Teknik, Premium Medical) dan, tiap hari, pak ALL gratis
   untuk login dan satu lagi untuk main 3 match. *Staff yang dimiliki*: 7 frame peran (FW, MF, DF, pelatih

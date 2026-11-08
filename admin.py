@@ -6,7 +6,8 @@ language, and the page has a language switch) calls the JSON API below, which re
 gamedata/state.json through http_config's own helpers: EP, players (add / remove / grade / Tim
 inti-Cadangan), packs, Bag gifts, the daily login reward table, scout cooldowns, the server log,
 and the Shop catalog (gamedata/shop.json: every tab, new packs / items / packages, prices, hidden
-products; issue #10) with the client's own shop icons.
+products; issue #10) with the client's own shop icons, and the card database (gamedata/fifadb.sqlite:
+a card's stats, positions, traits and club, club crests, install into the game; issue #38).
 
 Guards: only 127.0.0.1 / localhost may connect, and every change must be a POST carrying the
 X-FO3-Admin header (a page on another origin cannot send it without a CORS preflight this server
@@ -14,10 +15,14 @@ never grants). ponytail: no login; anyone on this PC can use it, add a password 
 """
 import base64
 import binascii
+import functools
 import http.server
+import importlib.util
 import json
 import os
 import re
+import shutil
+import sqlite3
 import struct
 import subprocess
 import sys
@@ -31,7 +36,7 @@ PAGE = os.path.join(HERE, "admin", "index.html")
 POS_NAMES = "GK SW RWB RB RCB CB LCB LB LWB RDM CDM LDM RM RCM CM LCM LM RAM CAM LAM RF CF LF RW RS ST LS LW".split()
 API = {}
 READ_ONLY = {"summary", "players", "search", "packs", "daily", "match_rewards", "vm_chat", "missions", "prematch", "economy", "log", "shop",
-             "notice", "assets"}  # the rest must be POST + header
+             "notice", "assets", "card_meta", "card", "card_edits", "crest"}  # the rest must be POST + header
 hc = None  # the http_config module, set by start() (or by tests)
 
 
@@ -137,7 +142,8 @@ def search(p):
         rows = c.execute(f"""SELECT p.spid, COALESCE(n.full_eng, n.full, n.short), {hc.POSOVR}, p.preferredposition1
                              FROM players p JOIN nameseng n ON n.playerid = p.playerid
                              WHERE n.full LIKE ?1 OR n.short LIKE ?1 OR n.full_eng LIKE ?1 OR n.short_eng LIKE ?1
-                             ORDER BY 3 DESC LIMIT 60""", (f"%{q}%",)).fetchall()
+                                   OR p.spid = ?2 OR p.playerid = ?2
+                             ORDER BY 3 DESC LIMIT 60""", (f"%{q}%", int(q) if q.isdigit() else -1)).fetchall()
     return {"rows": [{"spid": s, "name": n, "season": s // 1000000, "ovr": o, "pos": POS_NAMES[pp] if 0 <= pp < 28 else "?",
                       "market": hc.on_market(s), "price": hc.card_price(s)} for s, n, o, pp in rows]}
 
@@ -501,14 +507,13 @@ def assets(p):
             lines = [ln.rstrip("\n")[:200] for ln in fh.readlines()[-12:]]
     except OSError:
         lines = []
-    return {"running": ASSET_JOB["kind"] if running else None, "last": ASSET_JOB["kind"], "counts": counts, "lines": lines}
+    return {"running": ASSET_JOB["kind"] if running else None, "last": ASSET_JOB["kind"], "counts": counts, "lines": lines,
+            "exit": None if proc is None or running else proc.returncode}
 
 
-@api("assets_fetch")
-def assets_fetch(p):
-    kind = p.get("kind")
-    if kind not in ASSET_KINDS:
-        raise AdminError("e_asset_kind")
+def run_job(kind, cmd):
+    """Start cmd in the background (one job at a time: the Aset downloads, the Database tab's
+    install), its output in ASSET_LOG."""
     proc = ASSET_JOB["proc"]
     if proc is not None and proc.poll() is None:
         raise AdminError("e_asset_busy")
@@ -516,9 +521,17 @@ def assets_fetch(p):
     if os.path.isfile(ASSET_STOP):
         os.remove(ASSET_STOP)
     with open(ASSET_LOG, "w", encoding="utf-8") as log:  # the child keeps its own handle
-        ASSET_JOB["proc"] = subprocess.Popen(ASSET_CMD + ASSET_KINDS[kind], cwd=HERE, stdout=log, stderr=subprocess.STDOUT,
+        ASSET_JOB["proc"] = subprocess.Popen(cmd, cwd=HERE, stdout=log, stderr=subprocess.STDOUT,
                                              creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     ASSET_JOB["kind"] = kind
+
+
+@api("assets_fetch")
+def assets_fetch(p):
+    kind = p.get("kind")
+    if kind not in ASSET_KINDS:
+        raise AdminError("e_asset_kind")
+    run_job(kind, ASSET_CMD + ASSET_KINDS[kind])
     return assets(p)
 
 
@@ -534,6 +547,223 @@ def assets_stop(p):
             proc.wait(10)
         os.remove(ASSET_STOP)
     return assets(p)
+
+
+# --- Card database (issue #38) -------------------------------------------------------------------
+# The Database tab edits one card (spid = season * 1e6 + player id: one season's card of a player)
+# in gamedata/fifadb.sqlite: its stats, positions, foot, weak foot, skill moves, work rates,
+# Karakteristik (trait1, bits in fo4_season.FO3_TRAITS order) and club (a transfer: teamid and that
+# club's league). CARD_EDITS keeps each edited card's original and new values (format in
+# tools/fo4_season.py, whose build puts them back on the season cards it makes again); Kembalikan
+# puts the original back. overallrating / potential follow the client rating's change. The game
+# reads its own copy of the DB in data_0.big: "Terapkan ke game" runs fo4_season.py install in the
+# background (game closed; not -I: it needs the user's cryptography and Pillow), and the server
+# reads the edits after its restart (play.bat). Club names: the client's own eng.db, table team.
+CARD_EDITS = os.path.join(HERE, "gamedata", "card_edits.json")
+CARD_STATS = ("acceleration sprintspeed agility balance reactions ballcontrol dribbling positioning finishing shotpower longshots "
+              "volleys penalties crossing curve freekickaccuracy shortpassing longpassing vision headingaccuracy marking "
+              "standingtackle slidingtackle interceptions aggression jumping stamina strength gkdiving gkhandling gkkicking "
+              "gkreflexes gkpositioning").split()
+CARD_FIELDS = {**dict.fromkeys(CARD_STATS, (1, 150)), "preferredposition1": (0, 27), "preferredposition2": (-1, 27),
+               "preferredposition3": (-1, 27), "preferredposition4": (-1, 27), "preferredfoot": (1, 2),
+               "weakfootabilitytypecode": (1, 5), "skillmoves": (0, 4), "attackingworkrate": (0, 2), "defensiveworkrate": (0, 2),
+               "trait1": (0, 2 ** 31 - 1), "teamid": (1, 999999)}
+INSTALL_CMD = [sys.executable, os.path.join(HERE, "tools", "fo4_season.py"), "install"]  # tests swap it
+
+
+@functools.lru_cache(maxsize=1)
+def fo4_season():
+    """tools/fo4_season.py as a module (its trait order)."""
+    spec = importlib.util.spec_from_file_location("fo4_season", os.path.join(HERE, "tools", "fo4_season.py"))
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m
+
+
+@functools.lru_cache(maxsize=1)
+def clubs():
+    """{teamid: (name, leagueid)} of the client's clubs (its eng.db in data_0.big, table team)."""
+    from extract_fifadb import decrypt
+    raw = hc.client_big(os.path.join(hc.GAME, "data", "data_0.big"), "data/db2/eng.db.db2")
+    if not raw:
+        return {}
+    db = decrypt(bytes(raw))
+    db[:16] = b"SQLite format 3\x00"
+    with closing(sqlite3.connect(":memory:")) as c:
+        c.deserialize(bytes(db))
+        return {t: (n, lg) for t, n, lg in c.execute("SELECT teamid, teamname, leagueid FROM team ORDER BY teamname")}
+
+
+def load_edits():
+    try:
+        with open(CARD_EDITS) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def save_edits(edits):
+    os.makedirs(os.path.dirname(CARD_EDITS), exist_ok=True)
+    with open(CARD_EDITS + ".tmp", "w") as f:
+        json.dump(edits, f, indent=1)
+    os.replace(CARD_EDITS + ".tmp", CARD_EDITS)
+
+
+def card_row(c, spid):
+    r = c.execute(f"SELECT p.*, {hc.POSOVR} AS ovr FROM players p WHERE p.spid = ?", (spid,)).fetchone()
+    if r is None:
+        raise AdminError("e_no_spid")
+    return r
+
+
+def write_card(c, r, values):
+    """values into card row r, its overallrating / potential moved by the client rating's change."""
+    c.execute(f"UPDATE players SET {', '.join(f'{k} = ?' for k in values)} WHERE spid = ?", [*values.values(), r["spid"]])
+    moved = card_row(c, r["spid"])["ovr"] - r["ovr"]
+    c.execute("UPDATE players SET overallrating = overallrating + ?1, potential = potential + ?1 WHERE spid = ?2", (moved, r["spid"]))
+    c.commit()
+    hc._OVR.pop(r["spid"], None)  # the server's cached rating and stats of the card
+    hc._STATS.pop(r["spid"], None)
+
+
+@api("card_meta")
+def card_meta(p):
+    return {"traits": fo4_season().FO3_TRAITS, "fields": CARD_FIELDS, "stats": CARD_STATS, "positions": POS_NAMES,
+            "clubs": [[t, n, lg] for t, (n, lg) in clubs().items()], "file": rel(CARD_EDITS)}
+
+
+@api("card")
+def card(p):
+    spid = as_int(p.get("spid"), 1, 10 ** 10, "spid")
+    with closing(hc._db()) as c:
+        r = card_row(c, spid)
+    club = clubs().get(r["teamid"])
+    return {"spid": spid, "playerid": r["playerid"], "season": spid // 1000000, "name": names([spid]).get(spid, "?"),
+            "ovr": r["ovr"], "teamid": r["teamid"], "leagueid": r["leagueid"], "club": club[0] if club else None,
+            "fields": {k: r[k] for k in CARD_FIELDS}, "orig": load_edits().get(str(spid), {}).get("orig", {})}
+
+
+@api("card_edits")
+def card_edits(p):
+    edits = load_edits()
+    nm = names(edits)
+    return {"rows": [{"spid": int(s), "name": nm.get(int(s), "?"), "season": int(s) // 1000000, "changed": sorted(e.get("new", {}))}
+                     for s, e in sorted(edits.items(), key=lambda kv: nm.get(int(kv[0]), ""))]}
+
+
+@api("card_set")
+def card_set(p):
+    spid = as_int(p.get("spid"), 1, 10 ** 10, "spid")
+    want = p.get("fields")
+    if not isinstance(want, dict):
+        raise AdminError("e_card_field", "fields")
+    with closing(hc._db()) as c:
+        r = card_row(c, spid)
+        new = {}
+        for k, v in want.items():
+            if k not in CARD_FIELDS:
+                raise AdminError("e_card_field", k)
+            if str(v) != str(r[k]):  # an unchanged value may be outside the range (a keeper's -3)
+                new[k] = as_int(v, *CARD_FIELDS[k], k)
+        if "teamid" in new:
+            if new["teamid"] not in clubs():
+                raise AdminError("e_club", new["teamid"])
+            new["leagueid"] = clubs()[new["teamid"]][1]
+        if new:
+            write_card(c, r, new)
+    edits = load_edits()
+    e = edits.setdefault(str(spid), {"orig": {}, "new": {}})
+    for k, v in new.items():
+        e["orig"].setdefault(k, r[k])
+        e["new"][k] = v
+    for k in [k for k in e["new"] if e["new"][k] == e["orig"][k]]:  # set back by hand
+        del e["new"][k], e["orig"][k]
+    if not e["new"]:
+        del edits[str(spid)]
+    save_edits(edits)
+    return card(p)
+
+
+@api("card_revert")
+def card_revert(p):
+    spid = as_int(p.get("spid"), 1, 10 ** 10, "spid")
+    edits = load_edits()
+    e = edits.pop(str(spid), None)
+    if e is None:
+        raise AdminError("e_not_edited")
+    with closing(hc._db()) as c:
+        write_card(c, card_row(c, spid), {k: v for k, v in e["orig"].items() if k in CARD_FIELDS or k == "leagueid"})
+    save_edits(edits)
+    return card(p)
+
+
+@api("db_install")
+def db_install(p):
+    run_job("install", INSTALL_CMD + ["--game", hc.GAME])
+    return assets(p)
+
+
+# Club crests: the client's cache, externalAssets/crests/large|small/s<teamid>.png (256 / 128 px).
+# The page fits the chosen picture into both squares (canvas) and sends PNGs; the first upload of a
+# club keeps the cache's own pair in gamedata/crest_backup (an empty file: there was none) for
+# Kembalikan. The game shows a new crest after it restarts.
+CRESTS = {"large": 256, "small": 128}
+CREST_BACKUP = os.path.join(HERE, "gamedata", "crest_backup")
+
+
+def crest_file(size, teamid, root=None):
+    return os.path.join(root or os.path.join(hc.ASSETS, "externalAssets", "crests"), size, f"s{teamid}.png")
+
+
+@api("crest")
+def crest(p):
+    tid = as_int(p.get("teamid"), 1, 999999, "teamid")
+    return {"teamid": tid, "has": {s: os.path.isfile(crest_file(s, tid)) for s in CRESTS},
+            "custom": os.path.isfile(crest_file("large", tid, CREST_BACKUP)), "updated": int(time.time())}
+
+
+@api("crest_set")
+def crest_set(p):
+    tid = as_int(p.get("teamid"), 1, 999999, "teamid")
+    if tid not in clubs():
+        raise AdminError("e_club", tid)
+    pngs = {}
+    for size, px in CRESTS.items():
+        try:
+            raw = base64.b64decode(str(p.get(size) or ""), validate=True)
+        except (binascii.Error, ValueError):
+            raise AdminError("e_crest_png", px)
+        if raw[:8] != b"\x89PNG\r\n\x1a\n" or raw[12:16] != b"IHDR" or struct.unpack(">II", raw[16:24]) != (px, px) or len(raw) > 2 << 20:
+            raise AdminError("e_crest_png", px)
+        pngs[size] = raw
+    for size, raw in pngs.items():
+        f, keep = crest_file(size, tid), crest_file(size, tid, CREST_BACKUP)
+        os.makedirs(os.path.dirname(f), exist_ok=True)
+        if not os.path.isfile(keep):
+            os.makedirs(os.path.dirname(keep), exist_ok=True)
+            if os.path.isfile(f):
+                shutil.copyfile(f, keep)
+            else:
+                open(keep, "wb").close()
+        with open(f + ".tmp", "wb") as fh:
+            fh.write(raw)
+        os.replace(f + ".tmp", f)
+    return crest(p)
+
+
+@api("crest_revert")
+def crest_revert(p):
+    tid = as_int(p.get("teamid"), 1, 999999, "teamid")
+    for size in CRESTS:
+        f, keep = crest_file(size, tid), crest_file(size, tid, CREST_BACKUP)
+        if not os.path.isfile(keep):
+            continue
+        if os.path.getsize(keep):
+            shutil.copyfile(keep, f)
+        elif os.path.isfile(f):
+            os.remove(f)
+        os.remove(keep)
+    return crest(p)
 
 
 # --- Shop (gamedata/shop.json, format in http_config's "Shop catalog" block) ----------------------
@@ -835,6 +1065,13 @@ class Admin(http.server.BaseHTTPRequestHandler):
                 return self._send(404, b"", "image/png")
             with open(hc.NOTICE_IMAGE, "rb") as fh:
                 return self._send(200, fh.read(), "image/png")
+        m = re.fullmatch(r"/crest/(large|small)/(\d+)\.png", url.path)  # the Database tab's club crests
+        if m:
+            f = crest_file(m.group(1), m.group(2))
+            if not os.path.isfile(f):
+                return self._send(404, b"", "image/png")
+            with open(f, "rb") as fh:
+                return self._send(200, fh.read(), "image/png")
         m = re.fullmatch(r"/icon/([A-Za-z0-9_]+)\.png", url.path)  # the shop icons
         if m:
             f = hc.asset_path(f"externalAssets/shop/{m.group(1)}.png")
@@ -964,6 +1201,7 @@ I18N = {
         nav_assets='Aset', as_title='Gambar yang belum ada', as_lead='Game menampilkan foto pemain, logo klub, logo liga dan foto staff dari cache client; yang belum ada tampil sebagai gambar bawaan (siluet, logo kosong). Tombol Unduh mengambil yang belum ada dari fifaaddict.com di latar, satu gambar tiap setengah detik; file yang sudah ada tidak diubah. Foto pemain bisa ribuan dan makan waktu lama; unduhan boleh dihentikan dan dilanjutkan kapan saja. Gambar baru tampil paling lambat setelah game dibuka ulang.', as_kind='Jenis', as_added='Sudah diunduh', as_failed='Tidak tersedia', as_faces='Foto pemain', as_crests='Logo klub', as_leagues='Logo liga', as_staffs='Foto staff', as_fetch='Unduh', as_stop='Hentikan', as_running='Sedang mengunduh: {0}', as_idle='Tidak ada unduhan berjalan.', as_started='Unduhan dimulai.', as_stopped='Unduhan dihentikan.', e_asset_kind='jenis gambar tidak dikenal', e_asset_busy='unduhan lain masih berjalan',
         nav_prematch="Pengaturan match", pm_title="Pengaturan match", pm_lead="Stadion, waktu, cuaca dan durasi untuk match berikutnya (Liga, Cup, Rank). Di Multiple > Rank semuanya juga bisa diganti di layar pengaturan match, dan pilihan itu ikut tersimpan di sini; layar Liga dan Cup hanya menampilkannya. Mendung: berawan di siang hari, senja di malam hari (layar Liga/Cup menuliskannya \"Salju\").", pm_stadium="Stadion", pm_tod="Waktu", pm_weather="Cuaca", pm_length="Durasi", pm_home="Kandang tim tuan rumah", pm_random="Acak", pm_day="Siang", pm_night="Malam", pm_dry="Cerah", pm_rain="Hujan", pm_snow="Salju", pm_overcast="Mendung", pm_minutes="{0} menit", pm_ball="Bola", pm_saved="Pengaturan match disimpan.", e_pm_value="nilai pengaturan match tidak valid",
         nav_economy="Ekonomi", eco_title="Ekonomi", eco_lead="Harga dan EP untuk semua manajer. Santai = seperti biasa (Shop gratis). Realistis: Shop berbayar (harga barang = isinya, barang tanpa EP seperti boost atau kapsul EXP punya harga dasar dikali pengali harga pemain; pack = nilai kartunya, +13% dengan pasar dinamis karena pack bisa dibuka di hari mahal) dan pasar dinamis. Sulit: harga pemain dan pack x2, EP awal kecil. Pasar dinamis: harga tiap pemain naik-turun setiap hari, manajer virtual kadang menjual murah, dan kamu boleh memasang harga sampai 105% (lebih lama terjual): beli murah, jual mahal. Selama Shop berbayar, Upgrade, Tukar dan Scout tidak mencetak EP: biaya upgrade sebesar nilai yang ditambahkannya, restore dibayar EP, tawaran tidak melebihi nilai kartu yang diserahkan. EP dari match diatur di tab Hadiah match; EP awal berlaku untuk manajer baru.", eco_preset="Preset", eco_custom="Kustom", eco_easy="Santai (seperti biasa)", eco_real="Realistis", eco_hard="Sulit", eco_shopfree="Shop gratis (0 EP)", eco_players="Harga pemain (x)", eco_packs="Harga pack (x)", eco_start="EP awal manajer baru", eco_dynamic="Pasar dinamis (harga naik-turun, bisa untung dari jual-beli)", eco_saved="Pengaturan ekonomi disimpan.", e_eco_value="nilai ekonomi tidak valid (pengali 0.1-100, EP awal 0 atau lebih)",
+        nav_db='Database', db_title='Database kartu dan klub', db_lead='Ubah kartu pemain per musim: atribut, posisi, kaki, kaki lemah, skill move, work rate, karakteristik dan klub (transfer). Satu kartu = satu spid = musim × 1.000.000 + player id (Messi 158023: kartu musim 91 = 91158023); cari dengan nama, spid atau player id. Perubahan tersimpan di gamedata/fifadb.sqlite dan dicatat di {0} (nilai asli dan baru: bisa dikembalikan, dan build musim FO4 memasangnya lagi). Game memakai salinan DB-nya sendiri: tutup game, tekan Terapkan ke game, tunggu sampai selesai, lalu jalankan play.bat.', db_apply='Terapkan ke game', db_started='Memasang ke game di latar…', db_done='Selesai terpasang. Jalankan play.bat untuk memulai server dan game lagi.', db_failed='Gagal (kode {0}); lihat log di bawah.', as_install='Terapkan ke game', db_search='Cari kartu', db_q='Nama, spid atau player id', db_hint='Ketik minimal 2 huruf nama, atau angka spid / player id.', db_edited='Kartu yang sudah diubah', db_none='Belum ada kartu yang diubah.', th_changed='Yang diubah', f_club='Klub', ph_club='ketik nama klub', f_pos_n='Posisi {0}', f_foot='Kaki utama', foot_right='Kanan', foot_left='Kiri', f_weak='Kaki lemah', f_skill='Skill move', f_wr_att='Work rate menyerang', f_wr_def='Work rate bertahan', wr_low='Rendah', wr_med='Sedang', wr_high='Tinggi', f_stats='Atribut', f_traits='Karakteristik', orig_value='asli: {0}', card_saved='{0} disimpan, OVR sekarang {1}. Tekan Terapkan ke game agar game memakainya.', crest_title='Logo klub', crest_lead='Pilih klub dan gambar (PNG transparan paling bagus); halaman ini menyesuaikannya ke 256×256 dan 128×128 lalu menyimpannya ke cache client. Logo asli disimpan di gamedata/crest_backup dan bisa dikembalikan. Tampil setelah game dibuka ulang.', crest_save='Simpan logo', crest_revert='Kembalikan logo asli', crest_confirm='Kembalikan logo asli klub ini?', crest_now='Logo sekarang', crest_new='Logo baru', crest_none='Belum ada logo klub ini di cache.', crest_pick='Pilih klub dan file gambar dulu.', crest_saved='Logo disimpan; tampil setelah game dibuka ulang.', crest_reverted='Logo asli dikembalikan.', e_card_field='{0} tidak bisa diubah di sini', e_club='klub {0} tidak ada di game', e_not_edited='kartu ini belum diubah', e_crest_png='gambar logo harus PNG {0}×{0} (pilih ulang file di halaman ini)',
     ),
     "en": dict(
         ep_balance="EP balance", language="Language", menu="Admin menu",
@@ -1047,6 +1285,7 @@ I18N = {
         nav_assets='Assets', as_title='Missing pictures', as_lead="The game shows player faces, club crests, league logos and staff pictures from the client's cache; a missing one shows as a default picture (a silhouette, a blank crest). Download fetches the missing ones from fifaaddict.com in the background, one picture every half second; files already there are not changed. Player faces can be thousands and take long; a download can be stopped and resumed at any time. New pictures show at the latest after the game is restarted.", as_kind='Kind', as_added='Downloaded', as_failed='Not available', as_faces='Player faces', as_crests='Club crests', as_leagues='League logos', as_staffs='Staff pictures', as_fetch='Download', as_stop='Stop', as_running='Downloading: {0}', as_idle='No download running.', as_started='Download started.', as_stopped='Download stopped.', e_asset_kind='unknown picture kind', e_asset_busy='another download is still running',
         nav_prematch="Match settings", pm_title="Match settings", pm_lead="Stadium, time of day, weather and length for the next matches (Liga, Cup, Rank). In Multiple > Rank they can also be changed on the game setting screen, and that choice is saved here too; the Liga and Cup screens only show them. Overcast: cloudy by day, dusk at night (the Liga/Cup screen labels it \"Salju\").", pm_stadium="Stadium", pm_tod="Time of day", pm_weather="Weather", pm_length="Length", pm_home="Home team's stadium", pm_random="Random", pm_day="Day", pm_night="Night", pm_dry="Clear", pm_rain="Rain", pm_snow="Snow", pm_overcast="Overcast", pm_minutes="{0} min", pm_ball="Ball", pm_saved="Match settings saved.", e_pm_value="invalid match setting",
         nav_economy="Economy", eco_title="Economy", eco_lead="Prices and EP for every manager. Easy = as always (free Shop). Realistic: a paid Shop (a product costs what it gives, one with no EP in it such as a boost or an EXP capsule a set price times the player price setting; a pack the worth of its cards, +13% with the dynamic Market, as a pack can be opened on a dear day) and the dynamic Market. Hard: player and pack prices x2, little starting EP. Dynamic Market: each player's price moves every day, virtual managers sometimes sell cheap, and you may ask up to 105% (it sells slower): buy low, sell high. While the Shop is paid, Upgrade, Tukar and Scout make no EP: an upgrade costs what it adds, a restore costs EP, and no offer is worth more than the cards given. Match EP is set on the Match rewards tab; starting EP is for new managers.", eco_preset="Preset", eco_custom="Custom", eco_easy="Easy (as always)", eco_real="Realistic", eco_hard="Hard", eco_shopfree="Free Shop (0 EP)", eco_players="Player prices (x)", eco_packs="Pack prices (x)", eco_start="A new manager's EP", eco_dynamic="Dynamic Market (prices move, trading can pay)", eco_saved="Economy settings saved.", e_eco_value="invalid economy setting (multipliers 0.1-100, starting EP 0 or more)",
+        nav_db='Database', db_title='Card and club database', db_lead="Edit a player's card per season: attributes, positions, foot, weak foot, skill moves, work rates, traits and club (a transfer). One card = one spid = season × 1,000,000 + player id (Messi is 158023: his season 91 card is 91158023); search by name, spid or player id. Changes go into gamedata/fifadb.sqlite and are recorded in {0} (original and new values: they can be restored, and the FO4 season build puts them back). The game reads its own copy of the DB: close the game, press Apply to the game, wait until it finishes, then run play.bat.", db_apply='Apply to the game', db_started='Installing into the game in the background…', db_done='Installed. Run play.bat to start the server and the game again.', db_failed='Failed (code {0}); see the log below.', as_install='Apply to the game', db_search='Find a card', db_q='Name, spid or player id', db_hint='Type at least 2 letters of a name, or a spid / player id.', db_edited='Edited cards', db_none='No card edited yet.', th_changed='Changed', f_club='Club', ph_club='type a club name', f_pos_n='Position {0}', f_foot='Preferred foot', foot_right='Right', foot_left='Left', f_weak='Weak foot', f_skill='Skill moves', f_wr_att='Attacking work rate', f_wr_def='Defensive work rate', wr_low='Low', wr_med='Medium', wr_high='High', f_stats='Attributes', f_traits='Traits', orig_value='original: {0}', card_saved='{0} saved, OVR now {1}. Press Apply to the game so the game uses it.', crest_title='Club crests', crest_lead="Pick a club and a picture (a transparent PNG looks best); this page fits it into 256×256 and 128×128 and saves both into the client's cache. The original crest is kept in gamedata/crest_backup and can be restored. Shows after the game restarts.", crest_save='Save crest', crest_revert='Restore the original crest', crest_confirm="Restore this club's original crest?", crest_now='Current crest', crest_new='New crest', crest_none='This club has no crest in the cache.', crest_pick='Pick a club and a picture first.', crest_saved='Crest saved; it shows after the game restarts.', crest_reverted='Original crest restored.', e_card_field='{0} cannot be changed here', e_club='club {0} is not in the game', e_not_edited='this card has not been edited', e_crest_png='the crest must be a {0}×{0} PNG (pick the file again on this page)',
     ),
     "zh": dict(
         lang_name="简体中文", locale="zh-CN",
@@ -1131,6 +1370,7 @@ I18N = {
         nav_assets='图片', as_title='缺失的图片', as_lead='游戏从客户端缓存中显示球员头像、俱乐部队徽、联赛标志和职员照片；缺失的会显示为默认图（剪影、空白队徽）。“下载”会在后台从 fifaaddict.com 获取缺失的图片，每半秒一张；已有的文件不会被改动。球员头像可能有几千张，需要较长时间；下载可以随时停止、随时继续。新图片最迟在重新打开游戏后显示。', as_kind='类型', as_added='已下载', as_failed='无法获取', as_faces='球员头像', as_crests='俱乐部队徽', as_leagues='联赛标志', as_staffs='职员照片', as_fetch='下载', as_stop='停止', as_running='正在下载：{0}', as_idle='没有正在进行的下载。', as_started='已开始下载。', as_stopped='已停止下载。', e_asset_kind='未知的图片类型', e_asset_busy='另一个下载仍在进行',
         nav_prematch="比赛设置", pm_title="比赛设置", pm_lead="下一场比赛（联赛、杯赛、排位）的球场、时间、天气和时长。在 Multiple > Rank 的比赛设置画面也可以修改，修改结果也会保存在这里；联赛和杯赛画面只显示这些设置。阴天：白天为多云，夜晚为黄昏（联赛/杯赛画面会显示为“Salju”）。", pm_stadium="球场", pm_tod="时间", pm_weather="天气", pm_length="时长", pm_home="主队球场", pm_random="随机", pm_day="白天", pm_night="夜晚", pm_dry="晴", pm_rain="雨", pm_snow="雪", pm_overcast="阴天", pm_minutes="{0} 分钟", pm_ball="足球", pm_saved="比赛设置已保存。", e_pm_value="无效的比赛设置",
         nav_economy="经济", eco_title="经济", eco_lead="所有经理的价格与 EP。轻松 = 保持原样（商店免费）。真实：商店收费（商品价格 = 其内容的价值，不含 EP 的商品（如强化加成、经验胶囊）按基础价格乘以球员价格倍率；卡包 = 卡包内球员的价值，开启动态市场时 +13%，因为卡包可以留到价格高的日子再开）并开启动态市场。困难：球员和卡包价格 x2，初始 EP 很少。动态市场：每位球员的价格每天涨跌，虚拟经理有时会低价出售，你可以把售价定到 105%（卖出更慢）：低买高卖。商店收费时，强化、交易和球探都无法刷 EP：强化费用等于它增加的价值，恢复需支付 EP，报价不会超过交出球员的价值。比赛 EP 在“比赛奖励”页设置；初始 EP 只对新经理有效。", eco_preset="预设", eco_custom="自定义", eco_easy="轻松（保持原样）", eco_real="真实", eco_hard="困难", eco_shopfree="商店免费（0 EP）", eco_players="球员价格（倍）", eco_packs="卡包价格（倍）", eco_start="新经理的初始 EP", eco_dynamic="动态市场（价格涨跌，买卖可以获利）", eco_saved="经济设置已保存。", e_eco_value="无效的经济设置（倍率 0.1-100，初始 EP 不小于 0）",
+        nav_db='数据库', db_title='球员卡与俱乐部数据库', db_lead='按赛季编辑球员卡：属性、位置、惯用脚、逆足、花式技巧、攻防积极性、特性和俱乐部（转会）。一张卡 = 一个 spid = 赛季 × 1,000,000 + 球员 ID（梅西为 158023，他的 91 赛季卡是 91158023）；可按名字、spid 或球员 ID 搜索。修改写入 gamedata/fifadb.sqlite 并记录在 {0}（原值和新值：可以恢复，FO4 赛季构建时会重新应用）。游戏读取自己的数据库副本：先关闭游戏，点击“应用到游戏”，等待完成，然后运行 play.bat。', db_apply='应用到游戏', db_started='正在后台安装到游戏…', db_done='安装完成。运行 play.bat 重新启动服务器和游戏。', db_failed='失败（代码 {0}）；请查看下方日志。', as_install='应用到游戏', db_search='查找球员卡', db_q='名字、spid 或球员 ID', db_hint='输入名字的至少 2 个字母，或 spid / 球员 ID。', db_edited='已修改的球员卡', db_none='还没有修改过的球员卡。', th_changed='修改项', f_club='俱乐部', ph_club='输入俱乐部名称', f_pos_n='位置 {0}', f_foot='惯用脚', foot_right='右脚', foot_left='左脚', f_weak='逆足', f_skill='花式技巧', f_wr_att='进攻积极性', f_wr_def='防守积极性', wr_low='低', wr_med='中', wr_high='高', f_stats='属性', f_traits='特性', orig_value='原值：{0}', card_saved='{0} 已保存，现在 OVR {1}。点击“应用到游戏”让游戏使用它。', crest_title='俱乐部队徽', crest_lead='选择俱乐部和图片（透明 PNG 效果最好）；本页会将其缩放到 256×256 和 128×128 并保存到客户端缓存。原队徽保存在 gamedata/crest_backup，可以恢复。重新打开游戏后显示。', crest_save='保存队徽', crest_revert='恢复原队徽', crest_confirm='恢复这个俱乐部的原队徽？', crest_now='当前队徽', crest_new='新队徽', crest_none='缓存中没有这个俱乐部的队徽。', crest_pick='请先选择俱乐部和图片。', crest_saved='队徽已保存；重新打开游戏后显示。', crest_reverted='已恢复原队徽。', e_card_field='{0} 不能在这里修改', e_club='游戏中没有俱乐部 {0}', e_not_edited='这张卡没有修改过', e_crest_png='队徽必须是 {0}×{0} 的 PNG（请在本页重新选择文件）',
     ),
     "th": dict(
         lang_name="ไทย", locale="th-TH",
@@ -1215,6 +1455,7 @@ I18N = {
         nav_assets='รูปภาพ', as_title='รูปที่ยังไม่มี', as_lead='เกมแสดงรูปนักเตะ โลโก้สโมสร โลโก้ลีก และรูปสตาฟจากแคชของไคลเอนต์ รูปที่ไม่มีจะแสดงเป็นรูปเริ่มต้น (เงาคน โลโก้ว่าง) ปุ่มดาวน์โหลดจะดึงรูปที่ยังไม่มีจาก fifaaddict.com ในเบื้องหลัง ทีละรูปทุกครึ่งวินาที ไฟล์ที่มีอยู่แล้วจะไม่ถูกแก้ไข รูปนักเตะอาจมีหลายพันรูปและใช้เวลานาน หยุดและดาวน์โหลดต่อได้ทุกเมื่อ รูปใหม่จะแสดงอย่างช้าที่สุดหลังเปิดเกมใหม่', as_kind='ประเภท', as_added='ดาวน์โหลดแล้ว', as_failed='ไม่มีให้ดาวน์โหลด', as_faces='รูปนักเตะ', as_crests='โลโก้สโมสร', as_leagues='โลโก้ลีก', as_staffs='รูปสตาฟ', as_fetch='ดาวน์โหลด', as_stop='หยุด', as_running='กำลังดาวน์โหลด: {0}', as_idle='ไม่มีการดาวน์โหลดที่กำลังทำงาน', as_started='เริ่มดาวน์โหลดแล้ว', as_stopped='หยุดดาวน์โหลดแล้ว', e_asset_kind='ไม่รู้จักประเภทรูป', e_asset_busy='ยังมีการดาวน์โหลดอื่นทำงานอยู่',
         nav_prematch="ตั้งค่าแมตช์", pm_title="ตั้งค่าแมตช์", pm_lead="สนาม ช่วงเวลา สภาพอากาศ และความยาวของแมตช์ถัดไป (ลีก คัพ แรงก์) ใน Multiple > Rank เปลี่ยนได้ที่หน้าตั้งค่าแมตช์เช่นกัน และตัวเลือกนั้นจะถูกบันทึกที่นี่ด้วย หน้าลีกและคัพแสดงค่าเท่านั้น ครึ้มฟ้า: กลางวันมีเมฆมาก กลางคืนเป็นยามพลบค่ำ (หน้าลีก/คัพแสดงเป็น \"Salju\")", pm_stadium="สนาม", pm_tod="ช่วงเวลา", pm_weather="สภาพอากาศ", pm_length="ความยาว", pm_home="สนามของทีมเจ้าบ้าน", pm_random="สุ่ม", pm_day="กลางวัน", pm_night="กลางคืน", pm_dry="แจ่มใส", pm_rain="ฝนตก", pm_snow="หิมะ", pm_overcast="ครึ้มฟ้า", pm_minutes="{0} นาที", pm_ball="ลูกบอล", pm_saved="บันทึกการตั้งค่าแมตช์แล้ว", e_pm_value="ค่าการตั้งค่าแมตช์ไม่ถูกต้อง",
         nav_economy="เศรษฐกิจ", eco_title="เศรษฐกิจ", eco_lead="ราคาและ EP ของผู้จัดการทุกคน ง่าย = เหมือนเดิม (ร้านค้าฟรี) สมจริง: ร้านค้าเสียเงิน (ราคาสินค้า = มูลค่าของที่ได้ สินค้าที่ไม่มี EP เช่นบูสต์หรือแคปซูล EXP ใช้ราคาพื้นฐานคูณตัวคูณราคานักเตะ ราคาแพ็ค = มูลค่าการ์ดในแพ็ค +13% เมื่อเปิดตลาดแบบไดนามิก เพราะเก็บแพ็คไว้เปิดวันที่ราคาสูงได้) และตลาดแบบไดนามิก ยาก: ราคานักเตะและแพ็ค x2 และ EP เริ่มต้นน้อย ตลาดแบบไดนามิก: ราคานักเตะแต่ละคนขึ้นลงทุกวัน ผู้จัดการเสมือนบางครั้งขายถูก และคุณตั้งราคาได้ถึง 105% (ขายได้ช้าลง): ซื้อถูก ขายแพง เมื่อร้านค้าเสียเงิน การอัปเกรด การแลกเปลี่ยน และแมวมองจะไม่สร้าง EP เพิ่ม: ค่าอัปเกรดเท่ากับมูลค่าที่เพิ่มขึ้น การกู้คืนจ่ายด้วย EP และข้อเสนอจะไม่สูงกว่ามูลค่าการ์ดที่ให้ไป EP จากแมตช์ตั้งได้ที่แท็บรางวัลหลังแมตช์ EP เริ่มต้นใช้กับผู้จัดการใหม่", eco_preset="พรีเซ็ต", eco_custom="กำหนดเอง", eco_easy="ง่าย (เหมือนเดิม)", eco_real="สมจริง", eco_hard="ยาก", eco_shopfree="ร้านค้าฟรี (0 EP)", eco_players="ราคานักเตะ (เท่า)", eco_packs="ราคาแพ็ค (เท่า)", eco_start="EP เริ่มต้นของผู้จัดการใหม่", eco_dynamic="ตลาดแบบไดนามิก (ราคาขึ้นลง ซื้อขายทำกำไรได้)", eco_saved="บันทึกการตั้งค่าเศรษฐกิจแล้ว", e_eco_value="ค่าการตั้งค่าเศรษฐกิจไม่ถูกต้อง (ตัวคูณ 0.1-100, EP เริ่มต้น 0 ขึ้นไป)",
+        nav_db='ฐานข้อมูล', db_title='ฐานข้อมูลการ์ดและสโมสร', db_lead='แก้ไขการ์ดนักเตะแต่ละซีซัน: ค่าพลัง ตำแหน่ง เท้าถนัด เท้าข้างไม่ถนัด สกิลมูฟ เวิร์กเรต ทักษะพิเศษ และสโมสร (ย้ายทีม) การ์ดหนึ่งใบ = หนึ่ง spid = ซีซัน × 1,000,000 + player id (เมสซี่คือ 158023: การ์ดซีซัน 91 ของเขาคือ 91158023) ค้นหาด้วยชื่อ spid หรือ player id การแก้ไขบันทึกลง gamedata/fifadb.sqlite และจดไว้ใน {0} (ค่าเดิมและค่าใหม่: กู้คืนได้ และการ build ซีซัน FO4 จะใส่กลับให้) เกมอ่านสำเนาฐานข้อมูลของตัวเอง: ปิดเกม กด ใช้กับเกม รอจนเสร็จ แล้วเปิด play.bat', db_apply='ใช้กับเกม', db_started='กำลังติดตั้งลงเกมเบื้องหลัง…', db_done='ติดตั้งเสร็จแล้ว เปิด play.bat เพื่อเริ่มเซิร์ฟเวอร์และเกมใหม่', db_failed='ล้มเหลว (รหัส {0}) ดูบันทึกด้านล่าง', as_install='ใช้กับเกม', db_search='ค้นหาการ์ด', db_q='ชื่อ, spid หรือ player id', db_hint='พิมพ์ชื่ออย่างน้อย 2 ตัวอักษร หรือ spid / player id', db_edited='การ์ดที่แก้ไขแล้ว', db_none='ยังไม่มีการ์ดที่แก้ไข', th_changed='ที่แก้ไข', f_club='สโมสร', ph_club='พิมพ์ชื่อสโมสร', f_pos_n='ตำแหน่ง {0}', f_foot='เท้าถนัด', foot_right='ขวา', foot_left='ซ้าย', f_weak='เท้าข้างไม่ถนัด', f_skill='สกิลมูฟ', f_wr_att='เวิร์กเรตเกมรุก', f_wr_def='เวิร์กเรตเกมรับ', wr_low='ต่ำ', wr_med='กลาง', wr_high='สูง', f_stats='ค่าพลัง', f_traits='ทักษะพิเศษ', orig_value='ค่าเดิม: {0}', card_saved='บันทึก {0} แล้ว ตอนนี้ OVR {1} กด ใช้กับเกม เพื่อให้เกมใช้ค่านี้', crest_title='โลโก้สโมสร', crest_lead='เลือกสโมสรและรูปภาพ (PNG พื้นใสดีที่สุด) หน้านี้จะปรับเป็น 256×256 และ 128×128 แล้วบันทึกลงแคชของไคลเอนต์ โลโก้เดิมเก็บไว้ใน gamedata/crest_backup และกู้คืนได้ แสดงหลังเปิดเกมใหม่', crest_save='บันทึกโลโก้', crest_revert='กู้คืนโลโก้เดิม', crest_confirm='กู้คืนโลโก้เดิมของสโมสรนี้?', crest_now='โลโก้ปัจจุบัน', crest_new='โลโก้ใหม่', crest_none='ไม่มีโลโก้ของสโมสรนี้ในแคช', crest_pick='เลือกสโมสรและไฟล์รูปภาพก่อน', crest_saved='บันทึกโลโก้แล้ว จะแสดงหลังเปิดเกมใหม่', crest_reverted='กู้คืนโลโก้เดิมแล้ว', e_card_field='แก้ไข {0} ที่นี่ไม่ได้', e_club='ไม่มีสโมสร {0} ในเกม', e_not_edited='การ์ดนี้ยังไม่ได้แก้ไข', e_crest_png='โลโก้ต้องเป็น PNG {0}×{0} (เลือกไฟล์ใหม่ในหน้านี้)',
     ),
     "vi": dict(
         lang_name="Tiếng Việt", locale="vi-VN",
@@ -1299,6 +1540,7 @@ I18N = {
         nav_assets='Hình ảnh', as_title='Hình ảnh còn thiếu', as_lead='Game hiển thị ảnh cầu thủ, logo câu lạc bộ, logo giải đấu và ảnh nhân viên từ bộ nhớ đệm của client; ảnh nào thiếu sẽ hiện ảnh mặc định (bóng người, logo trống). Nút Tải xuống lấy các ảnh còn thiếu từ fifaaddict.com ở chế độ nền, mỗi nửa giây một ảnh; các tệp đã có không bị thay đổi. Ảnh cầu thủ có thể lên tới vài nghìn và mất nhiều thời gian; có thể dừng và tải tiếp bất cứ lúc nào. Ảnh mới hiện ra muộn nhất sau khi mở lại game.', as_kind='Loại', as_added='Đã tải', as_failed='Không có', as_faces='Ảnh cầu thủ', as_crests='Logo câu lạc bộ', as_leagues='Logo giải đấu', as_staffs='Ảnh nhân viên', as_fetch='Tải xuống', as_stop='Dừng', as_running='Đang tải: {0}', as_idle='Không có lượt tải nào đang chạy.', as_started='Đã bắt đầu tải.', as_stopped='Đã dừng tải.', e_asset_kind='loại ảnh không xác định', e_asset_busy='một lượt tải khác vẫn đang chạy',
         nav_prematch="Cài đặt trận", pm_title="Cài đặt trận đấu", pm_lead="Sân, thời gian, thời tiết và thời lượng cho các trận tiếp theo (Liga, Cup, Rank). Trong Multiple > Rank cũng đổi được ở màn hình cài đặt trận, và lựa chọn đó cũng được lưu tại đây; màn hình Liga và Cup chỉ hiển thị. Âm u: trời nhiều mây ban ngày, hoàng hôn ban đêm (màn hình Liga/Cup ghi là \"Salju\").", pm_stadium="Sân vận động", pm_tod="Thời gian", pm_weather="Thời tiết", pm_length="Thời lượng", pm_home="Sân của đội chủ nhà", pm_random="Ngẫu nhiên", pm_day="Ban ngày", pm_night="Ban đêm", pm_dry="Quang đãng", pm_rain="Mưa", pm_snow="Tuyết", pm_overcast="Âm u", pm_minutes="{0} phút", pm_ball="Bóng", pm_saved="Đã lưu cài đặt trận đấu.", e_pm_value="giá trị cài đặt trận đấu không hợp lệ",
         nav_economy="Kinh tế", eco_title="Kinh tế", eco_lead="Giá và EP cho mọi HLV. Dễ = như trước (Shop miễn phí). Thực tế: Shop tính phí (giá vật phẩm = giá trị bên trong, vật phẩm không chứa EP như tăng tỉ lệ hay viên EXP có giá cơ bản nhân hệ số giá cầu thủ; giá gói = giá trị các thẻ, +13% khi thị trường biến động vì gói có thể để dành mở vào ngày giá cao) và thị trường biến động. Khó: giá cầu thủ và giá gói x2, EP ban đầu ít. Thị trường biến động: giá mỗi cầu thủ lên xuống mỗi ngày, HLV ảo đôi khi bán rẻ, và bạn có thể đặt giá đến 105% (bán chậm hơn): mua rẻ, bán đắt. Khi Shop tính phí, Nâng cấp, Trao đổi và Tuyển trạch không tạo thêm EP: phí nâng cấp bằng giá trị nó thêm vào, khôi phục trả bằng EP, và đề nghị không vượt quá giá trị các thẻ đã đưa. EP từ trận đấu chỉnh ở tab Thưởng sau trận; EP ban đầu áp dụng cho HLV mới.", eco_preset="Mẫu", eco_custom="Tùy chỉnh", eco_easy="Dễ (như trước)", eco_real="Thực tế", eco_hard="Khó", eco_shopfree="Shop miễn phí (0 EP)", eco_players="Giá cầu thủ (x)", eco_packs="Giá gói (x)", eco_start="EP ban đầu của HLV mới", eco_dynamic="Thị trường biến động (giá lên xuống, mua bán có lãi)", eco_saved="Đã lưu cài đặt kinh tế.", e_eco_value="giá trị kinh tế không hợp lệ (hệ số 0.1-100, EP ban đầu từ 0 trở lên)",
+        nav_db='Cơ sở dữ liệu', db_title='Cơ sở dữ liệu thẻ và câu lạc bộ', db_lead='Sửa thẻ cầu thủ theo từng mùa: chỉ số, vị trí, chân thuận, chân không thuận, kỹ năng, tỷ lệ công/thủ, đặc điểm và câu lạc bộ (chuyển nhượng). Một thẻ = một spid = mùa × 1.000.000 + player id (Messi là 158023: thẻ mùa 91 của anh ấy là 91158023); tìm theo tên, spid hoặc player id. Thay đổi được ghi vào gamedata/fifadb.sqlite và lưu lại trong {0} (giá trị gốc và mới: có thể khôi phục, và bản build mùa FO4 sẽ áp dụng lại). Game đọc bản sao CSDL riêng: đóng game, bấm Áp dụng vào game, chờ xong rồi chạy play.bat.', db_apply='Áp dụng vào game', db_started='Đang cài vào game ở chế độ nền…', db_done='Đã cài xong. Chạy play.bat để khởi động lại server và game.', db_failed='Thất bại (mã {0}); xem nhật ký bên dưới.', as_install='Áp dụng vào game', db_search='Tìm thẻ', db_q='Tên, spid hoặc player id', db_hint='Nhập ít nhất 2 chữ cái của tên, hoặc spid / player id.', db_edited='Thẻ đã sửa', db_none='Chưa có thẻ nào được sửa.', th_changed='Đã sửa', f_club='Câu lạc bộ', ph_club='nhập tên câu lạc bộ', f_pos_n='Vị trí {0}', f_foot='Chân thuận', foot_right='Phải', foot_left='Trái', f_weak='Chân không thuận', f_skill='Kỹ năng', f_wr_att='Tỷ lệ tấn công', f_wr_def='Tỷ lệ phòng ngự', wr_low='Thấp', wr_med='Trung bình', wr_high='Cao', f_stats='Chỉ số', f_traits='Đặc điểm', orig_value='gốc: {0}', card_saved='Đã lưu {0}, OVR hiện là {1}. Bấm Áp dụng vào game để game dùng thay đổi.', crest_title='Logo câu lạc bộ', crest_lead='Chọn câu lạc bộ và ảnh (PNG nền trong suốt là đẹp nhất); trang này chỉnh về 256×256 và 128×128 rồi lưu vào bộ nhớ đệm của client. Logo gốc được giữ trong gamedata/crest_backup và có thể khôi phục. Hiển thị sau khi mở lại game.', crest_save='Lưu logo', crest_revert='Khôi phục logo gốc', crest_confirm='Khôi phục logo gốc của câu lạc bộ này?', crest_now='Logo hiện tại', crest_new='Logo mới', crest_none='Bộ nhớ đệm chưa có logo của câu lạc bộ này.', crest_pick='Hãy chọn câu lạc bộ và tệp ảnh trước.', crest_saved='Đã lưu logo; hiển thị sau khi mở lại game.', crest_reverted='Đã khôi phục logo gốc.', e_card_field='không thể sửa {0} ở đây', e_club='câu lạc bộ {0} không có trong game', e_not_edited='thẻ này chưa được sửa', e_crest_png='logo phải là PNG {0}×{0} (chọn lại tệp trên trang này)',
     ),
     "ko": dict(
         lang_name="한국어", locale="ko-KR",
@@ -1383,6 +1625,7 @@ I18N = {
         nav_assets='이미지', as_title='없는 이미지', as_lead='게임은 선수 얼굴, 클럽 엠블럼, 리그 로고, 스태프 사진을 클라이언트 캐시에서 보여 주며, 없는 것은 기본 이미지(실루엣, 빈 엠블럼)로 표시됩니다. 다운로드는 없는 이미지를 fifaaddict.com에서 백그라운드로 0.5초에 한 장씩 가져오며, 이미 있는 파일은 바꾸지 않습니다. 선수 얼굴은 수천 장일 수 있어 오래 걸립니다. 언제든 멈추고 이어서 받을 수 있습니다. 새 이미지는 늦어도 게임을 다시 실행한 뒤 표시됩니다.', as_kind='종류', as_added='받음', as_failed='없음', as_faces='선수 얼굴', as_crests='클럽 엠블럼', as_leagues='리그 로고', as_staffs='스태프 사진', as_fetch='다운로드', as_stop='중지', as_running='다운로드 중: {0}', as_idle='진행 중인 다운로드가 없습니다.', as_started='다운로드를 시작했습니다.', as_stopped='다운로드를 중지했습니다.', e_asset_kind='알 수 없는 이미지 종류', e_asset_busy='다른 다운로드가 아직 진행 중입니다',
         nav_prematch="경기 설정", pm_title="경기 설정", pm_lead="다음 경기(리그, 컵, 랭크)의 경기장, 시간대, 날씨, 경기 시간입니다. Multiple > Rank에서는 경기 설정 화면에서도 바꿀 수 있고, 그 선택도 여기에 저장됩니다. 리그와 컵 화면은 표시만 합니다. 흐림: 낮에는 구름 낀 하늘, 밤에는 해질녘입니다(리그/컵 화면에는 \"Salju\"로 표시됨).", pm_stadium="경기장", pm_tod="시간대", pm_weather="날씨", pm_length="경기 시간", pm_home="홈 팀 경기장", pm_random="무작위", pm_day="낮", pm_night="밤", pm_dry="맑음", pm_rain="비", pm_snow="눈", pm_overcast="흐림", pm_minutes="{0}분", pm_ball="공", pm_saved="경기 설정을 저장했습니다.", e_pm_value="잘못된 경기 설정 값",
         nav_economy="경제", eco_title="경제", eco_lead="모든 감독의 가격과 EP입니다. 쉬움 = 지금과 같음(상점 무료). 현실적: 유료 상점(상품 가격 = 내용물의 가치, EP가 없는 부스트나 EXP 캡슐 등은 기본 가격 × 선수 가격 배율, 팩 = 들어 있는 카드의 가치이며 변동 시장에서는 +13%: 팩을 비싼 날까지 두었다가 열 수 있기 때문)과 변동 시장. 어려움: 선수와 팩 가격 x2, 적은 시작 EP. 변동 시장: 선수 가격이 매일 오르내리고, 가상 감독이 가끔 싸게 팔며, 판매가를 105%까지 정할 수 있습니다(더 늦게 팔림): 싸게 사서 비싸게 파세요. 상점이 유료일 때는 강화, 트레이드, 스카우트로 EP를 불릴 수 없습니다: 강화 비용은 늘어나는 가치만큼이고, 복구는 EP로 내며, 제안은 내준 카드의 가치를 넘지 않습니다. 경기 EP는 경기 보상 탭에서, 시작 EP는 새 감독에게 적용됩니다.", eco_preset="프리셋", eco_custom="사용자 지정", eco_easy="쉬움(지금과 같음)", eco_real="현실적", eco_hard="어려움", eco_shopfree="상점 무료(0 EP)", eco_players="선수 가격(배)", eco_packs="팩 가격(배)", eco_start="새 감독의 시작 EP", eco_dynamic="변동 시장(가격 변동, 거래로 이익 가능)", eco_saved="경제 설정을 저장했습니다.", e_eco_value="잘못된 경제 설정 값(배율 0.1-100, 시작 EP 0 이상)",
+        nav_db='데이터베이스', db_title='선수 카드와 클럽 데이터베이스', db_lead='시즌별 선수 카드를 수정합니다: 능력치, 포지션, 주발, 약발, 개인기, 공수 가담, 특성, 클럽(이적). 카드 한 장 = spid 하나 = 시즌 × 1,000,000 + 선수 ID(메시는 158023: 91 시즌 카드는 91158023)이며, 이름, spid 또는 선수 ID로 찾을 수 있습니다. 변경 사항은 gamedata/fifadb.sqlite에 저장되고 {0}에 기록됩니다(원래 값과 새 값: 되돌릴 수 있고, FO4 시즌 build가 다시 적용합니다). 게임은 자체 DB 사본을 읽습니다: 게임을 닫고 게임에 적용을 누른 뒤 끝날 때까지 기다렸다가 play.bat을 실행하세요.', db_apply='게임에 적용', db_started='백그라운드에서 게임에 설치하는 중…', db_done='설치했습니다. play.bat을 실행해 서버와 게임을 다시 시작하세요.', db_failed='실패(코드 {0}); 아래 로그를 확인하세요.', as_install='게임에 적용', db_search='카드 찾기', db_q='이름, spid 또는 선수 ID', db_hint='이름을 2글자 이상 입력하거나 spid / 선수 ID를 입력하세요.', db_edited='수정한 카드', db_none='아직 수정한 카드가 없습니다.', th_changed='수정 항목', f_club='클럽', ph_club='클럽 이름 입력', f_pos_n='포지션 {0}', f_foot='주발', foot_right='오른발', foot_left='왼발', f_weak='약발', f_skill='개인기', f_wr_att='공격 가담', f_wr_def='수비 가담', wr_low='낮음', wr_med='보통', wr_high='높음', f_stats='능력치', f_traits='특성', orig_value='원래 값: {0}', card_saved='{0} 저장, 현재 OVR {1}. 게임에 적용을 눌러야 게임에 반영됩니다.', crest_title='클럽 엠블럼', crest_lead='클럽과 그림을 고르세요(투명 PNG가 가장 좋습니다). 이 페이지가 256×256과 128×128로 맞춘 뒤 클라이언트 캐시에 저장합니다. 원래 엠블럼은 gamedata/crest_backup에 보관되어 되돌릴 수 있습니다. 게임을 다시 열면 보입니다.', crest_save='엠블럼 저장', crest_revert='원래 엠블럼으로', crest_confirm='이 클럽의 원래 엠블럼으로 되돌릴까요?', crest_now='현재 엠블럼', crest_new='새 엠블럼', crest_none='캐시에 이 클럽의 엠블럼이 없습니다.', crest_pick='먼저 클럽과 그림 파일을 고르세요.', crest_saved='엠블럼을 저장했습니다. 게임을 다시 열면 보입니다.', crest_reverted='원래 엠블럼으로 되돌렸습니다.', e_card_field='{0}은(는) 여기서 바꿀 수 없습니다', e_club='게임에 클럽 {0}이(가) 없습니다', e_not_edited='이 카드는 수정되지 않았습니다', e_crest_png='엠블럼은 {0}×{0} PNG여야 합니다(이 페이지에서 파일을 다시 고르세요)',
     ),
 }
 

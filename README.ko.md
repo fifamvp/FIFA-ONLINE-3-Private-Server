@@ -252,6 +252,13 @@ Gudang 등은 게임에 표시되는 화면 이름이라, 게임에서 찾기 �
   고르고, 목록에서 친구(가상 감독, 자기가 고른 클럽으로 들어와 바로 준비함)를 초대한 뒤 Siap을 누르면 두 클럽의
   실제 스쿼드로 경기함. 하루 5경기, 내 카드는 이 경기로 EXP를 얻지 않음. Live Center는 전에 나던 UI 오류 두 개
   없이 열림.
+- **관리자 페이지의 카드와 클럽 데이터베이스**(issue #38): 데이터베이스 탭에서 선수 카드를 시즌별로 한 장씩
+  수정(spid = 시즌 × 1,000,000 + 선수 ID; 이름, spid 또는 선수 ID로 검색): 능력치 33개, 포지션, 주발과 약발,
+  개인기, 공수 가담, 특성, 클럽(이적). 변경 사항은 `gamedata/fifadb.sqlite`와 `gamedata/card_edits.json`에
+  저장(원래 값과 새 값: Kembalikan으로 되돌리고, `tools/fo4_season.py build`가 다시 만드는 카드에 다시 적용).
+  게임은 자체 DB 사본을 읽음: 게임을 닫고 Terapkan ke game(백그라운드에서 `tools/fo4_season.py install` 실행)을
+  누른 뒤 `play.bat` 실행. 이 탭은 클라이언트 캐시의 클럽 엠블럼도 바꿈(두 크기, 원본은 `gamedata/crest_backup`).
+  카드별 얼굴, 헤어, 유니폼과 새 클럽은 아직 없음.
 - **스태프**(Tim > Manajemen Staff): FO3 스태프 시스템이 다시 작동함. *Rekrut*(영입): EP로 사는 스태프 팩(Basic
   FW / MF / DF / GK / ALL, Pro, Premium, 기술 이사, Premium Medical)과 매일 로그인하면 무료 ALL 팩 하나, 3경기를
   하면 하나 더. *Staff yang dimiliki*(보유 스태프): 역할 칸 7개(FW, MF, DF, 수석 코치, GK, 피지컬 코치, 기술 이사);

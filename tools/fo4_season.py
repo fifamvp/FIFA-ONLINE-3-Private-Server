@@ -459,6 +459,7 @@ def cmd_build(a):
             for t in NAME_TABLES:
                 c.execute(f"INSERT OR REPLACE INTO {t} (playerid, full, short, full_eng, short_eng, jersey) VALUES (?,?,?,?,?,?)",
                           (pid, full, short, full, short, jersey))
+    edited = apply_card_edits(c, seasons)
     sys.path.insert(0, ROOT)
     from http_config import POSOVR  # exactly the client's own +0 rating + PLUS1, as on FO3's cards
     c.execute(f"UPDATE players AS p SET overallrating = {POSOVR} + ?1, potential = {POSOVR} + ?1 "
@@ -470,7 +471,35 @@ def cmd_build(a):
     json.dump(heads, open(HEADS, "w"))
     per = collections.Counter(card["season"] for card in cards.values())
     print(f"{len(cards)} cards ({', '.join(f'{SEASON_NAMES[s]} {n}' for s, n in sorted(per.items()))}): "
-          f"{found} players FO3 has, {new} new -> {FIFADB}")
+          f"{found} players FO3 has, {new} new, {edited} edited on the admin page -> {FIFADB}")
+
+
+# The admin page's Database tab (issue #38) edits cards in gamedata/fifadb.sqlite and keeps each
+# edited card's values in CARD_EDITS ({spid: {"orig": {column: value}, "new": {column: value}}}).
+# Cards of the seasons build makes again get their new values back here.
+CARD_EDITS = os.path.join(ROOT, "gamedata", "card_edits.json")
+
+
+def apply_card_edits(c, seasons):
+    """Put the admin page's edits back on the rebuilt cards of seasons (c: row_factory Row); the
+    rebuilt values become the ones its Kembalikan button restores. Returns how many cards."""
+    try:
+        with open(CARD_EDITS) as f:
+            edits = json.load(f)
+    except (OSError, ValueError):
+        return 0
+    n = 0
+    for spid, e in edits.items():
+        r = c.execute("SELECT * FROM players WHERE spid = ?", (int(spid),)).fetchone()
+        new = {k: v for k, v in e.get("new", {}).items() if r is not None and k in r.keys()}
+        if not new or int(spid) // 1000000 not in seasons:
+            continue
+        e["orig"] = {k: r[k] for k in new}
+        c.execute(f"UPDATE players SET {', '.join(f'{k} = ?' for k in new)} WHERE spid = ?", [*new.values(), int(spid)])
+        n += 1
+    with open(CARD_EDITS, "w") as f:
+        json.dump(edits, f, indent=1)
+    return n
 
 
 # --- WC18: the 2018 World Cup's best 300 squad players ----------------------------------------

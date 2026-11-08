@@ -120,6 +120,21 @@
   .tag button { border: 0; background: none; cursor: pointer; color: var(--mute); padding: 0 4px; }
   .tag button:hover { color: #ffb4ad; }
 
+  /* Database: the card editor's stat groups (an edited field has a gold edge), crest previews */
+  #cardDlg { width: min(1000px, calc(100vw - 32px)); }
+  .statgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px 14px; }
+  .statgrid fieldset { display: grid; align-content: start; gap: 4px; margin: 0; padding: 6px 10px 10px; border: 1px solid var(--line); border-radius: var(--radius); }
+  .statgrid legend { padding: 0 4px; color: var(--mute); font-size: 13px; }
+  .statgrid label { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 13px; }
+  .statgrid input { width: 68px; padding: 3px 6px; text-align: right; }
+  .traits { grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); max-height: none; }
+  .chg { border-color: var(--gold) !important; }
+  .foot .err { margin-right: auto; align-self: center; color: #ffb4ad; }
+  .crests { display: flex; flex-wrap: wrap; gap: 16px; align-items: end; margin-top: 12px; }
+  .crests figure { margin: 0; }
+  .crests figcaption { margin-bottom: 4px; color: var(--mute); font-size: 13px; }
+  .crests img, .crests canvas { display: block; background: #11181f; border: 1px solid var(--line); }
+
   @media (max-width: 760px) {
     .shell { grid-template-columns: 1fr; }
     nav { display: flex; overflow-x: auto; padding: 0; border-right: 0; border-bottom: 1px solid var(--line); }
@@ -155,6 +170,7 @@
     <button role="tab" data-tab="chat" data-i18n="nav_chat"></button>
     <button role="tab" data-tab="notice" data-i18n="nav_notice"></button>
     <button role="tab" data-tab="assets" data-i18n="nav_assets"></button>
+    <button role="tab" data-tab="db" data-i18n="nav_db"></button>
     <button role="tab" data-tab="missions" data-i18n="nav_missions"></button>
     <button role="tab" data-tab="scout" data-i18n="nav_scout"></button>
     <button role="tab" data-tab="log" data-i18n="nav_log"></button>
@@ -363,6 +379,41 @@
       <pre class="log" id="assetLog"></pre>
     </section>
 
+    <section id="db" hidden>
+      <h2 data-i18n="db_title"></h2>
+      <p class="lead" id="dbLead"></p>
+      <div class="row"><button class="b primary" id="dbApply" data-i18n="db_apply"></button><span class="muted" id="dbState"></span></div>
+      <pre class="log" id="dbLog" hidden></pre>
+      <h3 data-i18n="db_search"></h3>
+      <form class="row" id="dbForm">
+        <label class="f"><span data-i18n="db_q"></span><input class="wide" id="dbQ" minlength="2" data-i18n-ph="ph_messi" required></label>
+        <button class="b primary" data-i18n="search"></button>
+      </form>
+      <div class="table-wrap"><table>
+        <thead><tr><th data-i18n="th_name"></th><th class="num">spid</th><th class="num" data-i18n="th_season"></th><th data-i18n="th_pos"></th><th class="num">OVR</th><th></th></tr></thead>
+        <tbody id="dbRows"><tr><td colspan="6" class="muted" data-i18n="db_hint"></td></tr></tbody>
+      </table></div>
+      <h3 data-i18n="db_edited"></h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th data-i18n="th_name"></th><th class="num">spid</th><th class="num" data-i18n="th_season"></th><th data-i18n="th_changed"></th><th></th></tr></thead>
+        <tbody id="dbEdited"></tbody>
+      </table></div>
+      <h3 data-i18n="crest_title"></h3>
+      <p class="lead" data-i18n="crest_lead"></p>
+      <div class="row">
+        <label class="f"><span data-i18n="f_club"></span><input class="wide" id="crestClub" list="clubList" data-i18n-ph="ph_club"></label>
+        <label class="f"><span data-i18n="notice_file"></span><input type="file" id="crestFile" accept="image/png,image/jpeg"></label>
+        <button class="b primary" id="crestSave" data-i18n="crest_save"></button>
+        <button class="b danger" id="crestRevert" data-i18n="crest_revert" hidden></button>
+      </div>
+      <div class="crests">
+        <figure><figcaption data-i18n="crest_now"></figcaption><div id="crestNow"></div></figure>
+        <figure><figcaption data-i18n="crest_new"></figcaption><canvas id="crestLarge" width="256" height="256"></canvas></figure>
+        <figure><figcaption>128 × 128</figcaption><canvas id="crestSmall" width="128" height="128"></canvas></figure>
+      </div>
+      <datalist id="clubList"></datalist>
+    </section>
+
     <section id="missions" hidden>
       <h2 data-i18n="mis_title"></h2>
       <p class="lead" id="misLead"></p>
@@ -402,6 +453,25 @@
     <div class="head"><h3 id="editorTitle"></h3><span class="muted" id="editorId"></span></div>
     <div class="body" id="editorBody"></div>
     <div class="foot">
+      <button class="b" value="cancel" formnovalidate data-i18n="cancel"></button>
+      <button class="b primary" value="save" data-i18n="save"></button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="cardDlg" aria-labelledby="cardTitle">
+  <form method="dialog" id="cardForm">
+    <div class="head"><h3 id="cardTitle"></h3><span class="muted" id="cardIds"></span></div>
+    <div class="body">
+      <div class="grid2" id="cardInfo"></div>
+      <h3 data-i18n="f_stats"></h3>
+      <div class="statgrid" id="cardStats"></div>
+      <h3 data-i18n="f_traits"></h3>
+      <div class="seasons traits" id="cardTraits"></div>
+    </div>
+    <div class="foot">
+      <span class="err" id="cardErr" role="alert"></span>
+      <button class="b danger" type="button" id="cardRevert" data-i18n="restore"></button>
       <button class="b" value="cancel" formnovalidate data-i18n="cancel"></button>
       <button class="b primary" value="save" data-i18n="save"></button>
     </div>
@@ -567,9 +637,24 @@ const loaders = {
     assetsBusy = !!a.running;
     $("#assetRows").innerHTML = Object.entries(a.counts).map(([k, c]) => `<tr><td>${esc(t("as_" + k))}</td><td>${fmt(c.added)}</td>
       <td>${fmt(c.failed)}</td><td><button class="b" data-asset="${k}"${a.running ? " disabled" : ""}>${esc(t("as_fetch"))}</button></td></tr>`).join("");
-    $("#assetState").textContent = a.running ? t("as_running", t("as_" + a.running)) : t("as_idle");
+    $("#assetState").textContent = a.running ? jobState(a.running) : t("as_idle");
     $("#assetStop").hidden = !a.running;
     $("#assetLog").textContent = a.lines.join("\n");
+  },
+  async db() {
+    if (!META) {
+      META = await api("card_meta");
+      $("#clubList").innerHTML = META.clubs.map(([id, name]) => `<option value="${esc(name)} · ${id}"></option>`).join("");
+    }
+    $("#dbLead").textContent = t("db_lead", META.file);
+    if (dbFound) renderDb();
+    const {rows} = await api("card_edits");
+    $("#dbEdited").innerHTML = rows.map(r => `<tr><td>${esc(r.name)}</td><td class="num">${r.spid}</td><td class="num">${r.season}</td>
+      <td class="muted">${esc(r.changed.filter(k => k !== "leagueid").map(fieldName).join(", "))}</td>
+      <td><button class="b small" data-card="${r.spid}">${esc(t("edit"))}</button>
+        <button class="b small danger" data-revert="${r.spid}" data-name="${esc(r.name)}">${esc(t("restore"))}</button></td></tr>`).join("")
+      || `<tr><td colspan="5" class="muted">${esc(t("db_none"))}</td></tr>`;
+    await dbJob();
   },
   async log() {
     const {lines} = await api("log?n=150");
@@ -997,6 +1082,146 @@ $("#assetRows").addEventListener("click", e => {
 });
 $("#assetStop").addEventListener("click", () => act(async () => { await api("assets_stop", {}); await loaders.assets(); }, t("as_stopped")));
 setInterval(() => { if (assetsBusy && !$("#assets").hidden) loaders.assets().catch(() => {}); }, 2000);
+
+/* ---------- Database (issue #38): card editor, club crests, install into the game ---------- */
+let META = null, dbFound = null, cardNow = null, dbBusy = false, crestImg = null;
+const GROUPS = {Pace: "acceleration sprintspeed", Shooting: "finishing shotpower longshots volleys penalties positioning",
+  Passing: "vision crossing freekickaccuracy shortpassing longpassing curve", Dribbling: "agility balance reactions ballcontrol dribbling",
+  Defending: "interceptions headingaccuracy marking standingtackle slidingtackle", Physical: "jumping stamina strength aggression",
+  Goalkeeping: "gkdiving gkhandling gkkicking gkreflexes gkpositioning"};
+const STAT_NAME = {acceleration: "Acceleration", sprintspeed: "Sprint speed", finishing: "Finishing", shotpower: "Shot power",
+  longshots: "Long shots", volleys: "Volleys", penalties: "Penalties", positioning: "Positioning", vision: "Vision", crossing: "Crossing",
+  freekickaccuracy: "Free kick accuracy", shortpassing: "Short passing", longpassing: "Long passing", curve: "Curve", agility: "Agility",
+  balance: "Balance", reactions: "Reactions", ballcontrol: "Ball control", dribbling: "Dribbling", interceptions: "Interceptions",
+  headingaccuracy: "Heading accuracy", marking: "Marking", standingtackle: "Standing tackle", slidingtackle: "Sliding tackle",
+  jumping: "Jumping", stamina: "Stamina", strength: "Strength", aggression: "Aggression", gkdiving: "GK diving", gkhandling: "GK handling",
+  gkkicking: "GK kicking", gkreflexes: "GK reflexes", gkpositioning: "GK positioning"};
+const FIELD_KEY = {teamid: "f_club", trait1: "f_traits", preferredfoot: "f_foot", weakfootabilitytypecode: "f_weak", skillmoves: "f_skill",
+                   attackingworkrate: "f_wr_att", defensiveworkrate: "f_wr_def"};
+const fieldName = k => STAT_NAME[k] || (FIELD_KEY[k] ? t(FIELD_KEY[k]) : k.startsWith("preferredposition") ? t("f_pos_n", k.slice(-1)) : k);
+const clubLabel = id => { const c = META.clubs.find(c => c[0] === id); return c ? `${c[1]} · ${id}` : String(id); };
+const clubId = s => { const m = /(\d+)\s*$/.exec(s || ""); return m ? Number(m[1]) : null; };
+
+const jobState = kind => kind === "install" ? t("db_started") : t("as_running", t("as_" + kind));
+async function dbJob() {  // the install's state and output (the Aset tab's one background job)
+  const a = await api("assets"), mine = a.last === "install";
+  dbBusy = a.running === "install";
+  $("#dbApply").disabled = !!a.running;
+  $("#dbState").textContent = a.running ? jobState(a.running) : mine ? (a.exit === 0 ? t("db_done") : t("db_failed", a.exit)) : "";
+  $("#dbLog").hidden = !mine;
+  if (mine) $("#dbLog").textContent = a.lines.join("\n");
+}
+setInterval(() => { if (dbBusy && !$("#db").hidden) dbJob().catch(() => {}); }, 2000);
+$("#dbApply").addEventListener("click", () => act(async () => { await api("db_install", {}); await dbJob(); }, t("db_started")));
+
+function renderDb() {
+  $("#dbRows").innerHTML = dbFound.map(r => `<tr><td>${esc(r.name)}</td><td class="num">${r.spid}</td><td class="num">${r.season}</td>
+    <td>${r.pos}</td><td class="num">${r.ovr}</td><td><button class="b small" data-card="${r.spid}">${esc(t("edit"))}</button></td></tr>`).join("")
+    || `<tr><td colspan="6" class="muted">${esc(t("no_card"))}</td></tr>`;
+}
+$("#dbForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  try {
+    dbFound = (await api("search?q=" + encodeURIComponent($("#dbQ").value.trim()))).rows;
+    renderDb(); say(t("found", dbFound.length), "");
+  } catch (err) { say(t("search_failed") + err.message, "err"); }
+});
+$("#db").addEventListener("click", e => {
+  const tg = e.target;
+  if (tg.dataset.card) openCard(Number(tg.dataset.card)).catch(err => say(t("load_failed") + err.message, "err"));
+  if (tg.dataset.revert && confirm(t("confirm_restore", tg.dataset.name)))
+    act(async () => { await api("card_revert", {spid: Number(tg.dataset.revert)}); await loaders.db(); }, t("restored", tg.dataset.name));
+});
+
+async function openCard(spid) {
+  cardNow = await api("card?spid=" + spid);
+  const f = cardNow.fields, o = cardNow.orig, R = META.fields;
+  const mark = k => k in o ? ` class="chg" title="${esc(t("orig_value", k === "teamid" ? clubLabel(o[k]) : o[k]))}"` : "";
+  const sel = (k, opts) => `<select data-f="${k}"${mark(k)}>${opts.map(([v, l]) =>
+    `<option value="${v}"${v === f[k] ? " selected" : ""}>${esc(l)}</option>`).join("")}</select>`;
+  const pos = (k, none) => sel(k, [...(none ? [[-1, "-"]] : []), ...META.positions.map((p, i) => [i, p])]);
+  const stars = lo => Array.from({length: 5}, (_, i) => [lo + i, "★".repeat(i + 1)]);
+  const wr = [[1, t("wr_low")], [0, t("wr_med")], [2, t("wr_high")]];
+  const field = (label, html) => `<label class="f"><span>${esc(label)}</span>${html}</label>`;
+  $("#cardTitle").textContent = cardNow.name;
+  $("#cardIds").textContent = `spid ${cardNow.spid}, player id ${cardNow.playerid}, ${t("th_season")} ${cardNow.season}, OVR ${cardNow.ovr}`;
+  $("#cardInfo").innerHTML = field(t("f_club"), `<input data-f="teamid" list="clubList" value="${esc(clubLabel(f.teamid))}"${mark("teamid")}>`)
+    + [1, 2, 3, 4].map(i => field(t("f_pos_n", i), pos("preferredposition" + i, i > 1))).join("")
+    + field(t("f_foot"), sel("preferredfoot", [[1, t("foot_right")], [2, t("foot_left")]]))
+    + field(t("f_weak"), sel("weakfootabilitytypecode", stars(1))) + field(t("f_skill"), sel("skillmoves", stars(0)))
+    + field(t("f_wr_att"), sel("attackingworkrate", wr)) + field(t("f_wr_def"), sel("defensiveworkrate", wr));
+  // a value outside the range (a keeper's -3) stays valid while it is not changed
+  $("#cardStats").innerHTML = Object.entries(GROUPS).map(([g, ks]) => `<fieldset><legend>${g}</legend>${ks.split(" ").map(k =>
+    `<label><span>${STAT_NAME[k]}</span><input type="number" data-f="${k}" value="${f[k]}" min="${Math.min(R[k][0], f[k])}" max="${R[k][1]}"${mark(k)}></label>`).join("")}</fieldset>`).join("");
+  $("#cardTraits").innerHTML = META.traits.map((n, i) =>
+    `<label class="check"><input type="checkbox" data-bit="${i}"${f.trait1 & 2 ** i ? " checked" : ""}> ${esc(n.replace(/-/g, " "))}</label>`).join("");
+  $("#cardTraits").classList.toggle("chg", "trait1" in o);
+  $("#cardRevert").hidden = !Object.keys(o).length;
+  $("#cardErr").textContent = "";
+  $("#cardDlg").showModal();
+}
+function readCard() {
+  const out = {};
+  $$("#cardDlg [data-f]").forEach(el => out[el.dataset.f] = el.dataset.f === "teamid" ? clubId(el.value) : Number(el.value));
+  out.trait1 = $$("#cardTraits [data-bit]").reduce((n, el) => el.checked ? n + 2 ** Number(el.dataset.bit) : n, 0);
+  return out;
+}
+$("#cardForm").addEventListener("submit", async e => {
+  if (e.submitter?.value !== "save") return;
+  e.preventDefault();
+  try {
+    const c = await api("card_set", {spid: cardNow.spid, fields: readCard()});
+    $("#cardDlg").close();
+    await loaders.db();
+    say(t("card_saved", c.name, c.ovr), "ok");
+  } catch (err) { $("#cardErr").textContent = t("failed") + err.message; }
+});
+$("#cardRevert").addEventListener("click", () => {
+  if (!confirm(t("confirm_restore", cardNow.name))) return;
+  $("#cardDlg").close();
+  act(async () => { await api("card_revert", {spid: cardNow.spid}); await loaders.db(); }, t("restored", cardNow.name));
+});
+
+// a club crest: the picture fitted into the cache's 256 and 128 squares (transparent edges), sent as PNGs
+function drawCrest() {
+  for (const c of [$("#crestLarge"), $("#crestSmall")]) {
+    const g = c.getContext("2d");
+    g.clearRect(0, 0, c.width, c.height);
+    if (!crestImg) continue;
+    const k = Math.min(c.width / crestImg.width, c.height / crestImg.height), w = crestImg.width * k, h = crestImg.height * k;
+    g.imageSmoothingQuality = "high";
+    g.drawImage(crestImg, (c.width - w) / 2, (c.height - h) / 2, w, h);
+  }
+}
+async function showCrest() {
+  const id = clubId($("#crestClub").value);
+  $("#crestNow").innerHTML = ""; $("#crestRevert").hidden = true;
+  if (!id) return;
+  const c = await api("crest?teamid=" + id);
+  $("#crestNow").innerHTML = c.has.large ? `<img src="/crest/large/${id}.png?t=${c.updated}" alt="" width="256" height="256">`
+    : `<p class="muted">${esc(t("crest_none"))}</p>`;
+  $("#crestRevert").hidden = !c.custom;
+}
+$("#crestClub").addEventListener("change", () => showCrest().catch(e => say(t("failed") + e.message, "err")));
+$("#crestFile").addEventListener("change", e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  const img = new Image();
+  img.onload = () => { crestImg = img; drawCrest(); };
+  img.onerror = () => say(t("failed") + t("e_crest_png", 256), "err");
+  img.src = URL.createObjectURL(f);
+});
+$("#crestSave").addEventListener("click", () => {
+  const id = clubId($("#crestClub").value);
+  if (!id || !crestImg) return say(t("crest_pick"), "err");
+  const png = c => c.toDataURL("image/png").split(",")[1];
+  act(async () => { await api("crest_set", {teamid: id, large: png($("#crestLarge")), small: png($("#crestSmall"))}); await showCrest(); },
+      t("crest_saved"));
+});
+$("#crestRevert").addEventListener("click", () => {
+  const id = clubId($("#crestClub").value);
+  if (id && confirm(t("crest_confirm"))) act(async () => { await api("crest_revert", {teamid: id}); await showCrest(); }, t("crest_reverted"));
+});
 $("#scoutReset").addEventListener("click", () => act(async () => { await api("scouts_reset", {}); await loaders.scout(); }, t("scouts_ready")));
 $("#logRefresh").addEventListener("click", () => loaders.log());
 setInterval(() => { if ($("#logAuto").checked && !$("#log").hidden) loaders.log(); }, 3000);
