@@ -222,6 +222,10 @@
   管理后台的比赛设置页可以把地区换成印度尼西亚、新加坡/马来西亚、泰国或越南（越南语名称）的城市，或在那里按每行“区域: 城市, 城市”写的自定义地区（例如在 Miền Bắc 加上 Sa Pa）。
 - **登录公告图片**（issue #36）：管理后台的 Pengumuman（公告）页可以为登录时的"公告"弹窗上传 JPG 或 PNG 图片（适配
   800×720 的弹窗，带预览），也可以删除它。
+- **截至本赛季的俱乐部经历**（fifamvp 的 PR #39）：球员信息的特性（Karakteristik）页显示球员卡的俱乐部经历
+  （`features.seasoncare`）。FO3 自带的经历止于 2017 年左右，且只在 22-24 赛季的卡上显示；现在有经历的球员的所有卡都会显示，
+  管理后台的 Aset 页（俱乐部经历，或 `python tools/club_history.py fetch`）从 Wikidata 获取截至当前赛季的经历（年份、
+  俱乐部、租借；FO3 没有名称的俱乐部会在客户端中加上名称）。然后点击“数据库 > 应用到游戏”。
 - **在管理后台下载缺失的图片**（issue #36）：Aset（图片）页会在后台从 fifaaddict.com 下载缺失的球员头像（每张卡的赛季头像和球员头像）、
   俱乐部队徽、联赛标志和教练照片（一次一种；可随时停止、随时继续）。它运行的是 `tools/fa_faces.py`，
   该工具现在也支持 `--leagues`。比赛设置界面的 "Default ball" 会显示 EA SPORTS 的球，小国旗改用大国旗图片，
@@ -337,6 +341,7 @@
 | `tools/fa_sync.py` | 同步 fifaaddict.com 价格。 |
 | `tools/fo4_season.py` | 把 FIFA Online 4 的 26 LIVE 和 25 LIVE 球员卡（fifaaddict 数据，属性按 +0 计）加为两个新赛季，使用 FO4 的赛季徽章：`fetch`、`collect` + `import`、`build`、`install`（就地改写 `data_0.big` 中的条目，因为它的大小不能改变；以追加方式修改 `Label.big` 和 `Module.big`；`restore` 恢复这些文件）。`hud` 只修补 `Module.big`，用于之前已安装赛季的客户端：比赛中的球员名牌以前对所有 2017 和 FO4 球员卡都显示 '17 徽章，现在显示球员卡自己的赛季。`wc18` 为 `build` 读取 2018 世界杯大名单中最好的 300 名球员（futwiz 的 FIFA 18 世界杯评分，维基百科的大名单和俱乐部）：赛季 WC18（代码 78），+1 时卡面评分为世界杯评分 - 5，徽章是与 FO3 自己的世界杯徽章同款绿色的“18”；球队颜色为“2018 WC All-Star”（赛季）和“18 WC <国家>”（各国球员卡），特性取自球员的 FO3 卡和 FIFA 18 卡。 |
 | `tools/fa_faces.py` | 补充客户端缓存中缺少的球员小头像（fifaaddict 提供同样的 128x128 PNG）；`--crests` 补充缺少的俱乐部队徽（大多数俱乐部在缓存中没有，游戏会显示默认队徽）；`--staffs` 补充教练照片（缓存中只有服务器发放的 71 名教练中的 7 张）。可断点续传，`--remove` 撤销。 |
+| `tools/club_history.py` | 球员信息特性页截至当前赛季的俱乐部经历：按出生日期和姓名把 Wikidata 的足球运动员与 FO3 球员对应，其俱乐部（P54：年份、租借；不含国家队和青年队）对应到 EA 球队 ID（FO3 自带经历，其次 TEAMNAMES 名称，否则使用写入 TEAMNAMES 的新 ID），保存到 `gamedata/club_history.json`；`fo4_season.py install` 把它放进客户端。`show 姓名` 显示一名球员的经历。 |
 | `tools/draft_icons.py` | 绘制选秀卡包的商店图标（客户端缓存里没有选秀图片），保存到 `assets/externalAssets/shop/`，服务器优先提供这些图片；`<icon> <tag> <picks>` 可再画一个，用于管理页面创建的卡包。需要 Pillow。 |
 | `tools/re/` | 逆向工程辅助工具：`bigdir.py`（BIg4 归档表）、`refpack.py`（RefPack 编解码）、`eadb.py`（EA "DB" 数据库表）、`abc*.py`（AS3 字节码解析 / 搜索 / 结构挖掘）、`gfxx.py`（界面 SWF）、`memgrab.py`、`dbwin.py`（客户端调试输出）、`relay_emu.py`（PvP 中继数据包编解码和测试中继）、`gamectl.ps1`（测试时操控客户端窗口）。 |
 | `blaze.py`、`server.py`、`test_client.py`、`analyze_capture.py` | 项目第一阶段的 EA Blaze 帧格式（Fire/TDF）和回环测试服务器；后来发现客户端用的是 REST + messenger。 |

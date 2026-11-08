@@ -2394,6 +2394,17 @@ def main():
             a = A("assets_stop")
             assert (a["running"], a["last"], a["lines"]) == (None, "crests", ["stand-in --crests", "stopped"])
             assert set(a["counts"]) == set(admin.ASSET_KINDS) and not os.path.exists(admin.ASSET_STOP)
+            # PR #39 follow-up: the club careers row runs tools/club_history.py fetch; its counts come
+            # from gamedata/club_history.json (players with a career, players not found)
+            careers, admin.CAREER_CMD, admin.CAREERS = (admin.CAREER_CMD, admin.CAREERS), admin.ASSET_CMD + ["fetch"], os.path.join(tmp, "club_history.json")
+            json.dump({"players": {"1": [[73, 2017, -1, 0]], "2": []}, "teams": {}, "missing": 5}, open(admin.CAREERS, "w"))
+            assert A("assets_fetch", kind="careers")["running"] == "careers"
+            a = A("assets_stop")
+            assert a["lines"] == ["stand-in fetch", "stopped"] and a["counts"]["careers"] == {"added": 2, "failed": 5}, a
+            admin.CAREER_CMD, admin.CAREERS = careers
+            sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(admin.__file__)), "tools"))
+            import club_history
+            club_history.cmd_selftest()
         finally:
             admin.ASSET_CMD, admin.ASSET_LOG = cmd, log
         # issue #36 (a user's 1,049 crests all "failed" and a rerun fetched none): only a 404 is final; a
@@ -2431,13 +2442,15 @@ def main():
         # and club crests in a stand-in cache; tools/fo4_season.py build puts the edits back
         import gen_teams, sqlite3, importlib.util
         kept = (gen_teams.DB, admin.CARD_EDITS, admin.CREST_BACKUP, admin.INSTALL_CMD, hc.ASSETS, admin.CUSTOM_SEASONS, admin.SEASON_ICONS,
-                hc.CUSTOM_COLORS, hc.FACES)
+                hc.CUSTOM_COLORS, hc.FACES, admin.ASSET_LOG)
         hc.FACES = os.path.join(tmp, "faces")
+        admin.ASSET_LOG = os.path.join(tmp, "install38.log")  # not the owner's gamedata/assets_fetch.log
         hc.CUSTOM_COLORS = os.path.join(tmp, "teamcolors.json")
         gen_teams.DB = shutil.copyfile(gen_teams.DB, os.path.join(tmp, "fifadb38.sqlite"))
         admin.CARD_EDITS, admin.CREST_BACKUP = os.path.join(tmp, "card_edits.json"), os.path.join(tmp, "crest_backup")
         admin.CUSTOM_SEASONS, admin.SEASON_ICONS = os.path.join(tmp, "seasons.json"), os.path.join(tmp, "season_icons")
-        admin.INSTALL_CMD = [sys.executable, "-c", "import sys; print('stand-in', *sys.argv[1:])"]
+        # the stand-in lives a second, so a second Terapkan while it runs is refused (it was flaky)
+        admin.INSTALL_CMD = [sys.executable, "-c", "import sys, time; print('stand-in', *sys.argv[1:], flush=True); time.sleep(1)"]
         try:
             row = lambda spid: tuple(sqlite3.connect(gen_teams.DB).execute("SELECT * FROM players WHERE spid = ?", (spid,)).fetchone())
             messi, before = 91158023, row(91158023)
@@ -2545,7 +2558,7 @@ def main():
             assert [(c["id"], c["name"]) for c in A("teamcolors")["colors"]] == [(hc.TC_CUSTOM + 1, "Samba"), (hc.TC_CUSTOM + 2, "MSN")]
             # Terapkan ke game: fo4_season.py install in the background, its output on the page
             a = A("db_install")
-            assert a["running"] == "install" and refused("db_install")
+            assert a["running"] == "install" and refused("db_install"), a
             admin.ASSET_JOB["proc"].wait(30)
             a = A("assets")
             assert (a["running"], a["last"], a["exit"], a["lines"]) == (None, "install", 0, [f"stand-in --game {hc.GAME}"])
@@ -2602,7 +2615,7 @@ def main():
             assert A("heads", q="D")["rows"] == []
         finally:
             (gen_teams.DB, admin.CARD_EDITS, admin.CREST_BACKUP, admin.INSTALL_CMD, hc.ASSETS, admin.CUSTOM_SEASONS, admin.SEASON_ICONS,
-             hc.CUSTOM_COLORS, hc.FACES) = kept
+             hc.CUSTOM_COLORS, hc.FACES, admin.ASSET_LOG) = kept
             hc.tc_special_sets.cache_clear(); hc.tc_colors.cache_clear(); hc.vm_theme_keys.cache_clear()
             hc._OVR.clear(); hc._STATS.clear()
         # the game setting screen's "Default ball" (ball 0, "NOT FOUND") shows ball 6's picture, and a

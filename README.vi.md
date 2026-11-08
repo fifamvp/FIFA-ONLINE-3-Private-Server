@@ -277,6 +277,11 @@ Item saya, Gudang bên dưới là tên màn hình trong game, được giữ ng
   "Vùng: thành phố, thành phố" (ví dụ thêm Sa Pa vào Miền Bắc).
 - **Ảnh thông báo lúc đăng nhập** (issue #36): tab Pengumuman (Thông báo) trên trang quản trị tải lên ảnh JPG
   hoặc PNG (chỉnh theo popup 800×720, có xem trước) cho popup Thông báo lúc đăng nhập, hoặc xóa ảnh đó.
+- **Lịch sử CLB đến mùa này** (PR #39 của fifamvp): tab Karakteristik trong thông tin cầu thủ hiện sự nghiệp CLB
+  của thẻ (`features.seasoncare`). Lịch sử gốc của FO3 dừng khoảng 2017 và chỉ hiện ở thẻ mùa 22-24; giờ hiện ở mọi
+  thẻ của cầu thủ có lịch sử, và tab Aset trên trang quản trị (Lịch sử CLB, hoặc `python tools/club_history.py fetch`)
+  lấy sự nghiệp đến mùa hiện tại từ Wikidata (năm, CLB, cho mượn; CLB FO3 chưa có tên sẽ được thêm tên trong client).
+  Sau đó bấm Cơ sở dữ liệu > Áp dụng vào game.
 - **Tải ảnh còn thiếu từ trang quản trị** (issue #36): tab Aset (Hình ảnh) tải ảnh mặt cầu thủ (ảnh mùa của từng thẻ và ảnh
   của cầu thủ), logo CLB, logo
   giải đấu và ảnh staff còn thiếu từ fifaaddict.com ở chế độ nền (mỗi lần một loại; dừng và tải tiếp lúc nào cũng
@@ -410,6 +415,7 @@ Chưa làm: chơi online với người khác (xếp hạng PvP, giao hữu, Kin
 | `tools/fa_sync.py` | Đồng bộ giá từ fifaaddict.com. |
 | `tools/fo4_season.py` | Thêm thẻ 26 LIVE và 25 LIVE của FIFA Online 4 (dữ liệu fifaaddict, chỉ số tính là +0) thành hai mùa mới với biểu tượng mùa của FO4: `fetch`, `collect` + `import`, `build`, `install` (ghi đè các mục trong `data_0.big` tại chỗ vì kích thước tệp không được đổi, và ghi nối thêm vào `Label.big` và `Module.big`; `restore` khôi phục tất cả). `hud` chỉ vá `Module.big`, cho client đã cài mùa giải từ trước: ô tên cầu thủ trong trận trước đây hiện huy hiệu '17 cho mọi thẻ 2017 và FO4, giờ hiện mùa của chính thẻ đó. `wc18` lấy 300 cầu thủ hay nhất trong danh sách đội tuyển World Cup 2018 cho `build` (chỉ số FIFA 18 World Cup của futwiz, danh sách và câu lạc bộ từ Wikipedia): mùa WC18 (mã 78), thẻ ở +1 bằng chỉ số World Cup - 5, với biểu tượng "18" màu xanh lá như biểu tượng World Cup của chính FO3; team color "2018 WC All-Star" (mùa) và "18 WC <quốc gia>" (thẻ của từng quốc gia), đặc tính lấy từ thẻ FO3 và thẻ FIFA 18 của cầu thủ. |
 | `tools/fa_faces.py` | Thêm ảnh mặt nhỏ của cầu thủ còn thiếu trong bộ nhớ đệm của client (fifaaddict có cùng loại PNG 128x128); `--crests` thêm logo CLB còn thiếu (đa số CLB không có trong bộ nhớ đệm nên game hiện logo mặc định); `--staffs` thêm ảnh staff (bộ nhớ đệm chỉ có 7 trong 71 staff máy chủ phát). Chạy tiếp được nếu bị ngắt, `--remove` hoàn tác. |
+| `tools/club_history.py` | Sự nghiệp CLB đến mùa hiện tại cho tab Karakteristik trong thông tin cầu thủ: cầu thủ trên Wikidata được ghép với cầu thủ FO3 theo ngày sinh và tên, các CLB (P54: năm, cho mượn; bỏ đội tuyển và đội trẻ) được ghép với ID đội của EA (lịch sử FO3, rồi tên trong TEAMNAMES, nếu không có thì ID mới có tên trong TEAMNAMES), lưu vào `gamedata/club_history.json`; `fo4_season.py install` đưa vào client. `show TÊN` in lịch sử của một cầu thủ. |
 | `tools/draft_icons.py` | Vẽ biểu tượng Shop cho các gói draft (bộ nhớ đệm của client không có ảnh draft) vào `assets/externalAssets/shop/`, máy chủ gửi các ảnh này trước ảnh của client; `<icon> <tag> <picks>` vẽ thêm một biểu tượng cho gói tạo trên trang admin. Cần Pillow. |
 | `tools/re/` | Công cụ hỗ trợ dịch ngược: `bigdir.py` (bảng lưu trữ BIg4), `refpack.py` (codec RefPack), `eadb.py` (bảng cơ sở dữ liệu "DB" của EA), `abc*.py` (phân tích / tìm kiếm / khai thác cấu trúc bytecode AS3), `gfxx.py` (SWF giao diện), `memgrab.py`, `dbwin.py` (đầu ra debug của client), `relay_emu.py` (bộ mã hóa gói relay PvP và relay thử nghiệm), `gamectl.ps1` (điều khiển cửa sổ client khi kiểm thử). |
 | `blaze.py`, `server.py`, `test_client.py`, `analyze_capture.py` | Khung EA Blaze (Fire/TDF) và máy chủ kiểm thử loopback từ giai đoạn đầu của dự án; sau đó hóa ra client dùng REST + messenger. |

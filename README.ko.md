@@ -244,6 +244,11 @@ Gudang 등은 게임에 표시되는 화면 이름이라, 게임에서 찾기 �
   추가)으로 바꿀 수 있음.
 - **로그인 공지 이미지**(issue #36): 관리자 페이지의 Pengumuman(공지) 탭에서 로그인할 때 뜨는 공지 팝업의 JPG 또는 PNG
   이미지를 올리거나(800×720 팝업에 맞춰지며 미리 보기가 있음) 지울 수 있음.
+- **이번 시즌까지의 클럽 경력**(fifamvp의 PR #39): 선수 정보의 특성(Karakteristik) 탭이 카드의 클럽 경력을
+  보여 줍니다(`features.seasoncare`). FO3 자체 경력은 2017년 무렵에서 끝나고 22-24 시즌 카드에만 나왔지만, 이제
+  경력이 있는 선수의 모든 카드에 나오며, 관리자 페이지 Aset 탭(클럽 경력, 또는 `python tools/club_history.py fetch`)이
+  Wikidata에서 현재 시즌까지의 경력(연도, 클럽, 임대)을 받습니다. FO3에 이름이 없는 클럽은 클라이언트에 이름이
+  추가됩니다. 그다음 데이터베이스 > 게임에 적용을 누르세요.
 - **관리자 페이지에서 없는 이미지 받기**(issue #36): Aset(이미지) 탭이 없는 선수 얼굴(카드마다 시즌 사진과 선수 사진), 구단 엠블럼, 리그 로고, 스태프
   사진을 fifaaddict.com에서 백그라운드로 내려받음(한 번에 한 종류씩, 언제든 멈추고 이어서 받을 수 있음). 이 탭은
   `tools/fa_faces.py`를 실행하며, 이 도구는 이제 `--leagues`도 받음. 경기 설정 화면의 "Default ball"에 EA SPORTS 공이
@@ -365,6 +370,7 @@ EALayer3(6.5 MB, `tools/re/ealayer3.py`)로 넣어도, 원본보다 작은 음�
 | `tools/fa_sync.py` | fifaaddict.com 가격 동기화. |
 | `tools/fo4_season.py` | FIFA Online 4의 26 LIVE·25 LIVE 카드(fifaaddict 데이터, 능력치는 +0 기준)를 FO4 시즌 아이콘과 함께 새 시즌 두 개로 추가: `fetch`, `collect` + `import`, `build`, `install`(`data_0.big`은 크기가 바뀌면 안 되므로 그 자리에 다시 쓰고 `Label.big`과 `Module.big`은 끝에 덧붙여 수정, `restore`로 모두 원본 복구). `hud`는 시즌을 먼저 설치한 클라이언트용으로 `Module.big`만 패치함: 경기 중 선수 이름 상자가 2017·FO4 카드 모두에 '17 배지를 보였으나 이제 카드 자신의 시즌을 보임. `wc18`은 `build`용으로 2018 월드컵 엔트리 상위 300명을 읽음(futwiz의 FIFA 18 월드컵 능력치, 위키백과의 엔트리와 소속 클럽): 시즌 WC18(코드 78), +1 카드의 OVR은 월드컵 능력치 - 5, FO3 자체 월드컵 아이콘과 같은 초록색 "18" 아이콘. 팀 컬러 "2018 WC All-Star"(시즌)와 "18 WC <국가>"(국가별 카드), 특성은 선수의 FO3 카드와 FIFA 18 카드에서 가져옴. |
 | `tools/fa_faces.py` | 클라이언트 캐시에 없는 선수 미니 얼굴 추가(fifaaddict가 같은 128x128 PNG 제공). `--crests`는 없는 구단 엠블럼 추가(대부분의 구단이 캐시에 없어 게임이 기본 엠블럼을 보여 줌). `--staffs`는 스태프 사진 추가(캐시에는 서버가 주는 71명 중 7명만 있음). 중단 후 이어서 실행 가능, `--remove`로 되돌림. |
+| `tools/club_history.py` | 선수 정보 특성 탭의 현재 시즌까지 클럽 경력: Wikidata의 축구 선수를 생년월일과 이름으로 FO3 선수와 맞추고, 그 클럽(P54: 연도, 임대, 국가대표·유소년팀 제외)을 EA 팀 ID로 연결합니다(FO3 자체 경력, TEAMNAMES 이름, 없으면 TEAMNAMES에 이름을 넣은 새 ID). 결과는 `gamedata/club_history.json`, `fo4_season.py install`이 클라이언트에 넣습니다. `show 이름`은 선수의 경력을 출력합니다. |
 | `tools/draft_icons.py` | 드래프트 팩의 상점 아이콘을 `assets/externalAssets/shop/`에 그림(클라이언트 캐시에 드래프트 이미지가 없음). 서버는 이 이미지를 클라이언트 이미지보다 먼저 제공. `<icon> <tag> <picks>`로 관리자 페이지에서 만든 팩용 아이콘을 하나 더 그림. Pillow 필요. |
 | `tools/re/` | 리버스 엔지니어링 도구: `bigdir.py`(BIg4 아카이브 표), `refpack.py`(RefPack 코덱), `eadb.py`(EA "DB" 데이터베이스 표), `abc*.py`(AS3 바이트코드 파서 / 검색 / 구조 추출), `gfxx.py`(UI SWF), `memgrab.py`, `dbwin.py`(클라이언트 디버그 출력), `relay_emu.py`(PvP 릴레이 패킷 코덱과 테스트 릴레이), `gamectl.ps1`(테스트용 클라이언트 창 조작). |
 | `blaze.py`, `server.py`, `test_client.py`, `analyze_capture.py` | 프로젝트 초기 단계의 EA Blaze 프레이밍(Fire/TDF)과 루프백 테스트 서버. 나중에 클라이언트가 REST + messenger를 쓰는 것으로 밝혀짐. |

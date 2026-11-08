@@ -282,6 +282,11 @@ Added, passing the tests but not yet checked in the client:
   city" line per region (e.g. Sa Pa added to Miền Bắc).
 - **Login notice image** (issue #36): the admin page's Pengumuman tab uploads a JPG or PNG (fitted
   to the 800×720 popup, with a preview) for the Notice popup at login, or deletes it.
+- **Club careers up to this season** (PR #39 by fifamvp): the player info's Karakteristik tab shows a card's
+  club career (`features.seasoncare`). FO3's own careers end around 2017 and only cards of seasons 22-24
+  showed one; now every card of a player with a career does, and the admin page's Aset tab (Club careers,
+  or `python tools/club_history.py fetch`) fetches the careers up to the running season from Wikidata
+  (years, clubs, loans; a club FO3 has no name for gets one in the client). Then press Database > Apply to the game.
 - **Missing pictures from the admin page** (issue #36): the Aset tab downloads the missing player
   faces (each card's season picture and the player's), club crests, league logos and staff pictures
   from fifaaddict.com in the background (one
@@ -422,6 +427,7 @@ Not done: online play against other people (ranked PvP, friendly, King of the Hi
 | `tools/fa_sync.py` | fifaaddict.com price sync. |
 | `tools/fo4_season.py` | Adds FIFA Online 4's 26 LIVE and 25 LIVE cards (fifaaddict data, stats as +0) as two new seasons with FO4's season badges: `fetch`, `collect` + `import`, `build`, `install` (rewrites entries of `data_0.big` in place, as its size must not change, and appends to `Label.big` and `Module.big`; `restore` puts them back). `hud` patches only `Module.big`, for a client installed before it: a match's player name boxes showed the '17 badge on every 2017 and FO4 card, now each card's own. `wc18` reads the 2018 World Cup's best 300 squad players for `build` (futwiz's FIFA 18 World Cup ratings, Wikipedia's squads and clubs): season WC18 (code 78), a card at +1 showing its World Cup rating - 5, with an "18" badge in the green of FO3's own World Cup ones; team colors "2018 WC All-Star" (the season) and "18 WC <nation>" (each nation's cards), Karakteristik from the player's FO3 card and his FIFA 18 card. |
 | `tools/fa_faces.py` | Adds the player mini faces missing from the client's cache (fifaaddict serves the same 128x128 PNGs); `--crests` adds the missing club crests (most clubs have none in the cache, so the game shows a default one); `--staffs` adds the staff pictures (the cache has 7 of the 71 the server hands out). Resumable, `--remove` undoes it. |
+| `tools/club_history.py` | Club careers up to the running season for the player info's Karakteristik tab: Wikidata's footballers matched to FO3's players by birth date and name, their clubs (P54: years, loans; no national or youth teams) mapped to EA team ids (FO3's own history, then the TEAMNAMES names, else a new id named in TEAMNAMES), into `gamedata/club_history.json`; `fo4_season.py install` puts them in the client. `show NAME` prints a player's rows. |
 | `tools/draft_icons.py` | Draws the draft packs' Shop icons (the client's cache has no draft pictures) into `assets/externalAssets/shop/`, which the server serves before the client's own images; `<icon> <tag> <picks>` draws one more, for a pack made on the admin page. Needs Pillow. |
 | `tools/re/` | Reverse-engineering helpers: `bigdir.py` (BIg4 archive tables), `refpack.py` (RefPack codec), `eadb.py` (EA "DB" database tables), `abc*.py` (AS3 bytecode parser / grep / schema miner), `gfxx.py` (UI SWFs), `memgrab.py`, `dbwin.py` (the client's debug output), `relay_emu.py` (PvP relay packet codec and test relay), `gamectl.ps1` (drive the client window for tests). |
 | `blaze.py`, `server.py`, `test_client.py`, `analyze_capture.py` | EA Blaze framing (Fire/TDF) and a loopback test server from the first phase of the project; the client turned out to use REST + the messenger instead. |

@@ -1376,13 +1376,22 @@ def client_db():
     """gamedata/fifadb.sqlite as the client gets it. Its packed DB has to fit the shipped one's
     place in data_0.big (with the engine DB too, see cmd_install), so the names of players
     without a card (half of each names table; the client reads names from its <lang>.db
-    anyway) are left out. Every card of a player with a club career (table playerhistory) shows
+    anyway) are left out, and so are the other regions' card permissions: the client only reads
+    perm<Localization.REGION> (TransferUtil's Market search), and the launcher always starts it
+    with region id (3.4 MB less). Every card of a player with a club career (table playerhistory) shows
     it: the player info's Karakteristik tab lists it for cards with historyopen = 1 once
     features.seasoncare is on (PR #39), and the shipped DB opens it on seasons 22-24 only.
-    0 and 1 take no bytes in a SQLite record, so the DB stays its size."""
+    The careers come from tools/club_history.py's gamedata/club_history.json (up to the running
+    season) where it has the player, else from FO3's own table (up to 2017)."""
+    import club_history
+
     def edit(c):
         for t in NAME_TABLES:
             c.execute(f"DELETE FROM {t} WHERE playerid NOT IN (SELECT playerid FROM players)")
+        for t in PERM_TABLES:
+            if t != "permid":
+                c.execute(f"DELETE FROM {t}")
+        club_history.apply(c)
         c.execute("UPDATE players SET historyopen = 1 WHERE playerid IN (SELECT playerid FROM playerhistory)")
     return _sqlite(open(FIFADB, "rb").read(), edit)
 
@@ -1630,11 +1639,13 @@ def cmd_install(a):
     gfx, dds = label_with_icons(gfx, dds, icons)
     bigdir.patch(label, {LABEL_GFX: gfx, LABEL_DDS: (refpack(dds), len(dds))})
     _patch_module(module)
+    import club_history
+    clubs = club_history.install_names(a.game)  # the club careers' clubs FO3 has no name for
     # check what the client will read
     for entry, plain_db in want.items():
         assert bytes(decrypt(bigdir.read(data0, entry))[16:]) == plain_db[16:], entry
     assert os.path.getsize(data0) == os.path.getsize(os.path.join(BACKUP, "data_0.big"))
-    print(f"installed into {a.game}: {len(names)} new names, season icons "
+    print(f"installed into {a.game}: {len(names)} new names, {clubs} new club names, season icons "
           f"{', '.join(SEASON_NAMES[s] for s in sorted(icons))}")
 
 
@@ -1661,6 +1672,10 @@ def cmd_restore(a):
     if not os.path.isfile(os.path.join(BACKUP, "data_0.big")):
         raise SystemExit("nothing to restore (no backup/fo4season)")
     _originals(a.game)
+    for lang in LOCALES:  # the TEAMNAMES install added club names to
+        big = os.path.join(a.game, "data", "ui", "localization", f"{lang}.big")
+        if os.path.isfile(os.path.join(BACKUP, os.path.basename(big))):
+            _original(big)
     c = sqlite3.connect(FIFADB)
     seasons = (*CLASSES.values(), WC18)
     for t in ("players", *PERM_TABLES):
@@ -1689,11 +1704,13 @@ def cmd_selftest(a=None):
         print(f"Style rules match {hit}/{len(rows)} 2017 cards exactly")
         tmp = os.path.join(tempfile.gettempdir(), "fo4_season_selftest.sqlite")
         open(tmp, "wb").write(client_db())
-        with closing(sqlite3.connect(tmp)) as c:  # club careers on every season (Messi '17 and 22)
-            got = dict(c.execute("SELECT spid, historyopen FROM players WHERE spid IN (88158023, 22158023, 88000028)"))
-            closed = c.execute("SELECT COUNT(*) FROM players WHERE historyopen = 0 AND playerid IN (SELECT playerid FROM playerhistory)").fetchone()[0]
+        with closing(sqlite3.connect(tmp)) as c:  # club careers on every season (Messi '17 and 22), one region's perms
+            got = dict(c.execute("SELECT spid, historyopen FROM players WHERE spid IN (88158023, 22158023)"))
+            wrong = c.execute("SELECT COUNT(*) FROM players WHERE historyopen != (playerid IN (SELECT playerid FROM playerhistory))").fetchone()[0]
+            perms = {t: c.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] > 0 for t in PERM_TABLES}
         os.remove(tmp)
-        assert got == {88158023: 1, 22158023: 1, 88000028: 0} and closed == 0, (got, closed)
+        assert got == {88158023: 1, 22158023: 1} and wrong == 0, (got, wrong)
+        assert perms == {t: t == "permid" for t in PERM_TABLES}, perms
     px = [(0, 230, 100, 255)] * 8 + [(60, 64, 70, 255)] * 7 + [(0, 0, 0, 0)]
     b = _bc3(px)
     assert len(b) == 16 and b[0] == 255 and b[1] == 0
