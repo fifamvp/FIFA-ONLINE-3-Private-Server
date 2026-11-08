@@ -1387,21 +1387,93 @@ NG_ENTRY, NG_META = "data/db/fifa_ng_db.db", "data/db/fifa_ng_db-meta.xml"
 ENGINE_COPY = ("height", "weight", "nationality", "preferredfoot")
 
 
-def engine_db(db, meta):
-    """fifa_ng_db (EA DB, tools/re/eadb.py) with a players row for every new player. The 3D
-    player (club creation's player view, matches) looks a card up there by spid, then by player
-    id ('17 cards have only their player id's row); a player with neither crashed the client.
-    The row is a copy of the 2017 player whose generic head build gave him (fo4_heads.json),
-    with his own id, height, weight, nationality and foot; rows stay sorted by player id."""
-    import struct, eadb
-    heads = {int(k): v for k, v in json.load(open(HEADS)).items()}
+def ng_players(db, meta):
+    """(Table, {field: (shortname, rangelow)}, {playerid: row}, table index, raw tables, base) of
+    the engine DB's players table (a stored value is the field's value - rangelow)."""
+    import eadb
     m = re.search(r'<table name="players" shortname="(\w+)".*?</table>', meta, re.S)
     fld = {n: (sn, int(lo)) for n, sn, lo in re.findall(r'<field name="(\w+)" shortname="(\w+)"[^>]*rangelow="(-?\d+)"', m.group())}
     base, names, raws = eadb.db_tables(db)
     i = names.index(m.group(1).encode())
     t = eadb.Table(raws[i])
+    return t, fld, {t.get(r, fld["playerid"][0]): r for r in t.rows}, i, raws, base
+
+
+# The admin page's seasons (issue #38): {code: {"name", "cards": {spid: {"from": the card it was
+# copied from, "boost": what it added to every stat}}}}, each with its badge in SEASON_ICONS/<code>.png. A season code is at most 99: the engine DB's
+# playerid / spid fields go to 99,999,999, so a card of season 300 or 325 has no row of its own.
+CUSTOM_SEASONS = os.path.join(ROOT, "gamedata", "seasons.json")
+SEASON_ICONS = os.path.join(ROOT, "gamedata", "season_icons")
+NG_MAX = 99999999
+# a card's look (card_edits.json "look"): "face" = the engine row whose head it wears (FACE fields
+# copied), the LOOK fields set as given
+FACE = ("headassetid", "headtypecode", "headclasscode", "hashighqualityhead", "headscalecode", "skintonecode",
+        "skintypecode", "eyecolorcode", "eyebrowcode")
+LOOK = ("hairtypecode", "haircolorcode", "facialhairtypecode", "facialhaircolorcode", "skintonecode", "eyecolorcode",
+        "bodytypecode")
+
+
+def custom_seasons():
+    try:
+        with open(CUSTOM_SEASONS) as f:
+            return {int(k): v for k, v in json.load(f).items()}
+    except (OSError, ValueError):
+        return {}
+
+
+def card_looks(t, fld, by):
+    """The admin page's rows in the engine DB: a card of one of its seasons gets a copy of the
+    row of the card it was copied from (so it looks the same), and a card's look edits go on its
+    own row (made from its player's row when it has none; a card over NG_MAX: on his player's
+    row, which every card of his without a row of its own wears). Returns how many rows."""
+    def put(row, name, v):
+        sn, lo = fld[name]
+        return t.set(row, sn, v - lo) if 0 <= v - lo < 1 << t.fields[sn][2] else row
+
+    def own(key, src):
+        if key not in by:
+            base = by.get(src, by.get(src % 1000000))
+            if base is None:
+                return False
+            by[key] = put(put(base, "playerid", key), "spid", key)
+        return True
+    n = 0
+    for s in custom_seasons().values():
+        for spid, src in s.get("cards", {}).items():
+            n += int(spid) not in by and int(spid) <= NG_MAX and own(int(spid), int(src["from"]))
+    try:
+        with open(CARD_EDITS) as f:
+            edits = json.load(f)
+    except (OSError, ValueError):
+        edits = {}
+    for spid, e in edits.items():
+        look, spid = e.get("look"), int(spid)
+        key = spid if spid <= NG_MAX else spid % 1000000
+        if not look or not own(key, spid % 1000000):
+            continue
+        row, face = by[key], by.get(look.get("face"))
+        for name in FACE if face is not None else ():
+            ty, bo, dep = t.fields[fld[name][0]]
+            row = t.set(row, fld[name][0], int.from_bytes(face, "little") >> bo & (1 << dep) - 1)  # raw bits (a float too)
+        for name in LOOK:
+            if name in look:
+                row = put(row, name, int(look[name]))
+        by[key] = row
+        n += 1
+    return n
+
+
+def engine_db(db, meta):
+    """fifa_ng_db (EA DB, tools/re/eadb.py) with a players row for every new player. The 3D
+    player (club creation's player view, matches) looks a card up there by spid, then by player
+    id ('17 cards have only their player id's row); a player with neither crashed the client.
+    The row is a copy of the 2017 player whose generic head build gave him (fo4_heads.json),
+    with his own id, height, weight, nationality and foot; rows stay sorted by player id. Then
+    the admin page's rows (card_looks)."""
+    import struct, eadb
+    heads = {int(k): v for k, v in json.load(open(HEADS)).items()}
+    t, fld, by, i, raws, base = ng_players(db, meta)
     pk = fld["playerid"][0]
-    by = {t.get(r, pk): r for r in t.rows}
     generic = next(r for r in t.rows if t.get(r, fld["headclasscode"][0]) == 1)
     with closing(sqlite3.connect(FIFADB)) as c:
         c.row_factory = sqlite3.Row
@@ -1415,6 +1487,7 @@ def engine_db(db, meta):
             if 0 <= v < 1 << t.fields[sn][2]:
                 row = t.set(row, sn, v)
         by[pid] = row
+    looks = card_looks(t, fld, by)
     t.rows = [by[k] for k in sorted(by)]
     raws[i] = t.raw()
     out, pos = bytearray(db[:base]), 0  # table offsets, sizes and checksums (as tools/eatrax_song.py)
@@ -1424,7 +1497,7 @@ def engine_db(db, meta):
     struct.pack_into("<I", out, base - 4, eadb.crc(out[0x18:base - 4]))
     struct.pack_into("<I", out, 8, base + pos)
     struct.pack_into("<I", out, 0x14, eadb.crc(out[:0x14]))
-    return bytes(out) + b"".join(raws), len(mine)
+    return bytes(out) + b"".join(raws), len(mine), looks
 
 
 def locale_additions():
@@ -1466,7 +1539,8 @@ def _seasons_built():
 
 def _icons(gfx, dds):
     """{season: RGBA PIL image} of FO4's season badges (downloaded once to gamedata/fo4_icons) and,
-    once built, WC18's (wc18_icon, from the shipped Label.big's gfx and dds)."""
+    once built, WC18's (wc18_icon, from the shipped Label.big's gfx and dds), and the admin page's
+    seasons that have cards (SEASON_ICONS)."""
     from PIL import Image
     d = os.path.join(ROOT, "gamedata", "fo4_icons")
     os.makedirs(d, exist_ok=True)
@@ -1482,6 +1556,13 @@ def _icons(gfx, dds):
             req = urllib.request.Request(meta[season], headers={"User-Agent": "Mozilla/5.0"})
             open(f, "wb").write(urllib.request.urlopen(req, timeout=60).read())
         out[season] = Image.open(f).convert("RGBA")
+    with closing(sqlite3.connect(FIFADB)) as c:  # the admin page's seasons that have cards
+        for code, s in custom_seasons().items():
+            f = os.path.join(SEASON_ICONS, f"{code}.png")
+            if os.path.isfile(f) and c.execute("SELECT 1 FROM players WHERE spid BETWEEN ? AND ? LIMIT 1",
+                                               (code * 1000000, code * 1000000 + 999999)).fetchone():
+                out[code] = Image.open(f).convert("RGBA")
+                SEASON_NAMES.setdefault(code, s["name"])
     return out
 
 
@@ -1526,7 +1607,7 @@ def cmd_install(a):
               + (" (cardless names left out)" if trim else ""), flush=True)
         files[entry], want[entry] = (packed, usize), plain_db
     # the engine DB: its own slot if it still fits, else the space fifadb left free in its slot
-    ng, n_new = engine_db(bigdir.read(data0, NG_ENTRY), bigdir.read(data0, NG_META).decode("utf-8", "replace"))
+    ng, n_new, n_looks = engine_db(bigdir.read(data0, NG_ENTRY), bigdir.read(data0, NG_META).decode("utf-8", "replace"))
     packed = refpack(ng)
     assert len(packed) < len(ng)  # stored or literal-only DB entries hang the boot (eatrax_song.py)
     at = {}
@@ -1535,7 +1616,7 @@ def cmd_install(a):
         at[NG_ENTRY] = -(-(off + len(files[FIFADB_ENTRY][0])) // 0x800) * 0x800
         if at[NG_ENTRY] + len(packed) > off + room[FIFADB_ENTRY]:
             raise SystemExit(f"{NG_ENTRY}: {len(packed)} bytes fit neither its slot nor fifadb's free space")
-    print(f"{NG_ENTRY}: {n_new} new players, {len(packed) / 1e6:.2f} MB"
+    print(f"{NG_ENTRY}: {n_new} new players, {n_looks} admin page rows, {len(packed) / 1e6:.2f} MB"
           + (" (in fifadb's slot)" if at else f", slot {room[NG_ENTRY] / 1e6:.2f} MB"), flush=True)
     files[NG_ENTRY] = (packed, len(ng))
     bigdir.patch(data0, files, in_place=True, at=at)

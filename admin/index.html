@@ -134,6 +134,7 @@
   .crests figure { margin: 0; }
   .crests figcaption { margin-bottom: 4px; color: var(--mute); font-size: 13px; }
   .crests img, .crests canvas { display: block; background: #11181f; border: 1px solid var(--line); }
+  .badge-prev, img.badge { width: 48px; height: 48px; object-fit: contain; background: #11181f; border: 1px solid var(--line); }
 
   @media (max-width: 760px) {
     .shell { grid-template-columns: 1fr; }
@@ -388,6 +389,8 @@
       <form class="row" id="dbForm">
         <label class="f"><span data-i18n="db_q"></span><input class="wide" id="dbQ" minlength="2" data-i18n-ph="ph_messi" required></label>
         <button class="b primary" data-i18n="search"></button>
+        <label class="f" id="copyBox" hidden><span data-i18n="sn_copy_to"></span><select id="copySeason"></select></label>
+        <label class="f" id="copyBoostBox" hidden><span data-i18n="f_boost_stats"></span><input type="number" id="copyBoost" min="-50" max="50" value="0"></label>
       </form>
       <div class="table-wrap"><table>
         <thead><tr><th data-i18n="th_name"></th><th class="num">spid</th><th class="num" data-i18n="th_season"></th><th data-i18n="th_pos"></th><th class="num">OVR</th><th></th></tr></thead>
@@ -398,6 +401,25 @@
         <thead><tr><th data-i18n="th_name"></th><th class="num">spid</th><th class="num" data-i18n="th_season"></th><th data-i18n="th_changed"></th><th></th></tr></thead>
         <tbody id="dbEdited"></tbody>
       </table></div>
+      <h3 data-i18n="sn_title"></h3>
+      <p class="lead" id="snLead"></p>
+      <div class="table-wrap"><table>
+        <thead><tr><th class="num" data-i18n="f_season_code"></th><th data-i18n="th_badge"></th><th data-i18n="f_name"></th><th class="num" data-i18n="th_cards"></th><th></th></tr></thead>
+        <tbody id="snRows"></tbody>
+      </table></div>
+      <div class="row">
+        <label class="f"><span data-i18n="f_season_code"></span><select id="snCode"></select></label>
+        <label class="f"><span data-i18n="f_name"></span><input id="snName" maxlength="20"></label>
+        <label class="f"><span data-i18n="sn_badge"></span><input type="file" id="snIcon" accept="image/png,image/jpeg"></label>
+        <canvas id="snCanvas" width="128" height="128" class="badge-prev"></canvas>
+        <button class="b primary" id="snSave" data-i18n="sn_save"></button>
+      </div>
+      <h3 data-i18n="mod_title"></h3>
+      <p class="lead" data-i18n="mod_lead"></p>
+      <div class="row">
+        <button class="b" id="modExport" data-i18n="mod_export"></button>
+        <label class="f"><span data-i18n="mod_import"></span><input type="file" id="modFile" accept="application/json,.json"></label>
+      </div>
       <h3 data-i18n="crest_title"></h3>
       <p class="lead" data-i18n="crest_lead"></p>
       <div class="row">
@@ -468,6 +490,9 @@
       <div class="statgrid" id="cardStats"></div>
       <h3 data-i18n="f_traits"></h3>
       <div class="seasons traits" id="cardTraits"></div>
+      <h3 data-i18n="f_look"></h3>
+      <p class="muted" id="cardLookNote"></p>
+      <div class="grid2" id="cardLook"></div>
     </div>
     <div class="foot">
       <span class="err" id="cardErr" role="alert"></span>
@@ -654,6 +679,7 @@ const loaders = {
       <td><button class="b small" data-card="${r.spid}">${esc(t("edit"))}</button>
         <button class="b small danger" data-revert="${r.spid}" data-name="${esc(r.name)}">${esc(t("restore"))}</button></td></tr>`).join("")
       || `<tr><td colspan="5" class="muted">${esc(t("db_none"))}</td></tr>`;
+    await loadSeasons();
     await dbJob();
   },
   async log() {
@@ -1096,7 +1122,7 @@ const STAT_NAME = {acceleration: "Acceleration", sprintspeed: "Sprint speed", fi
   headingaccuracy: "Heading accuracy", marking: "Marking", standingtackle: "Standing tackle", slidingtackle: "Sliding tackle",
   jumping: "Jumping", stamina: "Stamina", strength: "Strength", aggression: "Aggression", gkdiving: "GK diving", gkhandling: "GK handling",
   gkkicking: "GK kicking", gkreflexes: "GK reflexes", gkpositioning: "GK positioning"};
-const FIELD_KEY = {teamid: "f_club", trait1: "f_traits", preferredfoot: "f_foot", weakfootabilitytypecode: "f_weak", skillmoves: "f_skill",
+const FIELD_KEY = {teamid: "f_club", trait1: "f_traits", look: "f_look", preferredfoot: "f_foot", weakfootabilitytypecode: "f_weak", skillmoves: "f_skill",
                    attackingworkrate: "f_wr_att", defensiveworkrate: "f_wr_def"};
 const fieldName = k => STAT_NAME[k] || (FIELD_KEY[k] ? t(FIELD_KEY[k]) : k.startsWith("preferredposition") ? t("f_pos_n", k.slice(-1)) : k);
 const clubLabel = id => { const c = META.clubs.find(c => c[0] === id); return c ? `${c[1]} · ${id}` : String(id); };
@@ -1115,10 +1141,107 @@ setInterval(() => { if (dbBusy && !$("#db").hidden) dbJob().catch(() => {}); }, 
 $("#dbApply").addEventListener("click", () => act(async () => { await api("db_install", {}); await dbJob(); }, t("db_started")));
 
 function renderDb() {
+  const own = new Set(SEASONS.map(s => s.code));
   $("#dbRows").innerHTML = dbFound.map(r => `<tr><td>${esc(r.name)}</td><td class="num">${r.spid}</td><td class="num">${r.season}</td>
-    <td>${r.pos}</td><td class="num">${r.ovr}</td><td><button class="b small" data-card="${r.spid}">${esc(t("edit"))}</button></td></tr>`).join("")
+    <td>${r.pos}</td><td class="num">${r.ovr}</td><td><button class="b small" data-card="${r.spid}">${esc(t("edit"))}</button>
+      ${SEASONS.length ? `<button class="b small" data-copy="${r.spid}" data-name="${esc(r.name)}">${esc(t("sn_copy"))}</button>` : ""}
+      ${own.has(r.season) ? `<button class="b small danger" data-drop="${r.spid}" data-name="${esc(r.name)}">${esc(t("sn_remove"))}</button>` : ""}</td></tr>`).join("")
     || `<tr><td colspan="6" class="muted">${esc(t("no_card"))}</td></tr>`;
 }
+
+// the page's own seasons: a code, a name and a badge; cards are copied into one from the search
+let SEASONS = [], snImg = null;
+async function loadSeasons() {
+  const d = await api("seasons");
+  SEASONS = d.seasons;
+  $("#snLead").textContent = t("sn_lead", d.file);
+  $("#snRows").innerHTML = SEASONS.map(s => `<tr><td class="num">${s.code}</td>
+    <td>${s.icon ? `<img class="badge" src="/season_icon/${s.code}.png?t=${Date.now()}" alt="">` : ""}</td><td>${esc(s.name)}</td>
+    <td class="num">${fmt(s.cards)}</td><td><button class="b small danger" data-sndel="${s.code}" data-name="${esc(s.name)}" data-cards="${s.cards}">${esc(t("sn_delete"))}</button></td></tr>`).join("")
+    || `<tr><td colspan="5" class="muted">${esc(t("sn_none"))}</td></tr>`;
+  const pick = $("#snCode").value;
+  $("#snCode").innerHTML = [...SEASONS.map(s => [s.code, `${s.code} · ${s.name}`]), ...d.free.map(c => [c, `${c} · ${t("src_new")}`])]
+    .map(([v, l]) => `<option value="${v}">${esc(l)}</option>`).join("");
+  if (pick) $("#snCode").value = pick;
+  $("#snName").value = SEASONS.find(s => s.code === Number($("#snCode").value))?.name ?? "";
+  $("#copySeason").innerHTML = SEASONS.map(s => `<option value="${s.code}">${s.code} · ${esc(s.name)}</option>`).join("");
+  $("#copyBox").hidden = $("#copyBoostBox").hidden = !SEASONS.length;
+  if (dbFound) renderDb();
+}
+function drawBadge() {
+  const c = $("#snCanvas"), g = c.getContext("2d");
+  g.clearRect(0, 0, c.width, c.height);
+  if (!snImg) return;
+  const k = Math.min(c.width / snImg.width, c.height / snImg.height), w = snImg.width * k, h = snImg.height * k;
+  g.imageSmoothingQuality = "high";
+  g.drawImage(snImg, (c.width - w) / 2, (c.height - h) / 2, w, h);
+}
+$("#snIcon").addEventListener("change", e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  const img = new Image();
+  img.onload = () => { snImg = img; drawBadge(); };
+  img.onerror = () => say(t("failed") + t("e_season_icon"), "err");
+  img.src = URL.createObjectURL(f);
+});
+$("#snSave").addEventListener("click", () => {
+  const code = Number($("#snCode").value), name = $("#snName").value.trim();
+  const isNew = !SEASONS.some(s => s.code === code);
+  if (isNew && !snImg) return say(t("sn_pick_badge"), "err");
+  act(async () => {
+    await api("season_set", {code, name, icon: snImg ? $("#snCanvas").toDataURL("image/png").split(",")[1] : null});
+    snImg = null; drawBadge(); $("#snIcon").value = "";
+    await loadSeasons();
+  }, t("sn_saved", name));
+});
+$("#snCode").addEventListener("change", () => {
+  const s = SEASONS.find(s => s.code === Number($("#snCode").value));
+  $("#snName").value = s ? s.name : "";
+});
+$("#snRows").addEventListener("click", e => {
+  const tg = e.target;
+  if (tg.dataset.sndel && confirm(t("sn_confirm_delete", tg.dataset.name, tg.dataset.cards)))
+    act(async () => { await api("season_delete", {code: Number(tg.dataset.sndel)}); await loaders.db(); }, t("sn_deleted", tg.dataset.name));
+});
+$("#dbRows").addEventListener("click", e => {
+  const tg = e.target;
+  if (tg.dataset.copy) {
+    const code = Number($("#copySeason").value), season = SEASONS.find(s => s.code === code);
+    act(async () => {
+      const c = await api("season_card_add", {code, spid: Number(tg.dataset.copy), boost: Number($("#copyBoost").value) || 0});
+      await loaders.db();
+      say(t("sn_copied", tg.dataset.name, season.name, c.spid), "ok");
+    });
+  }
+  if (tg.dataset.drop && confirm(t("confirm_card_remove", tg.dataset.name, tg.dataset.drop)))
+    act(async () => {
+      await api("season_card_remove", {spid: Number(tg.dataset.drop)});
+      dbFound = dbFound.filter(r => r.spid !== Number(tg.dataset.drop));
+      await loaders.db();
+    }, t("sn_removed", tg.dataset.drop));
+});
+
+// mods: every season, copied card and edit of this tab in one JSON file, for another server
+$("#modExport").addEventListener("click", () => act(async () => {
+  const m = await api("mod_export");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(m, null, 1)], {type: "application/json"}));
+  a.download = "fo3id-mod.json";
+  a.click();
+  URL.revokeObjectURL(a.href);
+}));
+$("#modFile").addEventListener("change", e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  act(async () => {
+    let mod;
+    try { mod = JSON.parse(await f.text()); } catch (err) { throw new Error(t("e_mod")); }
+    const r = await api("mod_import", {mod});
+    e.target.value = "";
+    await loaders.db();
+    say(t("mod_imported", r.done, r.failed.length) + (r.failed.length ? ": " + r.failed.join(", ") : ""), r.failed.length ? "err" : "ok");
+  });
+});
 $("#dbForm").addEventListener("submit", async e => {
   e.preventDefault();
   try {
@@ -1156,7 +1279,16 @@ async function openCard(spid) {
   $("#cardTraits").innerHTML = META.traits.map((n, i) =>
     `<label class="check"><input type="checkbox" data-bit="${i}"${f.trait1 & 2 ** i ? " checked" : ""}> ${esc(n.replace(/-/g, " "))}</label>`).join("");
   $("#cardTraits").classList.toggle("chg", "trait1" in o);
-  $("#cardRevert").hidden = !Object.keys(o).length;
+  // the 3D look (engine DB): a head from one of the player's rows, hair, beard, skin, eyes, body
+  const L = cardNow.look, le = cardNow.look_edit;
+  $("#cardLookNote").textContent = !L ? t("e_no_engine")
+    : [t("look_lead"), t(L.fields.headclasscode === 1 ? "look_generic" : "look_scan"), L.shared ? t("look_shared") : ""].join(" ");
+  // a head from any engine row (the player's own ones listed; another player's or a generic one typed)
+  $("#cardLook").innerHTML = !L ? "" : field(t("f_face"), `<input data-look="face" list="faceList" value="${le.face ?? L.row}"${"face" in le ? ' class="chg"' : ""}>
+      <datalist id="faceList">${L.faces.map(([k, head]) => `<option value="${k}">${k === L.row ? esc(t("look_own")) : ""}${head !== k ? ` head ${head}` : ""}</option>`).join("")}</datalist>`)
+    + META.look.map(k => field(t("l_" + k), `<input type="number" data-look="${k}" value="${le[k] ?? L.fields[k]}" min="${L.ranges[k][0]}" max="${L.ranges[k][1]}"${
+      k in le ? ` class="chg" title="${esc(t("orig_value", L.fields[k]))}"` : ""}>`)).join("");
+  $("#cardRevert").hidden = !Object.keys(o).length && !Object.keys(le).length;
   $("#cardErr").textContent = "";
   $("#cardDlg").showModal();
 }
@@ -1166,11 +1298,12 @@ function readCard() {
   out.trait1 = $$("#cardTraits [data-bit]").reduce((n, el) => el.checked ? n + 2 ** Number(el.dataset.bit) : n, 0);
   return out;
 }
+const readLook = () => Object.fromEntries($$("#cardLook [data-look]").map(el => [el.dataset.look, Number(el.value)]));
 $("#cardForm").addEventListener("submit", async e => {
   if (e.submitter?.value !== "save") return;
   e.preventDefault();
   try {
-    const c = await api("card_set", {spid: cardNow.spid, fields: readCard()});
+    const c = await api("card_set", {spid: cardNow.spid, fields: readCard(), ...(cardNow.look ? {look: readLook()} : {})});
     $("#cardDlg").close();
     await loaders.db();
     say(t("card_saved", c.name, c.ovr), "ok");

@@ -254,11 +254,14 @@ Gudang 등은 게임에 표시되는 화면 이름이라, 게임에서 찾기 �
   없이 열림.
 - **관리자 페이지의 카드와 클럽 데이터베이스**(issue #38): 데이터베이스 탭에서 선수 카드를 시즌별로 한 장씩
   수정(spid = 시즌 × 1,000,000 + 선수 ID; 이름, spid 또는 선수 ID로 검색): 능력치 33개, 포지션, 주발과 약발,
-  개인기, 공수 가담, 특성, 클럽(이적). 변경 사항은 `gamedata/fifadb.sqlite`와 `gamedata/card_edits.json`에
-  저장(원래 값과 새 값: Kembalikan으로 되돌리고, `tools/fo4_season.py build`가 다시 만드는 카드에 다시 적용).
-  게임은 자체 DB 사본을 읽음: 게임을 닫고 Terapkan ke game(백그라운드에서 `tools/fo4_season.py install` 실행)을
-  누른 뒤 `play.bat` 실행. 이 탭은 클라이언트 캐시의 클럽 엠블럼도 바꿈(두 크기, 원본은 `gamedata/crest_backup`).
-  카드별 얼굴, 헤어, 유니폼과 새 클럽은 아직 없음.
+  개인기, 공수 가담, 특성, 클럽(이적), 3D 외형(아무 3D 행의 머리, 예: 다른 카드의 얼굴; 일반형 머리에서는 헤어
+  모델과 색, 수염, 피부, 눈, 체형, 머리색 0 = 금발; 스캔 머리는 자체 헤어 유지). 직접 만든 시즌: 코드, 이름,
+  배지로 만들고 다른 카드의 복사본으로 채움(모든 능력치 +N 가능), 시즌마다 Top 200 팩과 팀 컬러. 카드 수정은
+  `gamedata/fifadb.sqlite`와 `gamedata/card_edits.json`(원래 값과 새 값: Kembalikan으로 되돌리고
+  `tools/fo4_season.py build`가 다시 적용), 시즌은 `gamedata/seasons.json`에 저장; Ekspor / Impor mod로 전부를
+  JSON 파일 하나로 다른 서버에 옮김. 게임은 자체 DB 사본을 읽음: 게임을 닫고 Terapkan ke game(백그라운드에서
+  `tools/fo4_season.py install` 실행)을 누른 뒤 `play.bat` 실행. 이 탭은 클라이언트 캐시의 클럽 엠블럼도 바꿈(원본은
+  `gamedata/crest_backup`). 유니폼과 새 클럽은 아직 없음.
 - **스태프**(Tim > Manajemen Staff): FO3 스태프 시스템이 다시 작동함. *Rekrut*(영입): EP로 사는 스태프 팩(Basic
   FW / MF / DF / GK / ALL, Pro, Premium, 기술 이사, Premium Medical)과 매일 로그인하면 무료 ALL 팩 하나, 3경기를
   하면 하나 더. *Staff yang dimiliki*(보유 스태프): 역할 칸 7개(FW, MF, DF, 수석 코치, GK, 피지컬 코치, 기술 이사);

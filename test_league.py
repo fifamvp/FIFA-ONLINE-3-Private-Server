@@ -2330,9 +2330,10 @@ def main():
         # issue #38: the Database tab edits cards in a copy of fifadb (the real one stays as it is)
         # and club crests in a stand-in cache; tools/fo4_season.py build puts the edits back
         import gen_teams, sqlite3, importlib.util
-        kept = (gen_teams.DB, admin.CARD_EDITS, admin.CREST_BACKUP, admin.INSTALL_CMD, hc.ASSETS)
+        kept = (gen_teams.DB, admin.CARD_EDITS, admin.CREST_BACKUP, admin.INSTALL_CMD, hc.ASSETS, admin.CUSTOM_SEASONS, admin.SEASON_ICONS)
         gen_teams.DB = shutil.copyfile(gen_teams.DB, os.path.join(tmp, "fifadb38.sqlite"))
         admin.CARD_EDITS, admin.CREST_BACKUP = os.path.join(tmp, "card_edits.json"), os.path.join(tmp, "crest_backup")
+        admin.CUSTOM_SEASONS, admin.SEASON_ICONS = os.path.join(tmp, "seasons.json"), os.path.join(tmp, "season_icons")
         admin.INSTALL_CMD = [sys.executable, "-c", "import sys; print('stand-in', *sys.argv[1:])"]
         try:
             row = lambda spid: tuple(sqlite3.connect(gen_teams.DB).execute("SELECT * FROM players WHERE spid = ?", (spid,)).fetchone())
@@ -2370,6 +2371,49 @@ def main():
             assert row(messi) == before  # not rebuilt: left alone (not committed either)
             assert json.load(open(admin.CARD_EDITS))[str(live["spid"])]["orig"] == {"finishing": live["finishing"]}
             db.rollback(); db.close(); os.remove(admin.CARD_EDITS)
+            # a card's 3D look (engine DB row): another of the player's heads, hair; install makes the row
+            look = A("card", spid=messi)["look"]
+            assert look["row"] == messi and not look["shared"] and [40158023, 158023] in look["faces"]
+            assert A("card", spid=300158023)["look"]["shared"]  # 26 LIVE: no row of its own, his player's
+            yamal = A("card", spid=300700000)["look"]  # a new player: the generic head install copies for him
+            assert yamal["shared"] and yamal["fields"]["headclasscode"] == 1 and yamal["faces"] == [[yamal["row"], yamal["fields"]["headassetid"]]]
+            assert refused("card_set", spid=messi, look={"face": 424242}) and refused("card_set", spid=messi, look={"haircolorcode": 99})
+            c = A("card_set", spid=messi, look={"face": 40158023, "haircolorcode": 1, "hairtypecode": look["fields"]["hairtypecode"]})
+            assert c["look_edit"] == {"face": 40158023, "haircolorcode": 1} and A("card_edits")["rows"][0]["changed"] == ["look"]
+            # own seasons: a free code, a name and a badge; cards are copies (+ boost) with their perms
+            icon = base64.b64encode(png(64, 64)).decode()
+            def season(**p):  # refused() takes "name" itself
+                try:
+                    return admin.API["season_set"](p)
+                except admin.AdminError:
+                    return None
+            assert season(code=91, name="Taken", icon=icon) is None and season(code=50, name="No badge") is None
+            assert season(code=50, name="Admin 25", icon=icon)["seasons"] == [{"code": 50, "name": "Admin 25", "cards": 0, "icon": True}]
+            c = A("season_card_add", code=50, spid=messi, boost=5)
+            assert (c["spid"], c["season"], c["custom"], c["ovr"]) == (50158023, 50, True, A("card", spid=messi)["ovr"] + 5)
+            assert c["fields"]["finishing"] == A("card", spid=messi)["fields"]["finishing"] + 5
+            assert c["look"]["row"] == messi and refused("season_card_add", code=50, spid=messi) and refused("season_card_add", code=52, spid=messi)
+            assert sqlite3.connect(gen_teams.DB).execute("SELECT transferable FROM permid WHERE spid = 50158023").fetchone() == (1,)
+            # install's engine rows: the season card wears its source card's row, the edited card its look
+            fo4.CUSTOM_SEASONS = admin.CUSTOM_SEASONS
+            t, fld, shipped, _ = admin.engine_rows()
+            by = dict(shipped)
+            assert fo4.card_looks(t, fld, by) == 2
+            get = lambda k, f, rows=by: t.get(rows[k], fld[f][0]) + fld[f][1]
+            assert [get(50158023, f) for f in ("playerid", "spid", "headassetid")] == [50158023, 50158023, get(messi, "headassetid", shipped)]
+            assert get(messi, "haircolorcode") == 1
+            assert get(messi, "headassetid") == get(40158023, "headassetid")
+            # a mod file: every own season, copied card and edit, made again on an empty server
+            mod = A("mod_export")
+            assert set(mod["seasons"]) == {"50"} and mod["seasons"]["50"]["cards"] == {"50158023": {"from": messi, "boost": 5}}
+            assert A("season_delete", code=50)["seasons"] == [] and not os.path.exists(admin.season_icon(50))
+            assert not sqlite3.connect(gen_teams.DB).execute("SELECT 1 FROM players WHERE spid / 1000000 = 50").fetchone()
+            A("card_revert", spid=messi)
+            assert A("mod_import", mod=mod) == {"done": 2, "failed": []}
+            assert A("card", spid=50158023)["ovr"] == c["ovr"] and A("card", spid=messi)["look_edit"]["face"] == 40158023
+            assert refused("mod_import", mod={"something": "else"})
+            A("season_card_remove", spid=50158023); A("season_delete", code=50); A("card_revert", spid=messi)
+            assert row(messi) == before and A("card_edits")["rows"] == []
             # Terapkan ke game: fo4_season.py install in the background, its output on the page
             a = A("db_install")
             assert a["running"] == "install" and refused("db_install")
@@ -2392,7 +2436,7 @@ def main():
             assert not c["custom"] and c["has"] == {"large": True, "small": False}
             assert open(crest("large"), "rb").read() == b"the cache's own crest"
         finally:
-            gen_teams.DB, admin.CARD_EDITS, admin.CREST_BACKUP, admin.INSTALL_CMD, hc.ASSETS = kept
+            gen_teams.DB, admin.CARD_EDITS, admin.CREST_BACKUP, admin.INSTALL_CMD, hc.ASSETS, admin.CUSTOM_SEASONS, admin.SEASON_ICONS = kept
             hc._OVR.clear(); hc._STATS.clear()
         # the game setting screen's "Default ball" (ball 0, "NOT FOUND") shows ball 6's picture, and a
         # small flag (none cached) is the nation's big one

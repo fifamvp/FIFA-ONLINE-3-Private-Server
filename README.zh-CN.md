@@ -231,11 +231,14 @@
   从列表邀请好友（虚拟经理，会带着自己选的俱乐部加入并立即准备），然后按 Siap，用两家俱乐部的真实阵容比赛。
   每天 5 场；你的球员卡不会从这些比赛获得 EXP。Live Center 打开时不再出现那两个 UI 错误。
 - **管理后台的球员卡与俱乐部数据库**（issue #38）：Database 页按赛季逐张编辑球员卡（spid = 赛季 × 1,000,000 +
-  球员 ID；可按名字、spid 或球员 ID 搜索）：33 项属性、位置、惯用脚和逆足、花式技巧、攻防积极性、特性和俱乐部（转会）。
-  修改写入 `gamedata/fifadb.sqlite` 和 `gamedata/card_edits.json`（原值和新值：Kembalikan 可恢复，
-  `tools/fo4_season.py build` 会对重建的卡重新应用）。游戏读取自己的数据库副本：关闭游戏，点击 Terapkan ke game
-  （在后台运行 `tools/fo4_season.py install`），然后运行 `play.bat`。该页还能替换客户端缓存中的俱乐部队徽（两种尺寸，
-  原队徽保存在 `gamedata/crest_backup`）。按卡修改脸型、发型和球衣，以及新增俱乐部，还没有做。
+  球员 ID；可按名字、spid 或球员 ID 搜索）：33 项属性、位置、惯用脚和逆足、花式技巧、攻防积极性、特性、俱乐部（转会）
+  和 3D 外观（任意 3D 行的头部，例如另一张卡的脸；通用头部可改发型和发色、胡须、肤色、眼睛和体型，发色 0 = 金发；
+  扫描头部保留自己的头发）。自建赛季：代码、名称和徽章，用其他卡的复制品填充（可给所有属性 +N），每个赛季都有自己的
+  Top 200 卡包和团队色。球员卡修改写入 `gamedata/fifadb.sqlite` 和 `gamedata/card_edits.json`（原值和新值：Kembalikan
+  可恢复，`tools/fo4_season.py build` 会重新应用），赛季写入 `gamedata/seasons.json`；Ekspor / Impor mod 用一个 JSON
+  文件把这些全部搬到另一台服务器。游戏读取自己的数据库副本：关闭游戏，点击 Terapkan ke game（在后台运行
+  `tools/fo4_season.py install`），然后运行 `play.bat`。该页还能替换客户端缓存中的俱乐部队徽（原队徽保存在
+  `gamedata/crest_backup`）。球衣和新俱乐部还没有做。
 - **教练团队（Staff）**（Tim > Manajemen Staff）：FO3 的教练系统重新启用。*Rekrut*（招募）：用 EP 购买教练包
   （Basic FW / MF / DF / GK / ALL、Pro、Premium、技术总监、Premium 体能），每天登录可免费领取一个 ALL 包，再踢
   3 场比赛可再领一个。*Staff yang dimiliki*（已有教练）：7 个职位框（FW、MF、DF、主教练、GK、体能教练、技术总监）；

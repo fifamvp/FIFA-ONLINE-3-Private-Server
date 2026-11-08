@@ -293,13 +293,17 @@ Added, passing the tests but not yet checked in the client:
   EXP from them. The Live Center opens without its two old UI errors.
 - **Card and club database on the admin page** (issue #38): the Database tab edits one card of a player
   per season (spid = season × 1,000,000 + player id; search by name, spid or player id): the 33
-  attributes, positions, preferred and weak foot, skill moves, work rates, traits and club (a
-  transfer). Edits go into `gamedata/fifadb.sqlite` and `gamedata/card_edits.json` (original and new
-  values: Kembalikan restores a card, and `tools/fo4_season.py build` puts the edits back on the cards it
-  rebuilds). The game reads its own copy of the DB: close it, press Terapkan ke game (runs
-  `tools/fo4_season.py install` in the background), then start `play.bat`. The tab also replaces a club's
-  crest in the client's cache (both sizes, the original kept in `gamedata/crest_backup`). Faces, hair and
-  kits per card, and new clubs, are not done.
+  attributes, positions, preferred and weak foot, skill moves, work rates, traits, club (a transfer) and
+  its 3D look (the head of any 3D row, e.g. another card's face; hair model and colour, beard, skin, eyes
+  and body on a generic head, hair colour 0 being blonde; a scanned head keeps its own hair). Own
+  seasons: a code, a name and a badge, filled with copies of other cards (+N to every stat if you like),
+  each with its own Top 200 pack and team color. Card edits go into `gamedata/fifadb.sqlite` and
+  `gamedata/card_edits.json` (original and new values: Kembalikan restores a card, and
+  `tools/fo4_season.py build` puts the edits back), seasons into `gamedata/seasons.json`; Ekspor / Impor
+  mod moves all of it to another server in one JSON file. The game reads its own copy of the DB: close
+  it, press Terapkan ke game (runs `tools/fo4_season.py install` in the background), then start
+  `play.bat`. The tab also replaces a club's crest in the client's cache (the original kept in
+  `gamedata/crest_backup`). Kits and new clubs are not done.
 - **Staff** (Tim > Manajemen Staff): FO3's staff system works again. *Rekrut*: staff packs for EP
   (Basic FW / MF / DF / GK / ALL, Pro, Premium, Technical Director, Premium Medical) and, each day, a
   free ALL pack for logging in and another for playing 3 matches. *Staff yang dimiliki*: 7 role frames

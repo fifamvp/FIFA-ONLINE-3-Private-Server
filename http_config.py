@@ -4419,6 +4419,14 @@ FA_SEASONS = (
     # empty until it is installed)
     ("26 LIVE", (300,), 45011), ("25 LIVE", (325,), 45013), ("WC18", (78,), 880047),
 )
+# the admin page's own seasons (issue #38: gamedata/seasons.json, tools/fo4_season.py install adds
+# their badges): a Top 200 pack and a season color each, from the next start
+CUSTOM_SEASONS = os.path.join(HERE, "gamedata", "seasons.json")
+try:
+    with open(CUSTOM_SEASONS, encoding="utf-8") as _f:
+        FA_SEASONS += tuple((s["name"], (int(code),), 45011) for code, s in sorted(json.load(_f).items(), key=lambda kv: int(kv[0])))
+except (OSError, ValueError, KeyError):
+    pass
 # each one the season's 200 best cards (user: "all session pack  top 50 ganti menjadi top 200")
 PACKS.update({92000000 + codes[0]: (f"{label} Top 200", {"seasons": codes, "icon": icon, "top": 200, "all": True})
               for label, codes, icon in FA_SEASONS})
