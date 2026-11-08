@@ -328,6 +328,13 @@
         <label class="f"><span data-i18n="pm_ball"></span><select id="pmBall"></select></label>
         <button class="b primary" id="pmSave" data-i18n="save"></button>
       </div>
+      <h3 data-i18n="koth_title"></h3>
+      <p class="lead" data-i18n="koth_lead"></p>
+      <div class="row">
+        <label class="f"><span data-i18n="koth_regions"></span><select id="kothSet"></select></label>
+        <button class="b primary" id="kothSave" data-i18n="save"></button>
+      </div>
+      <p class="muted" id="kothList"></p>
     </section>
 
     <section id="economy" hidden>
@@ -650,6 +657,9 @@ const loaders = {
     $("#pmWeather").innerHTML = opts([[0, t("pm_dry")], [1, t("pm_rain")], [2, t("pm_snow")], [3, t("pm_overcast")], ["random", t("pm_random")]], d.weather);
     $("#pmLength").innerHTML = opts(d.halfLengths.map(h => [h, t("pm_minutes", h / 5)]), d.halfLength);
     $("#pmBall").innerHTML = opts(d.balls.map(b => [b.id, b.name]), d.ball);
+    KOTH = await api("koth");
+    $("#kothSet").innerHTML = opts(Object.keys(KOTH.sets).map(k => [k, t("koth_" + k)]), KOTH.set);
+    kothList();
   },
   async economy() {
     const d = await api("economy");
@@ -1081,6 +1091,14 @@ $("#ecoSave").addEventListener("click", () => act(async () => {
   await api("economy_set", ecoRead());
   await loaders.economy();
 }, t("eco_saved")));
+// King of the Hill's region set: its regions and cities shown under the picker
+let KOTH = null;
+const kothList = () => { $("#kothList").textContent = KOTH.sets[$("#kothSet").value].map(([r, cities]) => `${r}: ${cities.join(", ")}`).join(" · "); };
+$("#kothSet").addEventListener("change", kothList);
+$("#kothSave").addEventListener("click", () => act(async () => {
+  KOTH = await api("koth_set", {set: $("#kothSet").value});
+  kothList();
+}, t("koth_saved")));
 $("#pmSave").addEventListener("click", () => act(async () => {
   const v = sel => { const x = $(sel).value; return /^\d+$/.test(x) ? Number(x) : x; };
   await api("prematch_set", {stadium: v("#pmStadium"), tod: v("#pmTod"), weather: v("#pmWeather"),

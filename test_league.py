@@ -1836,6 +1836,24 @@ def main():
             st = hc._state(); rw = st["match"]["reward"]
             assert koth()["elo"] > elo0 == rw["preveloinfo"]["elo"] and rw["eloinfo"]["elo"] == koth()["elo"] and koth()["wins"] == 1
             assert hc.my_ladder(st) == lad0 and hc.my_coach(st)["multiplay"][-1]["type"] == "Regional_League"
+            # the admin page's region set (Vietnam here): its tree, its cities only, my Indonesian
+            # region is none now, the crowd spreads over its cities
+            kept_koth, hc.KOTH_FILE = hc.KOTH_FILE, os.path.join(tmp, "koth.json")
+            try:
+                assert hc.koth_set() == "id" and all(hc.koth_leaves(k) and len(hc.koth_leaves(k)) >= 18 for k in hc.KOTH_SETS)
+                json.dump({"regions": "vn"}, open(hc.KOTH_FILE, "w"))
+                vn = body(hc.ENDPOINTS["/esports2/region/seasons/presently"]("", b""))["regiongrouptrees"][cur["regiongroup"]["id"]]
+                assert set(vn) == {m for _, m, _ in hc.KOTH_SETS["vn"]} and "Miền Bắc" in vn and "Hà Nội" in vn["Miền Bắc"]["children"]
+                assert "regionid" not in koth() and koth()["seasonid"] == ""
+                assert not body(hc.ENDPOINTS["/esports2/region/register"]("", json.dumps({"regiongroupid": leaf["id"]}).encode()))["result"]
+                assert body(hc.ENDPOINTS["/esports2/region/register"]("", json.dumps({"regiongroupid": "3101"}).encode()))["result"]
+                assert koth()["regionname"] == {"name": "Hà Nội", "parent": "Miền Bắc"}
+                counts = body(hc.route(f"/esports2/region/register/{cur['_id']}")("", b""))["registeredplayer"]
+                assert set(counts) == set(hc.koth_leaves("vn")) and all(counts.values())
+                assert {hc.vm_region(m["_id"]) for m in hc.virtual_managers()} == set(hc.koth_leaves("vn"))
+            finally:
+                hc.KOTH_FILE = kept_koth
+            assert body(hc.ENDPOINTS["/esports2/region/register"]("", json.dumps({"regiongroupid": leaf["id"]}).encode()))["result"]
             # Exhibition (Live Center): plays a day; a room on licensed clubs (my side's club changed by
             # the room's team picker); an invited manager joins with a club of his own; my Ready plays
             # Exhibition_PvP, each side its club's own squad; a squad change goes to that club; my
@@ -1893,6 +1911,13 @@ def main():
         # the Rank opponents' chat: on/off and language (gamedata/vm_chat.json)
         assert A("vm_chat")["enabled"] and A("vm_chat")["lang"] == "id" and refused("vm_chat_set", enabled=True, lang="xx")
         assert A("vm_chat_set", enabled=False, lang="vi") == hc.vm_chat_cfg() == {"enabled": False, "lang": "vi"}
+        # King of the Hill's region set (issue #36): Indonesia, Singapore / Malaysia, Thailand, Vietnam
+        kept_koth, hc.KOTH_FILE = hc.KOTH_FILE, os.path.join(tmp, "koth_admin.json")
+        try:
+            assert A("koth")["set"] == "id" and set(A("koth")["sets"]) == {"id", "sgmy", "th", "vn"} and refused("koth_set", set="xx")
+            assert A("koth_set", set="th")["set"] == hc.koth_set() == "th"
+        finally:
+            hc.KOTH_FILE = kept_koth
         # issue #33, Info Manager: the record tab draws once /coach/me has createdat, playtime, career and
         # statistics with every object it reads (one missing stopped it at "-")
         me = hc.coach_me(hc._state(), 0)

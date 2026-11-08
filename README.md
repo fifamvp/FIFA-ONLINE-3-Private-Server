@@ -277,6 +277,8 @@ Added, passing the tests but not yet checked in the client:
   of 19 Indonesian regions; its leaderboard holds that region's virtual managers, and Mulai plays
   one of them near your King of the Hill rating. The reward screen shows the points won or lost. No
   weekly or season reward items yet.
+  The admin page's Match settings tab switches the regions to the cities of Indonesia, Singapore /
+  Malaysia, Thailand or Vietnam (Vietnamese names).
 - **Login notice image** (issue #36): the admin page's Pengumuman tab uploads a JPG or PNG (fitted
   to the 800×720 popup, with a preview) for the Notice popup at login, or deletes it.
 - **Missing pictures from the admin page** (issue #36): the Aset tab downloads the missing player

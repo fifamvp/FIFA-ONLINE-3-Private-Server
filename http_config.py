@@ -8410,13 +8410,55 @@ KOTH_REGIONS = (("1", "Sumatera", (("101", "Medan"), ("102", "Padang"), ("103", 
                 ("4", "Sulawesi", (("401", "Makassar"), ("402", "Manado"))),
                 ("5", "Bali Nusra", (("501", "Denpasar"), ("502", "Mataram"))),
                 ("6", "Maluku Papua", (("601", "Ambon"), ("602", "Jayapura"))))
-KOTH_LEAVES = {sid: (name, mid, mname) for mid, mname, subs in KOTH_REGIONS for sid, name in subs}
+# Region sets (user: "admin panel bisa ubah nama region ke wilayah indo, SG/Malay, Thai dan vietnam";
+# issue #36 asked for Vietnamese names): the admin page picks one (KOTH_FILE {"regions": key}). Each
+# set has its own ids, so after a switch my region is none (the main screen asks for one again) and
+# the virtual managers spread over the new set's cities. Names are keys of the region pickers: unique.
+KOTH_SETS = {
+    "id": KOTH_REGIONS,
+    "sgmy": (("11", "Singapore", (("1101", "Jurong"), ("1102", "Woodlands"), ("1103", "Tampines"), ("1104", "Ang Mo Kio"))),
+             ("12", "Utara", (("1201", "George Town"), ("1202", "Alor Setar"), ("1203", "Ipoh"))),
+             ("13", "Lembah Klang", (("1301", "Kuala Lumpur"), ("1302", "Shah Alam"), ("1303", "Petaling Jaya"))),
+             ("14", "Selatan", (("1401", "Seremban"), ("1402", "Melaka"), ("1403", "Johor Bahru"))),
+             ("15", "Pantai Timur", (("1501", "Kota Bharu"), ("1502", "Kuala Terengganu"), ("1503", "Kuantan"))),
+             ("16", "Sabah Sarawak", (("1601", "Kota Kinabalu"), ("1602", "Kuching"), ("1603", "Miri")))),
+    "th": (("21", "Greater Bangkok", (("2101", "Bangkok"), ("2102", "Nonthaburi"), ("2103", "Samut Prakan"))),
+           ("22", "Central", (("2201", "Ayutthaya"), ("2202", "Nakhon Pathom"))),
+           ("23", "North", (("2301", "Chiang Mai"), ("2302", "Chiang Rai"), ("2303", "Phitsanulok"))),
+           ("24", "Northeast", (("2401", "Khon Kaen"), ("2402", "Nakhon Ratchasima"), ("2403", "Udon Thani"),
+                                ("2404", "Ubon Ratchathani"))),
+           ("25", "East", (("2501", "Chonburi"), ("2502", "Pattaya"), ("2503", "Rayong"))),
+           ("26", "South", (("2601", "Phuket"), ("2602", "Hat Yai"), ("2603", "Surat Thani")))),
+    "vn": (("31", "Miền Bắc", (("3101", "Hà Nội"), ("3102", "Hải Phòng"), ("3103", "Quảng Ninh"), ("3104", "Bắc Ninh"))),
+           ("32", "Miền Trung", (("3201", "Đà Nẵng"), ("3202", "Huế"), ("3203", "Vinh"), ("3204", "Nha Trang"))),
+           ("33", "Tây Nguyên", (("3301", "Buôn Ma Thuột"), ("3302", "Pleiku"), ("3303", "Đà Lạt"))),
+           ("34", "Đông Nam Bộ", (("3401", "TP. Hồ Chí Minh"), ("3402", "Biên Hòa"), ("3403", "Thủ Dầu Một"),
+                                  ("3404", "Vũng Tàu"))),
+           ("35", "Tây Nam Bộ", (("3501", "Cần Thơ"), ("3502", "Long Xuyên"), ("3503", "Rạch Giá")))),
+}
+KOTH_FILE = os.path.join(HERE, "gamedata", "koth.json")
 KOTH_GOALS = {"weekly_winning_reward_condition": 10, "weekly_match_reward_condition": 20,
               "weekly_grade_reward_condition": 20, "season_grade_reward_condition": 50}  # the head tab's gauges
 
 
-def vm_region(vid):
-    return random.Random("region" + vid).choice(sorted(KOTH_LEAVES))
+def koth_set():
+    """The region set in use (a KOTH_SETS key)."""
+    try:
+        with open(KOTH_FILE, encoding="utf-8") as f:
+            key = json.load(f).get("regions")
+    except (OSError, ValueError, AttributeError):
+        key = None
+    return key if key in KOTH_SETS else "id"
+
+
+@functools.lru_cache(maxsize=None)
+def koth_leaves(key):
+    """{city id: (name, major id, major name)} of a region set."""
+    return {sid: (name, mid, mname) for mid, mname, subs in KOTH_SETS[key] for sid, name in subs}
+
+
+def vm_region(vid, key=None):
+    return random.Random("region" + vid).choice(sorted(koth_leaves(key or koth_set())))
 
 
 def koth_season(sid):
@@ -8444,7 +8486,7 @@ def ep_koth_presently(query, body):
     nxt = sid + 1 if sid % 100 < 12 else sid + 89
     # keyed by name: the region pickers list the keys (RegionalLeagueProxy.mainRegionList / subRegionList)
     tree = {mname: {"id": mid, "name": mname, "rewardgroupid": 1,
-                    "children": {n: {"id": s, "name": n, "parent": mname} for s, n in subs}} for mid, mname, subs in KOTH_REGIONS}
+                    "children": {n: {"id": s, "name": n, "parent": mname} for s, n in subs}} for mid, mname, subs in KOTH_SETS[koth_set()]}
     return _json({"seasons": [koth_season(sid), koth_season(nxt)], "regiongrouptrees": {KOTH_GROUP: tree}, "prev": []})
 
 
@@ -8464,9 +8506,10 @@ def my_koth(st, coach=None):
 def koth_board(st, region):
     """[(elo, wins, losses, id, name)] of a region (a major one: all of its own), best first: its
     virtual managers, and me."""
-    within = lambda leaf: leaf == region or (KOTH_LEAVES.get(leaf) or (0, 0))[1] == region
+    key = koth_set()
+    within = lambda leaf: leaf == region or (koth_leaves(key).get(leaf) or (0, 0))[1] == region
     rows = [(m["elo"][KOTH_LADDER], m["wins"][KOTH_LADDER], m["losses"][KOTH_LADDER], m["_id"], m["name"])
-            for m in virtual_managers() if within(vm_region(m["_id"]))]
+            for m in virtual_managers() if within(vm_region(m["_id"], key))]
     r, coach = my_koth(st), my_coach(st)
     if within(r.get("regionid")):
         rows.append((r["elo"], r["wins"], r["losses"], coach["_id"], coach["name"]))
@@ -8477,12 +8520,13 @@ def koth_statistics(st, coach):
     r = my_koth(st, coach)
     # seasonid only once a region is picked: the main screen shows its "pick a region" panel while
     # the season is not mine (isCurrentSeasonRegistered), and Mulai Laga needs regionid too
-    out = {"seasonid": str(r["sid"]) if r.get("regionid") in KOTH_LEAVES else "", "introid": r.get("introid", ""),
+    leaves = koth_leaves(koth_set())
+    out = {"seasonid": str(r["sid"]) if r.get("regionid") in leaves else "", "introid": r.get("introid", ""),
            "elo": r["elo"], "wins": r["wins"],
            "losses": r["losses"], "forfeits": 0, "midwins": r["weekwins"], "midmatches": r["weekgames"],
            "rank": 0, "rewarded": True, "midrewarded": []}
-    if r.get("regionid") in KOTH_LEAVES:
-        name, _, parent = KOTH_LEAVES[r["regionid"]]
+    if r.get("regionid") in leaves:
+        name, _, parent = leaves[r["regionid"]]
         out.update(regionid=r["regionid"], regionname={"name": name, "parent": parent})
         if coach is my_coach(st):
             out["rank"] = next(k for k, x in enumerate(koth_board(st, r["regionid"]), 1) if x[3] == coach["_id"])
@@ -8491,17 +8535,18 @@ def koth_statistics(st, coach):
 
 def ep_koth_register_counts(sid, query, body):
     """GET /esports2/region/register/<season>: players per region (the region picker shows them)."""
-    count = collections.Counter(vm_region(m["_id"]) for m in virtual_managers())
+    key = koth_set()
+    count = collections.Counter(vm_region(m["_id"], key) for m in virtual_managers())
     r = my_koth(_state())
     if r.get("regionid"):
         count[r["regionid"]] += 1
-    return _json({"result": True, "registeredplayer": {k: count[k] for k in KOTH_LEAVES}})
+    return _json({"result": True, "registeredplayer": {k: count[k] for k in koth_leaves(key)}})
 
 
 def ep_koth_register(query, body):
     """POST /esports2/region/register {regiongroupid}: my region for the season (and after)."""
     region = str(json.loads(body or b"{}").get("regiongroupid") or "")
-    if region not in KOTH_LEAVES:
+    if region not in koth_leaves(koth_set()):
         return _json({"result": False, "reason": "Esports_Grassroot_RegionSelect_Fail"})
     st = _state()
     my_koth(st)["regionid"] = region
@@ -8524,7 +8569,8 @@ def ep_koth_leaderboard(region, query, body):
 def koth_opponent(st):
     """One of the five managers of my region nearest my KOTH rating (anyone if the region has none)."""
     r = my_koth(st)
-    pool = [m for m in virtual_managers() if vm_region(m["_id"]) == r.get("regionid")] or virtual_managers()
+    key = koth_set()
+    pool = [m for m in virtual_managers() if vm_region(m["_id"], key) == r.get("regionid")] or virtual_managers()
     return random.choice(sorted(pool, key=lambda m: abs(m["elo"][KOTH_LADDER] - r["elo"]))[:5])
 
 

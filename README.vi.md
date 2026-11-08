@@ -272,6 +272,8 @@ Item saya, Gudang bên dưới là tên màn hình trong game, được giữ ng
   Indonesia; bảng xếp hạng của vùng đó gồm các HLV ảo trong vùng, và Mulai cho bạn đá với một người trong số họ
   có rating gần với rating King of the Hill của bạn. Màn hình phần thưởng hiện số điểm được hoặc mất. Chưa có vật
   phẩm thưởng tuần hay thưởng mùa.
+  Tab Cài đặt trận đấu trên trang quản trị đổi khu vực sang các thành phố của Indonesia, Singapore /
+  Malaysia, Thái Lan hoặc Việt Nam (tên tiếng Việt).
 - **Ảnh thông báo lúc đăng nhập** (issue #36): tab Pengumuman (Thông báo) trên trang quản trị tải lên ảnh JPG
   hoặc PNG (chỉnh theo popup 800×720, có xem trước) cho popup Thông báo lúc đăng nhập, hoặc xóa ảnh đó.
 - **Tải ảnh còn thiếu từ trang quản trị** (issue #36): tab Aset (Hình ảnh) tải ảnh mặt cầu thủ, logo CLB, logo
