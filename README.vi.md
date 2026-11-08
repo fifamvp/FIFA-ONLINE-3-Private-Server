@@ -298,7 +298,9 @@ Item saya, Gudang bên dưới là tên màn hình trong game, được giữ ng
   `tools/fo4_season.py build` áp dụng lại), mùa vào `gamedata/seasons.json`; Ekspor / Impor mod chuyển tất cả
   sang server khác bằng một tệp JSON. Game đọc bản sao CSDL riêng: đóng game, bấm Terapkan ke game (chạy
   `tools/fo4_season.py install` ở chế độ nền), rồi chạy `play.bat`. Tab này cũng thay logo CLB trong bộ nhớ
-  đệm của client (logo gốc giữ trong `gamedata/crest_backup`). Chưa có áo đấu và CLB mới.
+  đệm của client (logo gốc giữ trong `gamedata/crest_backup`) và, trong hộp thoại thẻ, ảnh cầu thủ bằng PNG/JPG
+  của bạn cho mọi thẻ của cầu thủ hoặc chỉ một thẻ (issue #36; `gamedata/faces/p<id>.png`, được phục vụ trước
+  ảnh trong bộ nhớ đệm; ô Khuôn mặt 3D cũng tìm đầu theo tên cầu thủ). Chưa có áo đấu và CLB mới.
 - **Thế giới FO3 cổ điển** (issue #38): *Dunia game* trong tab Database chọn Hiện đại (CLB AI, phần chọn CLB
   và gói This Season dùng thẻ 26 LIVE, như trước; mùa tự tạo cũng hiện trong tìm kiếm Market) hoặc Cổ điển FO3:
   mọi CLB dùng đội hình 2017 gốc của FO3, This Season = '17, còn các mùa thêm vào (25 / 26 LIVE, WC18, mùa tự tạo)

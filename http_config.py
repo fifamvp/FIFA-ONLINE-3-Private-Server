@@ -101,8 +101,15 @@ def notice_url():
     return "about:blank"
 
 
+# Own player pictures (issue #36), the admin Database tab's uploads: FACES/p<id>.png, 128x128,
+# served before the cache's. ExternalAssetLoaderUtil.loadExternalPlayerPicture asks for
+# p<spid>.png for a card of any season but curseason's (season 0, a bare player id) and, when that
+# fails, p<player id>.png: so p<spid> is one card's picture and p<player id> every card's.
+FACES = os.path.join(HERE, "gamedata", "faces")
+
+
 def asset_path(rel):
-    """OWN_ASSETS/rel or ASSETS/rel, whichever exists, else None. A club crest the cache lacks
+    """FACES' picture, OWN_ASSETS/rel or ASSETS/rel, whichever exists, else None. A club crest the cache lacks
     in one size is its other size (issue #29: the cache has 190 small crests but 49 large ones,
     and the cup screens ask for the large one: Napoli, Bayern, Man United showed none). A Rekrut
     pack tile (shop/staffpack_<stfid>) is that staff's picture: the client has no staff pack art.
@@ -111,6 +118,9 @@ def asset_path(rel):
     the nation's big one."""
     if rel == "externalAssets/notice/notice.png":
         return NOTICE_IMAGE if os.path.isfile(NOTICE_IMAGE) else None
+    m = re.fullmatch(r"externalAssets/players/(p\d+\.png)", rel)
+    if m and os.path.isfile(os.path.join(FACES, m[1])):
+        return os.path.join(FACES, m[1])
     rel = re.sub(r"^externalAssets/shop/staffpack_(\d+)\.png$", r"externalAssets/staffs/\1.png", rel)
     rel = re.sub(r"^externalAssets/balls/ball_0\.png$", "externalAssets/balls/ball_6.png", rel)
     rel = re.sub(r"^externalAssets/countries/smallFlags/(\d+\.png)$", r"externalAssets/countries/\1", rel)

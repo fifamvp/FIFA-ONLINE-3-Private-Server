@@ -239,7 +239,8 @@
   可恢复，`tools/fo4_season.py build` 会重新应用），赛季写入 `gamedata/seasons.json`；Ekspor / Impor mod 用一个 JSON
   文件把这些全部搬到另一台服务器。游戏读取自己的数据库副本：关闭游戏，点击 Terapkan ke game（在后台运行
   `tools/fo4_season.py install`），然后运行 `play.bat`。该页还能替换客户端缓存中的俱乐部队徽（原队徽保存在
-  `gamedata/crest_backup`）。球衣和新俱乐部还没有做。
+  `gamedata/crest_backup`），并可在球员卡窗口用自己的 PNG/JPG 替换球员头像，作用于该球员所有卡或仅本卡（issue #36；
+  `gamedata/faces/p<id>.png`，优先于缓存中的头像；3D 脸型栏也可按球员名字查找头部）。球衣和新俱乐部还没有做。
 - **经典 FO3 世界**（issue #38）：Database 页的 *Dunia game* 可选现代（AI 俱乐部、俱乐部选择和 This Season
   卡包使用 26 LIVE 卡，与之前相同；自建赛季也会出现在市场搜索中）或经典 FO3：所有俱乐部使用 FO3 原版 2017 阵容，
   This Season = '17，新增赛季（25 / 26 LIVE、WC18、自建赛季）不会出现在卡包、市场、交易或虚拟经理阵容中，只能通过

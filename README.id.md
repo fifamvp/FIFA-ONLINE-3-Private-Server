@@ -326,7 +326,9 @@ Sudah ditambahkan dan lolos tes, tapi belum dicek di client:
   Impor mod memindahkan semuanya ke server lain dalam satu file JSON. Game membaca salinan DB-nya
   sendiri: tutup game, tekan Terapkan ke game (menjalankan `tools/fo4_season.py install` di latar), lalu
   jalankan `play.bat`. Tab ini juga mengganti logo klub di cache client (logo asli disimpan di
-  `gamedata/crest_backup`). Jersey dan klub baru belum ada.
+  `gamedata/crest_backup`) dan, di dialog kartu, foto pemain dengan PNG/JPG sendiri untuk semua kartunya
+  atau satu kartu saja (issue #36; `gamedata/faces/p<id>.png`, disajikan sebelum foto cache; kolom Wajah
+  3D juga mencari kepala dengan nama pemain). Jersey dan klub baru belum ada.
 - **Dunia FO3 klasik** (issue #38): *Dunia game* di tab Database memilih Modern (klub AI, pilihan klub
   dan pak This Season memakai kartu 26 LIVE, seperti sebelumnya; musim buatan juga muncul di pencarian
   Market) atau Klasik FO3: semua klub memakai skuad 2017 asli FO3, This Season = '17, dan musim tambahan

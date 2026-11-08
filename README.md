@@ -306,7 +306,9 @@ Added, passing the tests but not yet checked in the client:
   mod moves all of it to another server in one JSON file. The game reads its own copy of the DB: close
   it, press Terapkan ke game (runs `tools/fo4_season.py install` in the background), then start
   `play.bat`. The tab also replaces a club's crest in the client's cache (the original kept in
-  `gamedata/crest_backup`). Kits and new clubs are not done.
+  `gamedata/crest_backup`) and, in the card dialog, the player's picture with your own PNG/JPG for every
+  card of his or one card only (issue #36; `gamedata/faces/p<id>.png`, served before the cache's; the
+  3D Face field also finds heads by player name). Kits and new clubs are not done.
 - **Classic FO3 world** (issue #38): the Database tab's *Dunia game* picks Modern (the AI clubs, the
   club picker and This Season packs use 26 LIVE cards, as before; own seasons also show in the Market
   search) or Classic FO3: every club plays FO3's own 2017 squad, This Season is '17, and the added seasons

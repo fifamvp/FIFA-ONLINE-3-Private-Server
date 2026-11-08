@@ -2427,7 +2427,8 @@ def main():
         # and club crests in a stand-in cache; tools/fo4_season.py build puts the edits back
         import gen_teams, sqlite3, importlib.util
         kept = (gen_teams.DB, admin.CARD_EDITS, admin.CREST_BACKUP, admin.INSTALL_CMD, hc.ASSETS, admin.CUSTOM_SEASONS, admin.SEASON_ICONS,
-                hc.CUSTOM_COLORS)
+                hc.CUSTOM_COLORS, hc.FACES)
+        hc.FACES = os.path.join(tmp, "faces")
         hc.CUSTOM_COLORS = os.path.join(tmp, "teamcolors.json")
         gen_teams.DB = shutil.copyfile(gen_teams.DB, os.path.join(tmp, "fifadb38.sqlite"))
         admin.CARD_EDITS, admin.CREST_BACKUP = os.path.join(tmp, "card_edits.json"), os.path.join(tmp, "crest_backup")
@@ -2559,9 +2560,26 @@ def main():
             c = A("crest_revert", teamid=241)
             assert not c["custom"] and c["has"] == {"large": True, "small": False}
             assert open(crest("large"), "rb").read() == b"the cache's own crest"
+            # issue #36: own player pictures in hc.FACES, served before the cache's (p<spid>: that card,
+            # p<player id>: every card of his); restoring deletes them
+            drogba, cached = 91031432, os.path.join(hc.ASSETS, "externalAssets", "players", "p31432.png")
+            os.makedirs(os.path.dirname(cached))
+            open(cached, "wb").write(b"the cache's own face")
+            f = A("face", id=31432)
+            assert (f["has"], f["custom"]) == (True, False) and not A("face", id=drogba)["has"]
+            assert refused("face_set", id=31432, png=b64(256, 256)) and refused("face_set", id=699999, png=b64(128, 128))  # 128 x 128, a known id
+            assert A("face_set", id=drogba, png=b64(128, 128))["custom"] and A("face_set", id=31432, png=b64(128, 128))["custom"]
+            assert hc.asset_path("externalAssets/players/p91031432.png") == os.path.join(hc.FACES, "p91031432.png")
+            assert hc.cdn_file("externalAssets/players/p31432.png")[1] == png(128, 128)
+            assert not A("face_revert", id=31432)["custom"] and open(hc.asset_path("externalAssets/players/p31432.png"), "rb").read() == b"the cache's own face"
+            assert not A("face_revert", id=drogba)["has"] and os.listdir(hc.FACES) == []
+            # the Face field's name search: engine rows of the players found, a scan or a generic head
+            h = A("heads", q="Drogba")["rows"]
+            assert h and all(k % 1000000 == 31432 and n == "Didier Drogba" and isinstance(scan, bool) for k, n, _, scan in h)
+            assert A("heads", q="D")["rows"] == []
         finally:
             (gen_teams.DB, admin.CARD_EDITS, admin.CREST_BACKUP, admin.INSTALL_CMD, hc.ASSETS, admin.CUSTOM_SEASONS, admin.SEASON_ICONS,
-             hc.CUSTOM_COLORS) = kept
+             hc.CUSTOM_COLORS, hc.FACES) = kept
             hc.tc_special_sets.cache_clear(); hc.tc_colors.cache_clear(); hc.vm_theme_keys.cache_clear()
             hc._OVR.clear(); hc._STATS.clear()
         # the game setting screen's "Default ball" (ball 0, "NOT FOUND") shows ball 6's picture, and a
@@ -2576,6 +2594,7 @@ def main():
             page = web.open(url + "/").read()
             assert b"FO3ID admin" in page and b"/*I18N*/" not in page and b'"lang_name": "\\u7b80\\u4f53\\u4e2d\\u6587"' in page
             assert web.open(url + "/icon/8194.png").read()[:4] == b"\x89PNG"  # the client's shop icon
+            assert web.open(url + "/face/20801.png").read()[:4] == b"\x89PNG"  # the card dialog's picture: the one the game gets
             assert b'<img src="/notice.png?t=' in web.open(url + "/notice").read()  # the login notice page
             err = urllib.request.Request(url + "/api/player_grade", b'{"id": "nope", "grade": 2}',
                                          {"X-FO3-Admin": "1", "X-FO3-Lang": "en"}, method="POST")

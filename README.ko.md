@@ -263,7 +263,8 @@ Gudang 등은 게임에 표시되는 화면 이름이라, 게임에서 찾기 �
   `tools/fo4_season.py build`가 다시 적용), 시즌은 `gamedata/seasons.json`에 저장; Ekspor / Impor mod로 전부를
   JSON 파일 하나로 다른 서버에 옮김. 게임은 자체 DB 사본을 읽음: 게임을 닫고 Terapkan ke game(백그라운드에서
   `tools/fo4_season.py install` 실행)을 누른 뒤 `play.bat` 실행. 이 탭은 클라이언트 캐시의 클럽 엠블럼도 바꿈(원본은
-  `gamedata/crest_backup`). 유니폼과 새 클럽은 아직 없음.
+  `gamedata/crest_backup`), 카드 창에서는 선수 사진을 내 PNG/JPG로 바꿈(모든 카드 또는 이 카드만; issue #36;
+  `gamedata/faces/p<id>.png`, 캐시보다 먼저 제공; 3D 얼굴 칸은 선수 이름으로 머리를 찾음). 유니폼과 새 클럽은 아직 없음.
 - **클래식 FO3 세계**(issue #38): Database 탭의 *Dunia game*에서 모던(AI 클럽, 클럽 선택, This Season 팩이
   26 LIVE 카드 사용, 기존과 같음; 직접 만든 시즌도 마켓 검색에 표시) 또는 클래식 FO3를 고름: 모든 클럽이 FO3 원래의
   2017 스쿼드, This Season = '17, 추가 시즌(25 / 26 LIVE, WC18, 직접 만든 시즌)은 팩, 마켓, 트레이드, 가상 감독 스쿼드에

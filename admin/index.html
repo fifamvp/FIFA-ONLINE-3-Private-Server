@@ -551,6 +551,19 @@
       <h3 data-i18n="f_look"></h3>
       <p class="muted" id="cardLookNote"></p>
       <div class="grid2" id="cardLook"></div>
+      <h3 data-i18n="face_title"></h3>
+      <p class="muted" data-i18n="face_lead"></p>
+      <div class="row">
+        <label class="f"><span data-i18n="face_for"></span><select id="faceFor"></select></label>
+        <label class="f"><span data-i18n="notice_file"></span><input type="file" id="faceFile" accept="image/png,image/jpeg"></label>
+        <button class="b primary" type="button" id="faceSave" data-i18n="face_save"></button>
+        <button class="b danger" type="button" id="faceRevert" data-i18n="face_revert" hidden></button>
+        <span class="muted" id="faceMsg" role="status"></span>
+      </div>
+      <div class="crests">
+        <figure><figcaption data-i18n="face_now"></figcaption><div id="faceNow"></div></figure>
+        <figure><figcaption data-i18n="face_new"></figcaption><canvas id="faceNew" width="128" height="128"></canvas></figure>
+      </div>
     </div>
     <div class="foot">
       <span class="err" id="cardErr" role="alert"></span>
@@ -1468,8 +1481,61 @@ async function openCard(spid) {
       k in le ? ` class="chg" title="${esc(t("orig_value", L.fields[k]))}"` : ""}>`)).join("");
   $("#cardRevert").hidden = !Object.keys(o).length && !Object.keys(le).length;
   $("#cardErr").textContent = "";
+  $("#faceFor").innerHTML = [[cardNow.playerid, t("face_player", cardNow.playerid)], ...(cardNow.spid !== cardNow.playerid
+    ? [[cardNow.spid, t("face_card", cardNow.spid)]] : [])].map(([v, l]) => `<option value="${v}">${esc(l)}</option>`).join("");
+  faceImg = null; $("#faceFile").value = ""; $("#faceMsg").textContent = ""; drawFace();
+  await showFace();
   $("#cardDlg").showModal();
 }
+// a 3D head by player name: the Face field's list becomes the found players' engine rows
+let headsTimer = 0;
+$("#cardLook").addEventListener("input", e => {
+  const q = e.target.dataset.look === "face" ? e.target.value.trim() : "";
+  if (q.length < 2 || /^\d+$/.test(q)) return;
+  clearTimeout(headsTimer);
+  headsTimer = setTimeout(async () => {
+    const rows = (await api("heads?q=" + encodeURIComponent(q)).catch(() => ({rows: []}))).rows;
+    $("#faceList").innerHTML = rows.map(([k, name, season, scan]) =>
+      `<option value="${k}">${esc(`${name}, ${t("th_season")} ${season}, ${t(scan ? "head_scan" : "head_generic")}`)}</option>`).join("");
+  }, 300);
+});
+
+// the player's picture (issue #36): fitted into 128x128 and saved for every card of the player or
+// this card only; the preview shows what the game shows for this card (its own picture, else the player's)
+let faceImg = null;
+async function showFace() {
+  const [player, own] = await Promise.all([...new Set([cardNow.playerid, cardNow.spid])].map(id => api("face?id=" + id)));
+  const now = own?.has ? own : player, pick = $("#faceFor").value == player.id ? player : own;
+  $("#faceNow").innerHTML = now.has ? `<img src="/face/${now.id}.png?t=${now.updated}" alt="" width="128" height="128">`
+    : `<p class="muted">${esc(t("face_none"))}</p>`;
+  $("#faceRevert").hidden = !pick.custom;
+}
+function drawFace() {
+  const c = $("#faceNew"), g = c.getContext("2d");
+  g.clearRect(0, 0, c.width, c.height);
+  if (!faceImg) return;
+  const k = Math.min(c.width / faceImg.width, c.height / faceImg.height), w = faceImg.width * k, h = faceImg.height * k;
+  g.drawImage(faceImg, (c.width - w) / 2, (c.height - h) / 2, w, h);
+}
+const faceDo = (fn, okMsg) => fn().then(() => { $("#cardErr").textContent = ""; $("#faceMsg").textContent = okMsg; })
+  .catch(err => { $("#cardErr").textContent = t("failed") + err.message; });
+$("#faceFor").addEventListener("change", () => faceDo(showFace, ""));
+$("#faceFile").addEventListener("change", e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  const img = new Image();
+  img.onload = () => { faceImg = img; drawFace(); };
+  img.onerror = () => { $("#cardErr").textContent = t("failed") + t("e_face_png", 128); };
+  img.src = URL.createObjectURL(f);
+});
+$("#faceSave").addEventListener("click", () => {
+  if (!faceImg) return void ($("#cardErr").textContent = t("face_pick"));
+  faceDo(async () => { await api("face_set", {id: Number($("#faceFor").value), png: $("#faceNew").toDataURL("image/png").split(",")[1]}); await showFace(); },
+         t("face_saved"));
+});
+$("#faceRevert").addEventListener("click", () => {
+  if (confirm(t("face_confirm"))) faceDo(async () => { await api("face_revert", {id: Number($("#faceFor").value)}); await showFace(); }, t("face_reverted"));
+});
 function readCard() {
   const out = {};
   $$("#cardDlg [data-f]").forEach(el => out[el.dataset.f] = el.dataset.f === "teamid" ? clubId(el.value) : Number(el.value));
