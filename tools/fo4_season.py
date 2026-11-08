@@ -1376,10 +1376,14 @@ def client_db():
     """gamedata/fifadb.sqlite as the client gets it. Its packed DB has to fit the shipped one's
     place in data_0.big (with the engine DB too, see cmd_install), so the names of players
     without a card (half of each names table; the client reads names from its <lang>.db
-    anyway) are left out."""
+    anyway) are left out. Every card of a player with a club career (table playerhistory) shows
+    it: the player info's Karakteristik tab lists it for cards with historyopen = 1 once
+    features.seasoncare is on (PR #39), and the shipped DB opens it on seasons 22-24 only.
+    0 and 1 take no bytes in a SQLite record, so the DB stays its size."""
     def edit(c):
         for t in NAME_TABLES:
             c.execute(f"DELETE FROM {t} WHERE playerid NOT IN (SELECT playerid FROM players)")
+        c.execute("UPDATE players SET historyopen = 1 WHERE playerid IN (SELECT playerid FROM playerhistory)")
     return _sqlite(open(FIFADB, "rb").read(), edit)
 
 
@@ -1683,6 +1687,13 @@ def cmd_selftest(a=None):
         hit = sum(badges(r) == r["badges"] for r in rows)
         assert hit >= 0.98 * len(rows), (hit, len(rows))
         print(f"Style rules match {hit}/{len(rows)} 2017 cards exactly")
+        tmp = os.path.join(tempfile.gettempdir(), "fo4_season_selftest.sqlite")
+        open(tmp, "wb").write(client_db())
+        with closing(sqlite3.connect(tmp)) as c:  # club careers on every season (Messi '17 and 22)
+            got = dict(c.execute("SELECT spid, historyopen FROM players WHERE spid IN (88158023, 22158023, 88000028)"))
+            closed = c.execute("SELECT COUNT(*) FROM players WHERE historyopen = 0 AND playerid IN (SELECT playerid FROM playerhistory)").fetchone()[0]
+        os.remove(tmp)
+        assert got == {88158023: 1, 22158023: 1, 88000028: 0} and closed == 0, (got, closed)
     px = [(0, 230, 100, 255)] * 8 + [(60, 64, 70, 255)] * 7 + [(0, 0, 0, 0)]
     b = _bc3(px)
     assert len(b) == 16 and b[0] == 255 and b[1] == 0
