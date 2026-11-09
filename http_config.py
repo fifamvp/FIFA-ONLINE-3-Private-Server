@@ -9172,9 +9172,13 @@ def my_koth(st, coach=None):
     """My KOTH record of this season {sid, regionid, introid, elo, wins, draws, losses, streak,
     weeks [{wins, games, elo}] (koth_week), paid [week], prev}: a new month starts at the start
     rating in the same region; the one I played stays as prev {sid, regionid, elo, wins, rank,
-    rewarded} until its rewards were shown."""
+    rewarded} until its rewards were shown. Before the first manager is made (a fresh install's
+    boot asks /esports2/region/register/<season> first: issue #42, the client quit) a blank one
+    that is not kept."""
     sid = koth_sid()
-    r = (coach or my_coach(st)).setdefault("es2", {})
+    if coach is None:
+        coach = next((c for c in st["coaches"] if c["slot"] == _default_slot(st)), None)
+    r = (coach if coach is not None else {}).setdefault("es2", {})
     if r.get("sid") != sid:
         if r.get("sid") and r.get("regionid") and r.get("wins", 0) + r.get("draws", 0) + r.get("losses", 0):
             key = koth_set()

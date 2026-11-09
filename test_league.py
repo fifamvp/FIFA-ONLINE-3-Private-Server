@@ -36,6 +36,9 @@ def main():
         hc.MISSIONS_FILE = os.path.join(tmp, "missions.json")  # default missions; admin test writes here
         # a fresh account through the client's club creation (the live state may hold no manager)
         hc._save({"coaches": [], "defaultcoachid": "", "teams": {}})
+        # issue #42: the boot asks King of the Hill's registrations before any manager exists (the
+        # client quit on the error); nothing is kept for no one
+        assert body(hc.route(f"/esports2/region/register/{hc.koth_sid()}")("", b""))["result"] and hc._state()["coaches"] == []
         spids = [p["spid"] for p in hc.roster(241)["team"]["players"]]  # 2017 file, or built for 26 LIVE
         assert body(hc.ENDPOINTS["/coach/0/new/step/3"]("", json.dumps({"id": 241, "spids": spids}).encode()))["result"]
         assert body(hc.ENDPOINTS["/coach/0"]("", json.dumps({"id": 241, "coachName": "Tester"}).encode()))["result"]
