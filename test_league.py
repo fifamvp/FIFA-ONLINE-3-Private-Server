@@ -2394,6 +2394,8 @@ def main():
             a = A("assets_stop")
             assert (a["running"], a["last"], a["lines"]) == (None, "crests", ["stand-in --crests", "stopped"])
             assert set(a["counts"]) == set(admin.ASSET_KINDS) and not os.path.exists(admin.ASSET_STOP)
+            assert A("assets_fetch", kind="all")["running"] == "all"  # every picture kind in one run
+            assert A("assets_stop")["lines"] == ["stand-in --all", "stopped"]
             # PR #39 follow-up: the club careers row runs tools/club_history.py fetch; its counts come
             # from gamedata/club_history.json (players with a career, players not found)
             careers, admin.CAREER_CMD, admin.CAREERS = (admin.CAREER_CMD, admin.CAREERS), admin.ASSET_CMD + ["fetch"], os.path.join(tmp, "club_history.json")
@@ -2432,12 +2434,82 @@ def main():
         finally:
             fa.urllib.request.urlopen = real_urlopen
         man = json.load(open(fa.MANIFESTS["crests"]))
-        assert man == {"added": ["crests/large/s4.png"], "failed": {"crests/large/s2.png": "404", "crests/large/s3.png": "404"}}
-        assert waits == [0, 10, 0, 0, 10, 20, 30, 40] and open(os.path.join(fa.EXT, "crests", "large", "s4.png"), "rb").read() == b"\x89PNG crest"
-        # faces: each card's season picture (fifaaddict has p<spid>.png) and its player's, none of the added seasons
+        assert man == {"added": ["crests/large/s4.png"], "fo4": True, "failed": {"crests/large/s2.png": "404", "crests/large/s3.png": "404"}}
+        # (issue #36, 2026-11-09: "automatically retry failed downloads") it goes on, waiting 10 s more,
+        # doubling, up to 5 min; only TRIES refusals in a row end it
+        assert waits == [0, 10, 0, 0, 10, 20, 40, 80, 160, 300] and open(os.path.join(fa.EXT, "crests", "large", "s4.png"), "rb").read() == b"\x89PNG crest"
+        tries, fa.TRIES, waits[:] = fa.TRIES, 2, []
+        fa.urllib.request.urlopen = answer
+        try:
+            assert fa.run("crests", fa.argparse.Namespace(delay=0, limit=0, remove=False)) is False and waits == [0, 10]
+        finally:
+            fa.urllib.request.urlopen, fa.TRIES = real_urlopen, tries
+        # a player's picture fifaaddict lacks (or refuses) comes from FC Online (FO4) (user: "jika download
+        # dari fo3 tidak ada pindah ke fo4"); the old run's 404s of player pictures are asked again
+        fa.MANIFESTS["faces"] = os.path.join(tmp, "fa_faces.json")
+        json.dump({"added": [], "failed": {"players/p7.png": "404", "players/p91000007.png": "404"}}, open(fa.MANIFESTS["faces"], "w"))
+        fa.wanted_faces = lambda: [(f"players/p{i}.png", [f"{fa.FA}players/p{i}.png", fa.FO4_FACE.format(i)]) for i in (5, 6, 7, 8)] \
+            + [("players/p91000007.png", [f"{fa.FA}players/p91000007.png"])]
+        def answer2(req, timeout):
+            u = req.full_url
+            i, fo4 = int(re.search(r"/p(\d+)\.png", u).group(1)), "nexoncdn" in u
+            if (i, fo4) in ((5, False), (7, True)):
+                return io.BytesIO(b"\x89PNG " + (b"fo4" if fo4 else b"fa"))
+            code = {(6, False): 404, (6, True): 403, (7, False): 404, (8, False): 503, (8, True): 403}[i, fo4]  # FO4's "not there" is 403
+            raise urllib.error.HTTPError(u, code, "no", {}, None)
+        waits[:] = []
+        fa.urllib.request.urlopen = answer2
+        try:
+            fa.ARGS[:] = ["--delay", "0"]
+            fa.main()
+        finally:
+            fa.urllib.request.urlopen = real_urlopen
+        man = json.load(open(fa.MANIFESTS["faces"]))
+        assert man == {"added": ["players/p5.png", "players/p7.png"], "fo4": True,
+                       "failed": {"players/p91000007.png": "404", "players/p6.png": "404"}}, man  # p8: fifaaddict refused, tried next time
+        assert open(os.path.join(fa.EXT, "players", "p7.png"), "rb").read() == b"\x89PNG fo4" and waits == [0, 0, 0, 0]
+        # faces: each card's season picture (fifaaddict has p<spid>.png) and its player's (FO4's after it),
+        # none of the added seasons; every card of the DB, not only the club's and the Market's
+        spec.loader.exec_module(fa)
         w = dict(fa.wanted_faces())
-        assert w["players/p91031432.png"] == fa.FA + "players/p91031432.png" and "players/p31432.png" in w
-        assert not [r for r in w if re.fullmatch(r"players/p(78|300|325)\d{6}\.png", r)]
+        assert w["players/p91031432.png"] == [fa.FA + "players/p91031432.png"]
+        assert w["players/p31432.png"] == [fa.FA + "players/p31432.png", fa.FO4_FACE.format(31432)]
+        assert not [r for r in w if re.fullmatch(r"players/p(78|300|325)\d{6}\.png", r) and int(r[-10:-4]) < 700000]  # new players': FO4's
+        with hc.closing(hc._db()) as c:
+            pids = {r[0] for r in c.execute("SELECT DISTINCT playerid FROM players WHERE playerid < 700000")}
+        assert all(f"players/p{p}.png" in w for p in pids)
+        # the server's new players (user: "pemain baru kenapa tidak di search by nama"): their FO4 cards,
+        # found by the birth date and name that gave them their id, have pictures on fifaaddict by card id
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(admin.__file__)), "tools"))
+        import fo4_season, hashlib
+        kept_fo4 = fo4_season.PIDS, fo4_season.CARDS
+        fo4_season.PIDS, fo4_season.CARDS = os.path.join(tmp, "fo4_pids.json"), os.path.join(tmp, "fo4_cards.json")
+        try:
+            json.dump({"2007-7-13|lamine yamal": 700000}, open(fo4_season.PIDS, "w"))
+            json.dump({"aaa": {"season": 325, "db": {"name": "Lamine Yamal", "birthdate": "13.07.2007"}},
+                       "bbb": {"season": 300, "db": {"name": "Lamine Yamal", "birthdate": "13.07.2007"}},
+                       "ccc": {"season": 300, "db": {"name": "Somebody Else", "birthdate": "1.01.2000"}}}, open(fo4_season.CARDS, "w"))
+            assert fo4_season.new_player_cards() == {325700000: "aaa", 300700000: "bbb"}
+        finally:
+            fo4_season.PIDS, fo4_season.CARDS = kept_fo4
+        fa.fo4_new_players = lambda: {325700000: "aaa", 300700000: "bbb"}
+        w = dict(fa.wanted_faces())
+        assert w["players/p700000.png"] == [fa.FA4.format("bbb")] == w["players/p300700000.png"]  # 26 LIVE's for him
+        assert w.get("players/p325700000.png", [fa.FA4.format("aaa")]) == [fa.FA4.format("aaa")] and "players/p700001.png" not in w
+        # fifaaddict answers an unknown card id with its silhouette: not there
+        spec.loader.exec_module(fa)
+        fa.EXT, fa.MANIFESTS = os.path.join(tmp, "ext36"), {**fa.MANIFESTS, "faces": os.path.join(tmp, "fa_faces2.json")}
+        fa.FA4_NONE = hashlib.sha256(b"\x89PNG silhouette").hexdigest()
+        fa.wanted_faces = lambda: [("players/p700000.png", [fa.FA4.format("bbb")]), ("players/p700001.png", [fa.FA4.format("zzz")])]
+        fa.time = types.SimpleNamespace(sleep=lambda s: None)
+        fa.urllib.request.urlopen = lambda req, timeout: io.BytesIO(b"\x89PNG " + (b"yamal" if "bbb" in req.full_url else b"silhouette"))
+        try:
+            fa.ARGS[:] = ["--delay", "0"]
+            fa.main()
+        finally:
+            fa.urllib.request.urlopen = real_urlopen
+        assert json.load(open(fa.MANIFESTS["faces"]))["failed"] == {"players/p700001.png": "404"}
+        assert open(os.path.join(fa.EXT, "players", "p700000.png"), "rb").read() == b"\x89PNG yamal"
         # issue #38: the Database tab edits cards in a copy of fifadb (the real one stays as it is)
         # and club crests in a stand-in cache; tools/fo4_season.py build puts the edits back
         import gen_teams, sqlite3, importlib.util
@@ -2597,22 +2669,111 @@ def main():
             asked = []
             def fa_answer(req, timeout):
                 asked.append(req.full_url)
-                if "p10031432" in req.full_url:
+                if "p10031432" in req.full_url or req.full_url in (admin.FO4_FACE.format(5), admin.FA4_FACE.format("bbb")):
                     return io.BytesIO(png(128, 128))
-                raise urllib.error.HTTPError(req.full_url, 404, "Not Found", {}, None)
+                raise urllib.error.HTTPError(req.full_url, 403 if "nexoncdn" in req.full_url else 404, "Not Found", {}, None)
             real_urlopen, admin.urllib.request.urlopen = admin.urllib.request.urlopen, fa_answer
             try:
                 assert A("face_from", id=31432, **{"from": 10031432})["custom"]
                 assert refused("face_from", id=31432, **{"from": 11031432})  # fifaaddict has none
+                assert A("face_from", id=31432, **{"from": 5})["custom"]  # a player's: FO4's when fifaaddict has none
+                assert refused("face_from", id=31432, **{"from": 6})  # neither
+                real_fo4, admin.fo4_season = admin.fo4_season, lambda: types.SimpleNamespace(new_player_cards=lambda: {300700000: "bbb"})
+                try:  # a new player's: his FO4 card's on fifaaddict
+                    assert A("face_from", id=31432, **{"from": 700000})["custom"]
+                finally:
+                    admin.fo4_season = real_fo4
             finally:
                 admin.urllib.request.urlopen = real_urlopen
-            assert asked == [admin.FA_FACE.format(10031432), admin.FA_FACE.format(11031432)]
+            assert asked == [admin.FA_FACE.format(10031432), admin.FA_FACE.format(11031432), admin.FA_FACE.format(5), admin.FO4_FACE.format(5),
+                             admin.FA_FACE.format(6), admin.FO4_FACE.format(6), admin.FA4_FACE.format("bbb")]
             A("face_revert", id=31432); A("face_revert", id=drogba)
             assert os.listdir(hc.FACES) == []
             # the Face field's name search: engine rows of the players found, a scan or a generic head
             h = A("heads", q="Drogba")["rows"]
             assert h and all(k % 1000000 == 31432 and n == "Didier Drogba" and isinstance(scan, bool) for k, n, _, scan in h)
             assert A("heads", q="D")["rows"] == []
+            # a 3D face from a photo (tools/photo_head.py, user: "buat 3d model berdasarkan foto close up
+            # pemain ... untuk pemain2 yang masih generic face"): the photo's points painted on a scanned
+            # donor's face texture, kept for the player id; install's engine rows: his id row wears it
+            sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(admin.__file__)), "tools"))
+            import photo_head, bigdir
+            import numpy as np
+            from PIL import Image
+            photo_head.cmd_selftest()
+            mods, d = (admin.photo_head_mod(), photo_head), os.path.join(tmp, "photo_heads")  # the page's, install's
+            ph_kept = [(m.DIR, m.HEADS) for m in mods]
+            for m in mods:
+                m.DIR, m.HEADS = d, os.path.join(d, "heads.json")
+            try:
+                gen = next(r[0] for r in sqlite3.connect(gen_teams.DB).execute("SELECT DISTINCT playerid FROM players ORDER BY playerid")
+                           if r[0] in shipped and t.get(shipped[r[0]], fld["headclasscode"][0]) == 1)
+                ph = mods[0]
+                face = np.full((200, 160, 3), (205, 160, 140), np.uint8)
+                face[80:90, 70:90] = 30  # a dark mark between the eyes
+                pts = [[ph.UV[k][0] * 160 / 512, ph.UV[k][1] * 200 / 512] for k in ph.POINTS]
+                photo = lambda img: (b := io.BytesIO(), Image.fromarray(img).save(b, "PNG"), base64.b64encode(b.getvalue()).decode())[2]
+                assert A("photo_head", pid=gen)["id"] is None and A("photo_head", pid=gen)["points"] == list(ph.POINTS)
+                assert refused("photo_head_make", pid=gen, png=photo(np.zeros((10, 1100, 3), np.uint8)), points=pts, row=messi)  # too big
+                assert refused("photo_head_make", pid=gen, png=photo(face), points=pts[:-1], row=messi)  # a point short
+                assert refused("photo_head_make", pid=gen, png=photo(face), points=pts, row=gen)  # not a scanned head
+                r = A("photo_head_make", pid=gen, png=photo(face), points=pts, row=messi)
+                assert (r["id"], r["row"]) == (ph.ID_BASE, messi) and A("photo_head_make", pid=gen, png=photo(face), points=pts, row=messi)["id"] == ph.ID_BASE
+                tex = np.asarray(Image.open(os.path.join(d, f"{ph.ID_BASE}.png")))
+                assert tex.shape == (512, 512, 3) and json.load(open(ph.HEADS))[str(ph.ID_BASE)]["donor"] == get(messi, "headassetid", shipped)
+                by = dict(shipped)
+                assert fo4.photo_heads(t, fld, by) >= 1
+                assert (get(gen, "headassetid", by), get(gen, "headclasscode", by)) == (ph.ID_BASE, 0) and by[messi] == shipped[messi]
+                # data_7.big: its own entries plus the head's files (the donor's mesh and hair, the new face)
+                orig7 = next(p for p in (os.path.join(fo4.BACKUP, "data_7.big"), os.path.join(hc.GAME, "data", "data_7.big")) if os.path.isfile(p))
+                big, n = photo_head.archive(hc.GAME, orig7)
+                open(os.path.join(tmp, "data_7.big"), "wb").write(big)
+                names = [e[0] for e in bigdir.entries(os.path.join(tmp, "data_7.big"))]
+                assert n == 1 and names[:len(bigdir.entries(orig7))] == [e[0] for e in bigdir.entries(orig7)]
+                assert sorted(names[-5:]) == sorted(p.format(ph.ID_BASE) for p in ph.FILES)
+                put = ph.texture_image(bigdir.read(os.path.join(tmp, "data_7.big"), ph.FACE_FILE.format(ph.ID_BASE)))
+                assert np.abs(put.astype(int) - tex).mean() < 6
+                assert A("photo_head_delete", pid=gen)["id"] is None and os.listdir(d) == ["heads.json"]
+                # from the player's picture (user: "Ya, pakai YuNet"): YuNet's points, a donor by skin
+                # and hair; the club's generic players in one go
+                look = ph.look(face, pts)
+                assert len(look) == 5 and look[0] > 150 and abs(look[3]) < 3  # light skin, no beard
+                donors = {1: [messi, look[0] + 20, *look[1:]], 2: [40158023, *look[:3], 60, look[4]], 3: [158023, *look]}
+                assert ph.suggest(look, donors) == 3 and ph.suggest(look, {k: donors[k] for k in (1, 2)}) == 1  # no beard before a closer skin
+                for m in mods:
+                    m.DONORS = os.path.join(d, "donors.json")
+                dl = ph.donor_looks(hc.GAME, {get(messi, "headassetid", shipped): messi})
+                assert list(dl) == [get(messi, "headassetid", shipped)] and dl[get(messi, "headassetid", shipped)][0] == messi
+                assert ph.donor_looks(hc.GAME, {}) == dl  # kept in DONORS
+                real_icon = os.path.join(kept[4], "externalAssets", "players", "p198176.png")  # de Vrij's FO3 picture
+                if os.path.isfile(ph.MODEL) and os.path.isfile(real_icon):  # (the test fetches nothing)
+                    got = ph.landmarks(ph.picture(real_icon))
+                    assert abs(got[0][0] - 52) < 4 and abs(got[1][0] - 76.5) < 4 and abs(got[0][1] - 67) < 4, got
+                    assert ph.landmarks(np.full((128, 128, 3), 150, np.uint8)) is None
+                    real_donors, admin.photo_donors = admin.photo_donors, lambda: dl
+                    try:
+                        os.makedirs(os.path.dirname(cached), exist_ok=True)
+                        shutil.copyfile(real_icon, os.path.join(os.path.dirname(cached), f"p{gen}.png"))
+                        r = A("photo_head_icon", pid=gen)
+                        assert len(r["points"]) == 11 and r["row"] == messi and r["donor"] == "Lionel Messi" and base64.b64decode(r["png"])[:4] == b"\x89PNG"
+                        assert refused("photo_head_icon", pid=699999)
+                        team = next(iter(hc._state()["teams"].values()))["players"]
+                        generic = [c["spid"] for c in team if (admin.card_look(c["spid"], c["spid"] % 1000000) or {}).get("fields", {}).get("headclasscode") == 1]
+                        if generic:
+                            shutil.copyfile(real_icon, os.path.join(os.path.dirname(cached), f"p{generic[0] % 1000000}.png"))
+                            r = A("photo_head_club")
+                            assert [m[0] for m in r["made"]] == [generic[0] % 1000000] and r["made"][0][2] == "Lionel Messi"
+                            assert {s[2] for s in r["skipped"]} <= {"phd_skip_icon", "phd_skip_face"}
+                            assert A("photo_head_club")["made"] == []  # once
+                            A("photo_head_delete", pid=generic[0] % 1000000)
+                    finally:
+                        admin.photo_donors = real_donors
+                else:
+                    print("photo heads: no YuNet model or picture here, its checks skipped")
+            finally:
+                for m, (a, b) in zip(mods, ph_kept):
+                    m.DIR, m.HEADS = a, b
+                    m.DONORS = os.path.join(a, "donors.json")
         finally:
             (gen_teams.DB, admin.CARD_EDITS, admin.CREST_BACKUP, admin.INSTALL_CMD, hc.ASSETS, admin.CUSTOM_SEASONS, admin.SEASON_ICONS,
              hc.CUSTOM_COLORS, hc.FACES, admin.ASSET_LOG) = kept

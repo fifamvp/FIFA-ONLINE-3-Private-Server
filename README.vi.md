@@ -287,6 +287,9 @@ Item saya, Gudang bên dưới là tên màn hình trong game, được giữ ng
   giải đấu và ảnh staff còn thiếu từ fifaaddict.com ở chế độ nền (mỗi lần một loại; dừng và tải tiếp lúc nào cũng
   được). Tab này chạy `tools/fa_faces.py`, công cụ này giờ nhận thêm `--leagues`. "Default ball" trên màn hình
   cài đặt trận hiện quả bóng EA SPORTS, cờ nhỏ dùng ảnh cờ lớn, và các màn hình Cup có cúp và skin riêng.
+  Ảnh cầu thủ fifaaddict không có (hoặc từ chối) sẽ lấy từ FC Online (FO4) (cùng player id của EA; cầu thủ mới của
+  server lấy ảnh thẻ FO4 từ fifaaddict), việc quét bao gồm mọi thẻ trong cơ sở dữ liệu, khi bị từ chối sẽ chờ lâu hơn rồi
+  tiếp tục thay vì dừng, và *Tải tất cả ảnh còn thiếu* lấy mọi loại trong một lần.
 - **Tên phần thưởng khi dùng gói ngôn ngữ** (issue #36): với gói tiếng Việt, danh sách thành tích hiện
   "undefined" trước mỗi phần thưởng và báo lỗi UI, vì máy chủ chỉ đặt tên vật phẩm thưởng bằng tiếng Indonesia và
   tiếng Hàn. Giờ mọi ngôn ngữ của client đều có tên.
@@ -307,6 +310,17 @@ Item saya, Gudang bên dưới là tên màn hình trong game, được giữ ng
   đệm của client (logo gốc giữ trong `gamedata/crest_backup`) và, trong hộp thoại thẻ, ảnh cầu thủ bằng PNG/JPG
   của bạn hoặc ảnh của spid / player id khác (từ bộ nhớ đệm hoặc fifaaddict.com) cho mọi thẻ của cầu thủ hoặc chỉ một thẻ (issue #36; `gamedata/faces/p<id>.png`, được phục vụ trước
   ảnh trong bộ nhớ đệm; ô Khuôn mặt 3D cũng tìm đầu theo tên cầu thủ). Chưa có áo đấu và CLB mới.
+- **Khuôn mặt 3D từ ảnh** (tab Database, hộp thoại thẻ): với cầu thủ có khuôn mặt chung, ảnh chụp cận mặt từ
+  phía trước trở thành da mặt trên đầu 3D đã quét của một cầu thủ khác (người cho: hình đầu và tóc đi kèm, mắt
+  vẫn là của người cho). Bấm 11 điểm trên ảnh (mắt, mũi, khóe miệng, cằm, trán, thái dương, hàm), chọn người
+  cho rồi bấm Tạo; Terapkan ke game đưa đầu này vào client (`data_7.big`, dựng lại từ bản gốc) cho mọi thẻ của
+  cầu thủ dùng dòng player id hoặc đầu chung. Lưu trong `gamedata/photo_heads`. Ở khoảng cách camera trận đấu
+  trông giống ảnh, với ánh sáng của ảnh và hình đầu của người cho.
+  *Lấy từ ảnh cầu thủ* điền ảnh, các điểm và người cho từ ảnh FO3 của cầu thủ (trong bộ nhớ đệm, nếu không thì
+  từ fifaaddict.com): bộ dò khuôn mặt YuNet (OpenCV Zoo, MIT; tải một lần vào `gamedata/yunet`) tìm mắt, mũi và
+  miệng, người cho là đầu quét gần nhất về màu da và tóc (màu và kiểu, từ ảnh của chính người cho), không râu.
+  Nút trong tab Database làm việc này cho mọi cầu thủ mặt chung trong CLB có ảnh (cầu thủ mới không có ảnh FO3
+  bị bỏ qua).
 - **Thế giới FO3 cổ điển** (issue #38): *Dunia game* trong tab Database chọn Hiện đại (CLB AI, phần chọn CLB
   và gói This Season dùng thẻ 26 LIVE, như trước; mùa tự tạo cũng hiện trong tìm kiếm Market) hoặc Cổ điển FO3:
   mọi CLB dùng đội hình 2017 gốc của FO3, This Season = '17, còn các mùa thêm vào (25 / 26 LIVE, WC18, mùa tự tạo)
@@ -414,8 +428,9 @@ Chưa làm: chơi online với người khác (xếp hạng PvP, giao hữu, Kin
 | `tools/eatrax_song.py` | Đặt một bài hát lên đầu nhạc menu EA Trax dưới dạng EALayer3, thay TrackID 1 (sửa `data_0.big` / `data_1.big` bằng cách ghi nối thêm; `--restore` khôi phục bản gốc). Làm game crash sau trận, xem lỗi đã biết. |
 | `tools/fa_sync.py` | Đồng bộ giá từ fifaaddict.com. |
 | `tools/fo4_season.py` | Thêm thẻ 26 LIVE và 25 LIVE của FIFA Online 4 (dữ liệu fifaaddict, chỉ số tính là +0) thành hai mùa mới với biểu tượng mùa của FO4: `fetch`, `collect` + `import`, `build`, `install` (ghi đè các mục trong `data_0.big` tại chỗ vì kích thước tệp không được đổi, và ghi nối thêm vào `Label.big` và `Module.big`; `restore` khôi phục tất cả). `hud` chỉ vá `Module.big`, cho client đã cài mùa giải từ trước: ô tên cầu thủ trong trận trước đây hiện huy hiệu '17 cho mọi thẻ 2017 và FO4, giờ hiện mùa của chính thẻ đó. `wc18` lấy 300 cầu thủ hay nhất trong danh sách đội tuyển World Cup 2018 cho `build` (chỉ số FIFA 18 World Cup của futwiz, danh sách và câu lạc bộ từ Wikipedia): mùa WC18 (mã 78), thẻ ở +1 bằng chỉ số World Cup - 5, với biểu tượng "18" màu xanh lá như biểu tượng World Cup của chính FO3; team color "2018 WC All-Star" (mùa) và "18 WC <quốc gia>" (thẻ của từng quốc gia), đặc tính lấy từ thẻ FO3 và thẻ FIFA 18 của cầu thủ. |
-| `tools/fa_faces.py` | Thêm ảnh mặt nhỏ của cầu thủ còn thiếu trong bộ nhớ đệm của client (fifaaddict có cùng loại PNG 128x128); `--crests` thêm logo CLB còn thiếu (đa số CLB không có trong bộ nhớ đệm nên game hiện logo mặc định); `--staffs` thêm ảnh staff (bộ nhớ đệm chỉ có 7 trong 71 staff máy chủ phát). Chạy tiếp được nếu bị ngắt, `--remove` hoàn tác. |
+| `tools/fa_faces.py` | Thêm ảnh mặt nhỏ của cầu thủ còn thiếu trong bộ nhớ đệm của client (fifaaddict có cùng loại PNG 128x128); `--crests` thêm logo CLB còn thiếu (đa số CLB không có trong bộ nhớ đệm nên game hiện logo mặc định); `--staffs` thêm ảnh staff (bộ nhớ đệm chỉ có 7 trong 71 staff máy chủ phát). Chạy tiếp được nếu bị ngắt, `--remove` hoàn tác. Ảnh cầu thủ fifaaddict không có sẽ lấy từ FC Online (FO4); `--all` lấy mọi loại. |
 | `tools/club_history.py` | Sự nghiệp CLB đến mùa hiện tại cho tab Karakteristik trong thông tin cầu thủ: cầu thủ trên Wikidata được ghép với cầu thủ FO3 theo ngày sinh và tên, các CLB (P54: năm, cho mượn; bỏ đội tuyển và đội trẻ) được ghép với ID đội của EA (lịch sử FO3, rồi tên trong TEAMNAMES, nếu không có thì ID mới có tên trong TEAMNAMES), lưu vào `gamedata/club_history.json`; `fo4_season.py install` đưa vào client. `show TÊN` in lịch sử của một cầu thủ. |
+| `tools/photo_head.py` | Khuôn mặt 3D từ ảnh: đọc và ghi các tệp đầu quét của client (RX3 / chunkzip, texture mặt DXT1 512×512), uốn ảnh lên texture mặt theo 11 điểm rồi hòa vào (OpenCV), và dựng lại `data_7.big` với các tệp đầu từ ảnh (mesh và tóc của người cho với id đầu mới từ 99.000.000). `uv HEADASSETID OUT.png` lưu texture mặt của một đầu. Các điểm có thể lấy từ YuNet (`landmarks`) và người cho từ `donor_looks` / `suggest`. |
 | `tools/draft_icons.py` | Vẽ biểu tượng Shop cho các gói draft (bộ nhớ đệm của client không có ảnh draft) vào `assets/externalAssets/shop/`, máy chủ gửi các ảnh này trước ảnh của client; `<icon> <tag> <picks>` vẽ thêm một biểu tượng cho gói tạo trên trang admin. Cần Pillow. |
 | `tools/re/` | Công cụ hỗ trợ dịch ngược: `bigdir.py` (bảng lưu trữ BIg4), `refpack.py` (codec RefPack), `eadb.py` (bảng cơ sở dữ liệu "DB" của EA), `abc*.py` (phân tích / tìm kiếm / khai thác cấu trúc bytecode AS3), `gfxx.py` (SWF giao diện), `memgrab.py`, `dbwin.py` (đầu ra debug của client), `relay_emu.py` (bộ mã hóa gói relay PvP và relay thử nghiệm), `gamectl.ps1` (điều khiển cửa sổ client khi kiểm thử). |
 | `blaze.py`, `server.py`, `test_client.py`, `analyze_capture.py` | Khung EA Blaze (Fire/TDF) và máy chủ kiểm thử loopback từ giai đoạn đầu của dự án; sau đó hóa ra client dùng REST + messenger. |

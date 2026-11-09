@@ -1,0 +1,489 @@
+"""Photo heads (user 2026-11-09: "di admin panel buat 3d model berdasarkan foto close up pemain lalu
+simpan di folder client untuk pemain2 yang masih generic face", then "Coba level 1 saja"): a
+player's face from a close-up photo, painted on the 3D head of a scanned "donor" player.
+
+A scanned head (engine DB headclasscode 0) is a set of files named by its headassetid:
+  data_3.big faces/face_<id>_0_0_0_0_0_0_0_0_textures.rx3   the face: one 512x512 DXT1 texture
+             (10 mips), the head unwrapped from the front, ears / teeth / tongue along the bottom
+  data_4.big heads/head_<id>_0.rx3, hair/hair_<id>_0_0.rx3, hair/hair_<id>_0_textures.rx3
+  data_6.big hairlod/hairlod_<id>_0_0.rx3
+Each is a plain "RX3l" file or a "chunkzip" of one (raw deflate chunks); the client reads both,
+and no file carries its own id. So a photo head is the donor's mesh and hair under a new id
+(from ID_BASE: headassetid goes to 99,999,999, the highest used is 97,999,916) with a face
+texture made from the photo: warped onto the donor's texture over the points clicked on the
+photo (POINTS, matched to UV), its colours blended into the donor's skin, the eyes kept from the
+donor (they sit on its eye sockets).
+
+The heads live in gamedata/photo_heads (HEADS: {id: {"pid": player id, "row": donor engine row,
+"donor": its headassetid, "made": date}}, <id>.png the face texture); install (fo4_season.py
+install) puts their files in data_7.big, the client's smallest archive (5 KB: the locale ini
+files), rebuilt from its original each time, and the player's engine rows wear it
+(fo4_season.photo_heads).
+
+python tools/photo_head.py selftest | uv HEADASSETID OUT.png [--game DIR]
+"""
+import json, os, struct, sys, zlib
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+sys.path.insert(0, os.path.join(HERE, "re"))
+import bigdir
+
+DIR = os.path.join(ROOT, "gamedata", "photo_heads")
+HEADS = os.path.join(DIR, "heads.json")
+GAME = os.environ.get("FO3_GAME", r"D:\FO3ID\32795")
+ID_BASE = 99000000
+ARCHIVE = os.path.join("data", "data_7.big")
+TEX = 0x7A0B60DA  # an RX3 texture section
+SIZE = 512
+FILES = {  # file name pattern -> the archive the client ships it in
+    "data/sceneassets/faces/face_{}_0_0_0_0_0_0_0_0_textures.rx3": "data_3.big",
+    "data/sceneassets/heads/head_{}_0.rx3": "data_4.big",
+    "data/sceneassets/hair/hair_{}_0_0.rx3": "data_4.big",
+    "data/sceneassets/hair/hair_{}_0_textures.rx3": "data_4.big",
+    "data/sceneassets/hairlod/hairlod_{}_0_0.rx3": "data_6.big",
+}
+FACE_FILE = next(iter(FILES))
+# The points clicked on the photo, in order (the subject's right = the photo's left), and where
+# they sit on a face texture (UV pixels).
+POINTS = ("eye_r", "eye_l", "nose", "mouth_r", "mouth_l", "chin", "forehead", "temple_r", "temple_l", "jaw_r", "jaw_l")
+UV = {"eye_r": (205, 168), "eye_l": (307, 168), "nose": (256, 216), "mouth_r": (220, 265), "mouth_l": (292, 265),
+      "chin": (256, 340), "forehead": (256, 100), "temple_r": (150, 145), "temple_l": (362, 145),
+      "jaw_r": (160, 290), "jaw_l": (352, 290)}
+# The points found by themselves (user: "Ya, pakai YuNet"): OpenCV Zoo's YuNet face detector (MIT)
+# gives the eyes, the nose tip and the mouth corners; the rest follow from the face's proportions,
+# in eye distances (across) and eye-to-mouth distances (down) from between the eyes, as measured on
+# FO3's player pictures (the edges a little inside the face, off the background).
+MODEL_URL = "https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx"
+MODEL_SHA256 = "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4"
+MODEL = os.path.join(ROOT, "gamedata", "yunet", "face_detection_yunet_2023mar.onnx")
+SHAPE = {"chin": (0, 1.7), "forehead": (0, -.85), "temple_r": (-.85, -.33), "temple_l": (.85, -.33),
+         "jaw_r": (-.72, 1.22), "jaw_l": (.72, 1.22)}
+DONORS = os.path.join(DIR, "donors.json")  # the scanned heads' looks (donor_looks), made once
+
+
+def unchunk(b):
+    """An RX3 file from a big entry ("chunkzip": BE version, size, chunk size, count; each chunk
+    u32 BE length + u32 deflated, its data 16-aligned)."""
+    if b[:8] != b"chunkzip":
+        return b
+    size, _, count = struct.unpack(">III", b[12:24])
+    out, pos = bytearray(), 0x28
+    for _ in range(count):
+        pos = ((pos + 8 + 15) & ~15) - 8
+        n, deflated = struct.unpack(">II", b[pos:pos + 8])
+        pos += 8
+        out += zlib.decompress(b[pos:pos + n], -15) if deflated else b[pos:pos + n]
+        pos += n
+    assert len(out) == size, (len(out), size)
+    return bytes(out)
+
+
+def _texture(rx3):
+    """[(data offset, width, height, size)] of every mip of an RX3's DXT1 texture."""
+    n = struct.unpack("<I", rx3[12:16])[0]
+    off = next(o for h, o, _, _ in (struct.unpack("<4I", rx3[16 + 16 * i:32 + 16 * i]) for i in range(n)) if h == TEX)
+    _, _, _, w, h, fmt, mips = struct.unpack("<IHHHHHH", rx3[off:off + 16])
+    assert fmt == 1, f"texture format {fmt}, not DXT1"
+    out, pos = [], off + 16
+    for _ in range(mips):
+        size = struct.unpack("<4I", rx3[pos:pos + 16])[2]
+        out.append((pos + 16, w, h, size))
+        pos += 16 + size
+        w, h = max(1, w // 2), max(1, h // 2)
+    return out
+
+
+def _rgb565(c):
+    import numpy as np
+    return np.stack([(c >> 11 & 31) * 255 // 31, (c >> 5 & 63) * 255 // 63, (c & 31) * 255 // 31], -1).astype(np.int32)
+
+
+def dxt1_decode(data, w, h):
+    """RGB uint8 array of a DXT1 image."""
+    import numpy as np
+    bw, bh = max(1, w // 4), max(1, h // 4)
+    d = np.frombuffer(data, np.uint8)[:bw * bh * 8].reshape(bh, bw, 8).astype(np.uint32)
+    c0, c1 = d[..., 0] | d[..., 1] << 8, d[..., 2] | d[..., 3] << 8
+    a, b = _rgb565(c0), _rgb565(c1)
+    four = (c0 > c1)[..., None]
+    pal = np.stack([a, b, np.where(four, (2 * a + b) // 3, (a + b) // 2), np.where(four, (a + 2 * b) // 3, 0)], 2)
+    bits = d[..., 4] | d[..., 5] << 8 | d[..., 6] << 16 | d[..., 7] << 24
+    img = np.zeros((bh * 4, bw * 4, 3), np.uint8)
+    for i in range(16):
+        idx = (bits >> 2 * i & 3)[..., None, None].repeat(3, -1)
+        img[i // 4::4, i % 4::4] = np.take_along_axis(pal, idx, 2)[:, :, 0]
+    return img[:h, :w]
+
+
+def dxt1_encode(img):
+    """DXT1 bytes of an RGB uint8 array (sides a multiple of 4, or under 4): per block, the ends
+    of the colours' spread along their main axis, then the nearest of the 4 palette colours."""
+    import numpy as np
+    h, w = img.shape[:2]
+    if h < 4 or w < 4:
+        img = np.pad(img, ((0, max(0, 4 - h)), (0, max(0, 4 - w)), (0, 0)), mode="edge")
+        h, w = img.shape[:2]
+    px = img.reshape(h // 4, 4, w // 4, 4, 3).swapaxes(1, 2).reshape(h // 4, w // 4, 16, 3).astype(np.float64)
+    mean = px.mean(2, keepdims=True)
+    cov = np.einsum("...ki,...kj->...ij", px - mean, px - mean)
+    axis = np.ones(cov.shape[:-1])
+    for _ in range(8):  # power iteration: the main axis
+        axis = np.einsum("...ij,...j->...i", cov, axis)
+        axis /= np.maximum(np.linalg.norm(axis, axis=-1, keepdims=True), 1e-9)
+    proj = np.einsum("...ki,...i->...k", px - mean, axis)
+    hi = mean[..., 0, :] + axis * proj.max(-1, keepdims=True)
+    lo = mean[..., 0, :] + axis * proj.min(-1, keepdims=True)
+
+    def q(c):
+        c = np.clip(np.rint(c), 0, 255).astype(np.uint32)
+        return (c[..., 0] * 31 + 127) // 255 << 11 | (c[..., 1] * 63 + 127) // 255 << 5 | (c[..., 2] * 31 + 127) // 255
+    c0, c1 = q(hi), q(lo)
+    swap = c0 < c1
+    c0, c1 = np.where(swap, c1, c0), np.where(swap, c0, c1)
+    a, b = _rgb565(c0), _rgb565(c1)
+    pal = np.stack([a, b, (2 * a + b) // 3, (a + 2 * b) // 3], 2).astype(np.float64)  # 4 colours (c0 > c1)
+    idx = ((px[:, :, :, None, :] - pal[:, :, None, :, :]) ** 2).sum(-1).argmin(-1).astype(np.uint32)
+    idx[c0 == c1] = 0  # one colour: the 3-colour mode, index 0
+    bits = np.zeros(idx.shape[:2], np.uint32)
+    for i in range(16):
+        bits |= idx[..., i] << 2 * i
+    out = np.zeros(idx.shape[:2] + (8,), np.uint8)
+    for start, v, n in ((0, c0, 2), (2, c1, 2), (4, bits, 4)):
+        for k in range(n):
+            out[..., start + k] = v >> 8 * k & 0xFF
+    return out.tobytes()
+
+
+def texture_image(rx3):
+    """The texture's first mip, as an RGB array."""
+    off, w, h, size = _texture(rx3)[0]
+    return dxt1_decode(rx3[off:off + size], w, h)
+
+
+def with_texture(rx3, img):
+    """The RX3 with its texture (every mip) made from an RGB array of its size."""
+    import numpy as np
+    from PIL import Image
+    out = bytearray(rx3)
+    for off, w, h, size in _texture(rx3):
+        mip = img if (w, h) == img.shape[1::-1] else np.asarray(Image.fromarray(img).resize((w, h), Image.LANCZOS))
+        data = dxt1_encode(mip)
+        assert len(data) == size, (w, h, len(data), size)
+        out[off:off + size] = data
+    return bytes(out)
+
+
+def donor_files(game, head):
+    """{file name pattern: the donor head's file as shipped}; KeyError when one is missing."""
+    data = os.path.join(game, "data")
+    return {p: bigdir.read(os.path.join(data, big), p.format(head)) for p, big in FILES.items()}
+
+
+def make(photo, points, donor_face, uv=None):
+    """The face texture (RGB array) from a photo (RGB array) whose POINTS are `points` [[x, y]...]
+    on the donor's face file: the photo inside the points' outline (but around the eyes) warped
+    triangle by triangle onto UV, blended in by Poisson cloning (its edge takes the donor's skin)."""
+    import cv2
+    import numpy as np
+    uv = uv or UV
+    base = np.ascontiguousarray(texture_image(unchunk(donor_face)))
+    src = np.float32(points)
+    dst = np.float32([uv[k] for k in POINTS])
+    assert src.shape == dst.shape, (src.shape, dst.shape)
+    photo = np.ascontiguousarray(photo)
+    d = float(np.linalg.norm(src[1] - src[0]))  # the photo's eyes, filled with the skin around them
+    holes = np.zeros(photo.shape[:2], np.uint8)  # (their whites would show around the donor's eyelids)
+    for p in src[:2]:
+        cv2.ellipse(holes, (int(p[0]), int(p[1])), (max(1, int(.3 * d)), max(1, int(.15 * d))), 0, 0, 360, 255, -1)
+    lips = np.zeros_like(holes)  # and a smile's teeth (the donor's lips are closed)
+    mouth, half = (src[3] + src[4]) / 2, float(np.linalg.norm(src[4] - src[3])) / 2
+    cv2.ellipse(lips, (int(mouth[0]), int(mouth[1])), (max(1, int(.9 * half)), max(1, int(.14 * d))), 0, 0, 360, 255, -1)
+    hsv = cv2.cvtColor(photo, cv2.COLOR_RGB2HSV)
+    holes |= lips & (((hsv[..., 2] > 170) & (hsv[..., 1] < 90)) * np.uint8(255))
+    photo = cv2.inpaint(photo, cv2.dilate(holes, np.ones((3, 3), np.uint8)), max(1, int(.1 * d)), cv2.INPAINT_TELEA)
+    warped = np.zeros_like(base)
+    mask = np.zeros(base.shape[:2], np.uint8)
+    sub = cv2.Subdiv2D((0, 0, SIZE, SIZE))
+    for p in dst:
+        sub.insert((float(p[0]), float(p[1])))
+    where = {(round(float(x)), round(float(y))): i for i, (x, y) in enumerate(dst)}
+    for t in sub.getTriangleList():
+        tri = [where.get((round(t[i]), round(t[i + 1]))) for i in (0, 2, 4)]
+        if None in tri:
+            continue
+        m = cv2.getAffineTransform(src[tri], dst[tri])
+        part = cv2.warpAffine(np.ascontiguousarray(photo), m, (SIZE, SIZE), flags=cv2.INTER_LINEAR,
+                              borderMode=cv2.BORDER_REFLECT)
+        tm = np.zeros_like(mask)
+        cv2.fillConvexPoly(tm, np.int32(np.rint(dst[tri])), 255)
+        warped[tm > 0] = part[tm > 0]
+        mask |= tm
+    mask = cv2.erode(mask, np.ones((5, 5), np.uint8))
+    x, y, w, h = cv2.boundingRect(mask)
+    if not w:
+        return base
+    # the photo's details over the donor's light: its broad shading (a lamp from one side) swapped
+    # for the donor's, both smoothed inside the face only
+    inside = (mask > 0).astype(np.float32)[..., None]
+    smooth = lambda img: cv2.GaussianBlur(img * inside, (0, 0), 24) / np.maximum(cv2.GaussianBlur(inside, (0, 0), 24)[..., None], 1e-3)
+    flat = warped.astype(np.float32) - smooth(warped.astype(np.float32)) + smooth(base.astype(np.float32))
+    warped = np.uint8(np.clip(np.rint(flat), 0, 255))
+    out = cv2.seamlessClone(warped, base, mask, (x + w // 2, y + h // 2), cv2.NORMAL_CLONE)
+    eyes = np.zeros(mask.shape, np.float32)  # the donor's eyelids stay on its eye sockets, faded in
+    for k in ("eye_r", "eye_l"):
+        cv2.ellipse(eyes, tuple(int(v) for v in uv[k]), (35, 19), 0, 0, 360, 1.0, -1)
+    eyes = cv2.GaussianBlur(eyes, (0, 0), 6)[..., None]
+    return np.uint8(np.rint(out * (1 - eyes) + base * eyes))
+
+
+def model():
+    """YuNet's file, fetched the first time (its pinned SHA-256 checked) into gamedata/yunet."""
+    import hashlib, urllib.request
+    if not os.path.isfile(MODEL):
+        os.makedirs(os.path.dirname(MODEL), exist_ok=True)
+        req = urllib.request.Request(MODEL_URL, headers={"User-Agent": "FO3-private-server photo heads"})
+        data = urllib.request.urlopen(req, timeout=60).read()
+        if hashlib.sha256(data).hexdigest() != MODEL_SHA256:
+            raise ValueError(f"{MODEL_URL}: not the expected file")
+        with open(MODEL + ".tmp", "wb") as f:
+            f.write(data)
+        os.replace(MODEL + ".tmp", MODEL)
+    return MODEL
+
+
+def landmarks(photo):
+    """The POINTS of the largest face on a photo (RGB array), or None without one."""
+    import cv2
+    import numpy as np
+    k = 512 / max(photo.shape[:2])  # YuNet finds the small faces of 128 px pictures once enlarged
+    img = cv2.resize(cv2.cvtColor(np.ascontiguousarray(photo), cv2.COLOR_RGB2BGR), None, fx=k, fy=k, interpolation=cv2.INTER_CUBIC)
+    det = cv2.FaceDetectorYN.create(model(), "", (img.shape[1], img.shape[0]), 0.6, 0.3, 50)
+    faces = det.detect(img)[1]
+    if faces is None or not len(faces):
+        return None
+    f = max(faces, key=lambda r: r[2] * r[3])
+    er, el, nose, mr, ml = (np.float64(f[i:i + 2]) / k for i in range(4, 14, 2))
+    mid, d = (er + el) / 2, np.linalg.norm(el - er)
+    ux = (el - er) / d
+    uy = np.array([-ux[1], ux[0]])
+    m = float(np.dot((mr + ml) / 2 - mid, uy))
+    pts = {"eye_r": er, "eye_l": el, "nose": nose, "mouth_r": mr, "mouth_l": ml,
+           **{n: mid + ux * a * d + uy * b * m for n, (a, b) in SHAPE.items()}}
+    h, w = photo.shape[:2]
+    return [[round(float(np.clip(pts[n][0], 0, w)), 1), round(float(np.clip(pts[n][1], 0, h)), 1)] for n in POINTS]
+
+
+def look(img, points):
+    """[skin L, a, b, beard, hair] of a face (RGB array) with its POINTS: the skin's colour (Lab of
+    the cheeks and forehead), how much darker the chin and jaw are, and the hair: [L, a, b] above
+    the hairline, how high its outline stands over the eyes and how much of the sides beside the
+    jaw it covers (long hair), from a picture's cut-out outline (None without hair to see). A
+    photo and a face texture (at UV) measure the same places."""
+    import cv2
+    import numpy as np
+    p = {n: np.float64(v) for n, v in zip(POINTS, points)}
+    eyes = (p["eye_r"] + p["eye_l"]) / 2
+    r = max(1, int(0.08 * np.linalg.norm(p["eye_l"] - p["eye_r"])))
+    img = np.ascontiguousarray(img)
+    lab = cv2.cvtColor(img, cv2.COLOR_RGB2LAB).astype(np.float64)
+    h, w = img.shape[:2]
+    fg = np.any(img != 150, axis=-1)  # a picture's background (picture()) does not count
+
+    def at(*xy):
+        m = np.zeros((h, w), np.uint8)
+        for x, y in xy:
+            cv2.circle(m, (int(np.clip(x, 0, w - 1)), int(np.clip(y, 0, h - 1))), r, 1, -1)
+        m = (m > 0) & fg
+        return lab[m].mean(0) if m.any() else None
+    skin = at((p["eye_r"] + p["jaw_r"]) / 2, (p["eye_l"] + p["jaw_l"]) / 2, (p["forehead"] + eyes) / 2)
+    mouth = (p["mouth_r"] + p["mouth_l"]) / 2
+    chin = at((mouth + p["chin"]) / 2, (p["mouth_r"] + p["jaw_r"]) / 2, (p["mouth_l"] + p["jaw_l"]) / 2)
+    hair = at(*(eyes + (p["forehead"] - eyes) * f for f in (1.5, 1.8, 2.1)))  # above the hairline
+    if skin is None:
+        skin = lab.reshape(-1, 3).mean(0)
+    beard = skin[0] - chin[0] if chin is not None else 0
+    if hair is not None:
+        d = np.linalg.norm(p["eye_l"] - p["eye_r"])
+        m = max(1.0, float(np.linalg.norm(mouth - eyes)))
+        x0, x1 = (int(np.clip(v, 0, w - 1)) for v in (eyes[0] - .1 * d, eyes[0] + .1 * d))
+        rows = np.flatnonzero(fg[:, x0:x1 + 1].any(1)[:int(np.clip(eyes[1], 1, h))])
+        top = (eyes[1] - rows[0]) / m if len(rows) else 0  # the outline's top over the eyes
+        y0, y1 = (int(np.clip(v, 0, h - 1)) for v in (mouth[1], p["chin"][1]))
+        sides = [fg[y0:y1 + 1, int(np.clip(a, 0, w - 1)):int(np.clip(b, 0, w - 1)) + 1]
+                 for a, b in ((p["jaw_r"][0] - .5 * d, p["jaw_r"][0] - .15 * d), (p["jaw_l"][0] + .15 * d, p["jaw_l"][0] + .5 * d))]
+        side = float(np.mean([s.mean() if s.size else 0 for s in sides]))
+        hair = [*hair, top, side]
+    return [round(float(v), 1) for v in (*skin, beard)] + [None if hair is None else [round(float(v), 2) for v in hair]]
+
+
+def donor_looks(game, rows, pictures=lambda pid: None):
+    """{headassetid: [engine row, *look]} of the scanned heads whose files are all in the client;
+    rows = {headassetid: an engine row wearing it}. The skin and beard are its face texture's (what
+    shows around the photo); the hair its player's picture's (pictures(player id) = its file, or
+    None), as the hair's colour is in its hair files (as masks) and on photos measured the same way
+    as the player's (None without one). Kept in DONORS (made once: ~2,000 textures and pictures)."""
+    import numpy as np
+    try:
+        with open(DONORS) as f:
+            kept = json.load(f)
+        if kept.get("version") == 4:
+            return {int(k): v for k, v in kept["heads"].items()}
+    except (OSError, ValueError, AttributeError):
+        pass
+    have = {p: {n for n, *_ in bigdir.entries(os.path.join(game, "data", big))} for p, big in FILES.items()}
+    out = {}
+    path = os.path.join(game, "data", FILES[FACE_FILE])
+    for head, row in sorted(rows.items()):
+        if not all(p.format(head) in have[p] for p in FILES):
+            continue
+        rx3 = unchunk(bigdir.read(path, FACE_FILE.format(head)))
+        off, w, h, size = _texture(rx3)[2]  # the 128 x 128 mip is enough
+        img = dxt1_decode(rx3[off:off + size], w, h)
+        out[head] = [row, *look(img, [np.float64(UV[n]) * w / SIZE for n in POINTS])]
+        pic, pts = pictures(row % 1000000), None
+        if pic:
+            try:
+                pic = picture(pic)
+                pts = landmarks(pic)
+            except Exception:  # not a picture
+                pass
+        out[head][-1] = look(pic, pts)[4] if pts else None
+    os.makedirs(DIR, exist_ok=True)
+    with open(DONORS, "w") as f:
+        json.dump({"version": 4, "heads": {str(k): v for k, v in out.items()}}, f)
+    return out
+
+
+def suggest(photo_look, donors):
+    """The donor head (headassetid) whose look is closest to a photo's: skin colour first, then
+    hair, and a clean-shaven one (a photo's own beard comes with it; a donor's would show around it,
+    and a small picture's lighting hides how much beard it has)."""
+    want = photo_look[4]
+
+    def far(v):
+        L, a, b, beard, hair = v[1:]
+        return ((L - photo_look[0]) ** 2 + 2 * (a - photo_look[1]) ** 2 + 2 * (b - photo_look[2]) ** 2) ** .5 \
+            + (0 if want is None else 40 if hair is None  # the hair: lightness and colour (red, blond)
+               else 0.6 * abs(hair[0] - want[0]) + 1.5 * (abs(hair[1] - want[1]) + abs(hair[2] - want[2]))
+               + 15 * abs(hair[3] - want[3]) + 30 * abs(hair[4] - want[4])) \
+            + 0.6 * max(0, beard - 12)
+    return min(donors, key=lambda k: far(donors[k]))
+
+
+def picture(path):
+    """A player's picture (a cut-out PNG) as an RGB array on grey."""
+    import numpy as np
+    from PIL import Image
+    im = Image.open(path).convert("RGBA")
+    bg = Image.new("RGBA", im.size, (150, 150, 150, 255))
+    bg.alpha_composite(im)
+    return np.asarray(bg.convert("RGB"))
+
+
+def load():
+    try:
+        with open(HEADS) as f:
+            return {int(k): v for k, v in json.load(f).items()}
+    except (OSError, ValueError):
+        return {}
+
+
+def save(heads):
+    os.makedirs(DIR, exist_ok=True)
+    with open(HEADS, "w") as f:
+        json.dump({str(k): v for k, v in sorted(heads.items())}, f, indent=1)
+
+
+def new_id(heads):
+    return max(heads, default=ID_BASE - 1) + 1
+
+
+def files(game, heads=None):
+    """{entry name: bytes} of every photo head: the donor's head and hair under its id and its own
+    face texture (gamedata/photo_heads/<id>.png). A head whose donor or picture is gone is left out."""
+    import numpy as np
+    from PIL import Image
+    out = {}
+    for hid, h in (load() if heads is None else heads).items():
+        try:
+            got = donor_files(game, h["donor"])
+            img = np.asarray(Image.open(os.path.join(DIR, f"{hid}.png")).convert("RGB"))
+        except (KeyError, OSError):
+            continue
+        got[FACE_FILE] = with_texture(unchunk(got[FACE_FILE]), img)
+        out.update({p.format(hid): b for p, b in got.items()})
+    return out
+
+
+def archive(game, original):
+    """(data_7.big from its original `original` plus every photo head's files, how many heads)."""
+    add = files(game)
+    old = [(n, bigdir.raw(original, n)) for n, *_ in bigdir.entries(original)]
+    return bigdir.build(old + sorted(add.items()), bigdir.tail(original)), len(add) // len(FILES)
+
+
+def install(game, original):
+    """Rebuild the client's data_7.big from its original (fo4_season's backup copy) plus every
+    photo head's files. Returns how many heads."""
+    data, n = archive(game, original)
+    with open(os.path.join(game, ARCHIVE), "wb") as f:
+        f.write(data)
+    return n
+
+
+def _blank_texture(size, mips):
+    """An RX3 with one blank DXT1 texture (the self-test's donor)."""
+    sec, w = b"", size
+    for _ in range(mips):
+        n = max(1, w // 4) ** 2 * 8
+        sec += struct.pack("<4I", max(1, w // 4) * 8, max(1, w // 4), n, 0) + bytes(n)
+        w = max(1, w // 2)
+    sec = struct.pack("<IHHHHHH", 16 + len(sec), 1, 1, size, size, 1, mips) + sec
+    return b"RX3l" + struct.pack("<III", 4, 0, 1) + struct.pack("<4I", TEX, 32, len(sec), 0) + sec
+
+
+def cmd_selftest():
+    import numpy as np
+    rng = np.random.default_rng(1)
+    img = (rng.random((16, 16, 3)) * 255).astype(np.uint8)
+    img[:4, :4] = 77  # a one-colour block
+    back = dxt1_decode(dxt1_encode(img), 16, 16)
+    assert np.abs(back.astype(int) - img).mean() < 40 and (back[:4, :4] == back[0, 0]).all()
+    smooth = np.dstack([np.tile(np.linspace(0, 255, 64), (64, 1))] * 3).astype(np.uint8)
+    assert np.abs(dxt1_decode(dxt1_encode(smooth), 64, 64).astype(int) - smooth).max() < 12
+    assert len(dxt1_encode(img[:2, :2])) == 8
+    small = _blank_texture(8, 4)
+    new = with_texture(small, np.full((8, 8, 3), 200, np.uint8))
+    assert len(new) == len(small) and np.abs(texture_image(new).astype(int) - 200).max() <= 4
+    deflate = zlib.compressobj(9, zlib.DEFLATED, -15)
+    body = deflate.compress(small) + deflate.flush()
+    cz = b"chunkzip" + struct.pack(">IIIII", 2, len(small), 0x2D000, 1, 16) + bytes(12) + struct.pack(">II", len(body), 1) + body
+    assert unchunk(cz) == small and unchunk(small) == small
+    # a photo whose points are UV's at half size: its dark mole on the nose lands on the nose, the
+    # skin takes the donor's colour (Poisson), the eyes and the rest stay the donor's
+    import cv2
+    donor = with_texture(_blank_texture(SIZE, 10), np.full((SIZE, SIZE, 3), (180, 120, 100), np.uint8))
+    skin = texture_image(donor)[5, 5].astype(int)
+    photo = np.full((256, 256, 3), (230, 200, 190), np.uint8)
+    cv2.circle(photo, (UV["nose"][0] // 2, UV["nose"][1] // 2), 4, (20, 20, 20), -1)
+    out = make(photo, [[UV[k][0] / 2, UV[k][1] / 2] for k in POINTS], donor).astype(int)
+    at = lambda k, dy=0: out[UV[k][1] + dy, UV[k][0]]
+    assert at("nose").sum() < skin.sum() - 150 and abs(at("nose", 30) - skin).max() < 20, (at("nose"), at("nose", 30))
+    assert abs(at("eye_r") - skin).max() < 8 and (out[5, 5] == skin).all(), (at("eye_r"), out[5, 5])
+    assert new_id({}) == ID_BASE and new_id({ID_BASE: {}}) == ID_BASE + 1
+    print("photo_head selftest ok")
+
+
+if __name__ == "__main__":
+    args = sys.argv[1:]
+    game = args[args.index("--game") + 1] if "--game" in args else GAME
+    if args[:1] == ["selftest"]:
+        cmd_selftest()
+    elif args[:1] == ["uv"] and len(args) >= 3:
+        from PIL import Image
+        face = bigdir.read(os.path.join(game, "data", FILES[FACE_FILE]), FACE_FILE.format(int(args[1])))
+        Image.fromarray(texture_image(unchunk(face))).save(args[2])
+        print(args[2])
+    else:
+        print(__doc__)

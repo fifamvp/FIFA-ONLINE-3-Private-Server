@@ -253,6 +253,8 @@ Gudang 등은 게임에 표시되는 화면 이름이라, 게임에서 찾기 �
   사진을 fifaaddict.com에서 백그라운드로 내려받음(한 번에 한 종류씩, 언제든 멈추고 이어서 받을 수 있음). 이 탭은
   `tools/fa_faces.py`를 실행하며, 이 도구는 이제 `--leagues`도 받음. 경기 설정 화면의 "Default ball"에 EA SPORTS 공이
   나오고, 작은 국기는 큰 국기 이미지를 쓰며, Cup 화면에 트로피와 스킨이 나옴.
+  fifaaddict에 없는(또는 거절된) 선수 사진은 FC Online(FO4)에서 받음(같은 EA 선수 ID; 서버의 새 선수는 fifaaddict의 FO4 카드 사진). 데이터베이스의
+  모든 카드를 훑고, 거절되면 멈추지 않고 점점 더 기다렸다 이어가며, *없는 것 모두 다운로드*가 모든 종류를 한 번에 받음.
 - **언어 팩을 쓸 때의 보상 이름**(issue #36): 베트남어 팩에서는 업적 목록의 보상마다 앞에 "undefined"가 붙고 UI 오류가
   났음. 서버가 보상 아이템 이름을 인도네시아어와 한국어로만 붙였기 때문. 이제 클라이언트의 모든 언어에 이름이 있음.
 - **AI와 Exhibition**(issue #36): Multiple > Exhibition에서 방이 열림. 화살표나 Pilih Team으로 라이선스 클럽을
@@ -271,6 +273,15 @@ Gudang 등은 게임에 표시되는 화면 이름이라, 게임에서 찾기 �
   `gamedata/crest_backup`), 카드 창에서는 선수 사진을 내 PNG/JPG나 다른 spid / 선수 ID의 사진(캐시
   또는 fifaaddict.com)으로 바꿈(모든 카드 또는 이 카드만; issue #36;
   `gamedata/faces/p<id>.png`, 캐시보다 먼저 제공; 3D 얼굴 칸은 선수 이름으로 머리를 찾음). 유니폼과 새 클럽은 아직 없음.
+- **사진으로 만든 3D 얼굴**(Database 탭, 카드 창): 일반 얼굴을 쓰는 선수의 정면 클로즈업 사진을 다른 선수의
+  스캔된 3D 머리에 얼굴 피부로 입힘(기증자: 머리 모양과 머리카락이 따라오고 눈은 기증자의 것). 사진에 11개 점(눈,
+  코, 입꼬리, 턱, 이마, 관자놀이, 턱선)을 클릭하고 기증자를 고른 뒤 만들기를 누르면, Terapkan ke game이 이 선수의
+  선수 ID 행이나 일반 머리를 쓰는 모든 카드에 그 머리를 클라이언트에 넣음(`data_7.big`, 원본에서 다시 만듦).
+  `gamedata/photo_heads`에 저장. 경기 카메라 거리에서 사진과 닮아 보이며, 조명은 사진의 것, 머리 모양은 기증자의 것.
+  *선수 사진에서 가져오기*는 선수의 FO3 사진(캐시, 없으면 fifaaddict.com)에서 사진, 점, 기증자를 채움: YuNet 얼굴
+  검출기(OpenCV Zoo, MIT; `gamedata/yunet`에 한 번 받음)가 눈, 코, 입을 찾고, 피부색과 머리카락(색과 모양, 기증자 자신의
+  사진 기준)이 가장 비슷한 수염 없는 스캔 머리를 기증자로 고름. Database 탭의 버튼은 사진이 있는 클럽의 모든 일반 얼굴
+  선수에게 이를 적용(FO3 사진이 없는 새 선수는 제외).
 - **클래식 FO3 세계**(issue #38): Database 탭의 *Dunia game*에서 모던(AI 클럽, 클럽 선택, This Season 팩이
   26 LIVE 카드 사용, 기존과 같음; 직접 만든 시즌도 마켓 검색에 표시) 또는 클래식 FO3를 고름: 모든 클럽이 FO3 원래의
   2017 스쿼드, This Season = '17, 추가 시즌(25 / 26 LIVE, WC18, 직접 만든 시즌)은 팩, 마켓, 트레이드, 가상 감독 스쿼드에
@@ -369,8 +380,9 @@ EALayer3(6.5 MB, `tools/re/ealayer3.py`)로 넣어도, 원본보다 작은 음�
 | `tools/eatrax_song.py` | 노래를 EALayer3로 EA Trax 메뉴 음악의 맨 앞에 넣어 TrackID 1을 교체(`data_0.big` / `data_1.big` 끝에 덧붙여 수정, `--restore`로 원본 복구). 경기 후 게임이 튕김, 알려진 문제 참고. |
 | `tools/fa_sync.py` | fifaaddict.com 가격 동기화. |
 | `tools/fo4_season.py` | FIFA Online 4의 26 LIVE·25 LIVE 카드(fifaaddict 데이터, 능력치는 +0 기준)를 FO4 시즌 아이콘과 함께 새 시즌 두 개로 추가: `fetch`, `collect` + `import`, `build`, `install`(`data_0.big`은 크기가 바뀌면 안 되므로 그 자리에 다시 쓰고 `Label.big`과 `Module.big`은 끝에 덧붙여 수정, `restore`로 모두 원본 복구). `hud`는 시즌을 먼저 설치한 클라이언트용으로 `Module.big`만 패치함: 경기 중 선수 이름 상자가 2017·FO4 카드 모두에 '17 배지를 보였으나 이제 카드 자신의 시즌을 보임. `wc18`은 `build`용으로 2018 월드컵 엔트리 상위 300명을 읽음(futwiz의 FIFA 18 월드컵 능력치, 위키백과의 엔트리와 소속 클럽): 시즌 WC18(코드 78), +1 카드의 OVR은 월드컵 능력치 - 5, FO3 자체 월드컵 아이콘과 같은 초록색 "18" 아이콘. 팀 컬러 "2018 WC All-Star"(시즌)와 "18 WC <국가>"(국가별 카드), 특성은 선수의 FO3 카드와 FIFA 18 카드에서 가져옴. |
-| `tools/fa_faces.py` | 클라이언트 캐시에 없는 선수 미니 얼굴 추가(fifaaddict가 같은 128x128 PNG 제공). `--crests`는 없는 구단 엠블럼 추가(대부분의 구단이 캐시에 없어 게임이 기본 엠블럼을 보여 줌). `--staffs`는 스태프 사진 추가(캐시에는 서버가 주는 71명 중 7명만 있음). 중단 후 이어서 실행 가능, `--remove`로 되돌림. |
+| `tools/fa_faces.py` | 클라이언트 캐시에 없는 선수 미니 얼굴 추가(fifaaddict가 같은 128x128 PNG 제공). `--crests`는 없는 구단 엠블럼 추가(대부분의 구단이 캐시에 없어 게임이 기본 엠블럼을 보여 줌). `--staffs`는 스태프 사진 추가(캐시에는 서버가 주는 71명 중 7명만 있음). 중단 후 이어서 실행 가능, `--remove`로 되돌림. fifaaddict에 없는 선수 사진은 FC Online(FO4)에서 받음; `--all`은 모든 종류를 받음. |
 | `tools/club_history.py` | 선수 정보 특성 탭의 현재 시즌까지 클럽 경력: Wikidata의 축구 선수를 생년월일과 이름으로 FO3 선수와 맞추고, 그 클럽(P54: 연도, 임대, 국가대표·유소년팀 제외)을 EA 팀 ID로 연결합니다(FO3 자체 경력, TEAMNAMES 이름, 없으면 TEAMNAMES에 이름을 넣은 새 ID). 결과는 `gamedata/club_history.json`, `fo4_season.py install`이 클라이언트에 넣습니다. `show 이름`은 선수의 경력을 출력합니다. |
+| `tools/photo_head.py` | 사진으로 만든 3D 얼굴: 클라이언트의 스캔 머리 파일(RX3 / chunkzip, 512×512 DXT1 얼굴 텍스처)을 읽고 쓰며, 사진을 11개 점으로 얼굴 텍스처에 맞춰 변형해 섞고(OpenCV), 사진 머리 파일(기증자의 메시와 머리카락, 99,000,000부터의 새 머리 ID)로 `data_7.big`을 다시 만듦. `uv HEADASSETID OUT.png`는 머리의 얼굴 텍스처를 저장. 점은 YuNet(`landmarks`), 기증자는 `donor_looks` / `suggest`로 정할 수 있음. |
 | `tools/draft_icons.py` | 드래프트 팩의 상점 아이콘을 `assets/externalAssets/shop/`에 그림(클라이언트 캐시에 드래프트 이미지가 없음). 서버는 이 이미지를 클라이언트 이미지보다 먼저 제공. `<icon> <tag> <picks>`로 관리자 페이지에서 만든 팩용 아이콘을 하나 더 그림. Pillow 필요. |
 | `tools/re/` | 리버스 엔지니어링 도구: `bigdir.py`(BIg4 아카이브 표), `refpack.py`(RefPack 코덱), `eadb.py`(EA "DB" 데이터베이스 표), `abc*.py`(AS3 바이트코드 파서 / 검색 / 구조 추출), `gfxx.py`(UI SWF), `memgrab.py`, `dbwin.py`(클라이언트 디버그 출력), `relay_emu.py`(PvP 릴레이 패킷 코덱과 테스트 릴레이), `gamectl.ps1`(테스트용 클라이언트 창 조작). |
 | `blaze.py`, `server.py`, `test_client.py`, `analyze_capture.py` | 프로젝트 초기 단계의 EA Blaze 프레이밍(Fire/TDF)과 루프백 테스트 서버. 나중에 클라이언트가 REST + messenger를 쓰는 것으로 밝혀짐. |

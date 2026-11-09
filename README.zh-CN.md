@@ -230,6 +230,8 @@
   俱乐部队徽、联赛标志和教练照片（一次一种；可随时停止、随时继续）。它运行的是 `tools/fa_faces.py`，
   该工具现在也支持 `--leagues`。比赛设置界面的 "Default ball" 会显示 EA SPORTS 的球，小国旗改用大国旗图片，
   Cup 界面也有了奖杯和皮肤。
+  fifaaddict 没有（或拒绝）的球员头像改从 FC Online（FO4）获取（相同的 EA 球员 ID；服务器新增的球员用 fifaaddict 上其 FO4 卡的头像），扫描覆盖数据库中
+  所有球员卡，被拒绝时会等待更久后继续而不是停止，“下载全部缺失的图片”一次获取所有类型。
 - **使用语言包时的奖励名称**（issue #36）：使用越南语语言包时，成就列表的每个奖励前都显示 "undefined"，还会出现
   UI 错误，因为服务器只用印尼语和韩语给奖励道具命名。现在客户端的每种语言都有名称了。
 - **与 AI 进行 Exhibition**（issue #36）：Multiple > Exhibition 可以开房了。用箭头或 Pilih Team 选择授权俱乐部，
@@ -245,6 +247,13 @@
   `tools/fo4_season.py install`），然后运行 `play.bat`。该页还能替换客户端缓存中的俱乐部队徽（原队徽保存在
   `gamedata/crest_backup`），并可在球员卡窗口用自己的 PNG/JPG 或其他 spid / 球员 ID 的头像（来自缓存或 fifaaddict.com）替换球员头像，作用于该球员所有卡或仅本卡（issue #36；
   `gamedata/faces/p<id>.png`，优先于缓存中的头像；3D 脸型栏也可按球员名字查找头部）。球衣和新俱乐部还没有做。
+- **用照片制作 3D 脸**（Database 页，球员卡窗口）：给通用脸的球员用正面特写照片，作为脸部皮肤贴到另一名已扫描
+  球员的 3D 头上（供体：头型和头发随之而来，眼睛保留供体的）。在照片上点 11 个点（眼睛、鼻子、嘴角、下巴、额头、
+  太阳穴、下颌），选择供体后点“制作”；“应用到游戏”把这个头放进客户端（`data_7.big`，从原版重新生成），用于该球员
+  所有使用其球员 ID 行或通用头的卡。保存在 `gamedata/photo_heads`。在比赛镜头距离下与照片相像，光照来自照片，头型来自供体。
+  “从头像获取”用球员的 FO3 头像（缓存中的，没有则用 fifaaddict.com 的）填入照片、点和供体：YuNet 人脸检测器（OpenCV Zoo，
+  MIT；只下载一次到 `gamedata/yunet`）找出眼睛、鼻子和嘴，供体是肤色和头发（颜色和发型，按供体自己的头像）最接近、没有胡子的
+  扫描头。Database 页的按钮会为俱乐部中所有有头像的通用脸球员这样做（没有 FO3 头像的新球员会被跳过）。
 - **经典 FO3 世界**（issue #38）：Database 页的 *Dunia game* 可选现代（AI 俱乐部、俱乐部选择和 This Season
   卡包使用 26 LIVE 卡，与之前相同；自建赛季也会出现在市场搜索中）或经典 FO3：所有俱乐部使用 FO3 原版 2017 阵容，
   This Season = '17，新增赛季（25 / 26 LIVE、WC18、自建赛季）不会出现在卡包、市场、交易或虚拟经理阵容中，只能通过
@@ -340,8 +349,9 @@
 | `tools/eatrax_song.py` | 把一首歌以 EALayer3 格式放到 EA Trax 菜单音乐的第一首，替换 TrackID 1（以追加方式修改 `data_0.big` / `data_1.big`；`--restore` 恢复原文件）。会导致比赛后崩溃，见已知问题。 |
 | `tools/fa_sync.py` | 同步 fifaaddict.com 价格。 |
 | `tools/fo4_season.py` | 把 FIFA Online 4 的 26 LIVE 和 25 LIVE 球员卡（fifaaddict 数据，属性按 +0 计）加为两个新赛季，使用 FO4 的赛季徽章：`fetch`、`collect` + `import`、`build`、`install`（就地改写 `data_0.big` 中的条目，因为它的大小不能改变；以追加方式修改 `Label.big` 和 `Module.big`；`restore` 恢复这些文件）。`hud` 只修补 `Module.big`，用于之前已安装赛季的客户端：比赛中的球员名牌以前对所有 2017 和 FO4 球员卡都显示 '17 徽章，现在显示球员卡自己的赛季。`wc18` 为 `build` 读取 2018 世界杯大名单中最好的 300 名球员（futwiz 的 FIFA 18 世界杯评分，维基百科的大名单和俱乐部）：赛季 WC18（代码 78），+1 时卡面评分为世界杯评分 - 5，徽章是与 FO3 自己的世界杯徽章同款绿色的“18”；球队颜色为“2018 WC All-Star”（赛季）和“18 WC <国家>”（各国球员卡），特性取自球员的 FO3 卡和 FIFA 18 卡。 |
-| `tools/fa_faces.py` | 补充客户端缓存中缺少的球员小头像（fifaaddict 提供同样的 128x128 PNG）；`--crests` 补充缺少的俱乐部队徽（大多数俱乐部在缓存中没有，游戏会显示默认队徽）；`--staffs` 补充教练照片（缓存中只有服务器发放的 71 名教练中的 7 张）。可断点续传，`--remove` 撤销。 |
+| `tools/fa_faces.py` | 补充客户端缓存中缺少的球员小头像（fifaaddict 提供同样的 128x128 PNG）；`--crests` 补充缺少的俱乐部队徽（大多数俱乐部在缓存中没有，游戏会显示默认队徽）；`--staffs` 补充教练照片（缓存中只有服务器发放的 71 名教练中的 7 张）。可断点续传，`--remove` 撤销。 fifaaddict 没有的球员头像从 FC Online（FO4）获取；`--all` 获取所有类型。 |
 | `tools/club_history.py` | 球员信息特性页截至当前赛季的俱乐部经历：按出生日期和姓名把 Wikidata 的足球运动员与 FO3 球员对应，其俱乐部（P54：年份、租借；不含国家队和青年队）对应到 EA 球队 ID（FO3 自带经历，其次 TEAMNAMES 名称，否则使用写入 TEAMNAMES 的新 ID），保存到 `gamedata/club_history.json`；`fo4_season.py install` 把它放进客户端。`show 姓名` 显示一名球员的经历。 |
+| `tools/photo_head.py` | 用照片制作 3D 脸：读写客户端的扫描头文件（RX3 / chunkzip，512×512 DXT1 脸部贴图），按 11 个点把照片变形到脸部贴图上并融合（OpenCV），再用照片头的文件（供体的网格和头发，新头 ID 从 99,000,000 起）重新生成 `data_7.big`。`uv HEADASSETID OUT.png` 保存某个头的脸部贴图。 点可来自 YuNet（`landmarks`），供体来自 `donor_looks` / `suggest`。 |
 | `tools/draft_icons.py` | 绘制选秀卡包的商店图标（客户端缓存里没有选秀图片），保存到 `assets/externalAssets/shop/`，服务器优先提供这些图片；`<icon> <tag> <picks>` 可再画一个，用于管理页面创建的卡包。需要 Pillow。 |
 | `tools/re/` | 逆向工程辅助工具：`bigdir.py`（BIg4 归档表）、`refpack.py`（RefPack 编解码）、`eadb.py`（EA "DB" 数据库表）、`abc*.py`（AS3 字节码解析 / 搜索 / 结构挖掘）、`gfxx.py`（界面 SWF）、`memgrab.py`、`dbwin.py`（客户端调试输出）、`relay_emu.py`（PvP 中继数据包编解码和测试中继）、`gamectl.ps1`（测试时操控客户端窗口）。 |
 | `blaze.py`、`server.py`、`test_client.py`、`analyze_capture.py` | 项目第一阶段的 EA Blaze 帧格式（Fire/TDF）和回环测试服务器；后来发现客户端用的是 REST + messenger。 |

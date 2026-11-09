@@ -293,6 +293,9 @@ Added, passing the tests but not yet checked in the client:
   kind at a time; stop and resume at any time). It runs `tools/fa_faces.py`, which also takes
   `--leagues` now. The game setting screen's "Default ball" shows the EA SPORTS ball, small flags
   use the big ones, and the cup screens get their trophy and skin.
+  Player pictures fifaaddict lacks (or refuses) come from FC Online (FO4) instead (same EA player id;
+  the server's new players get their FO4 cards' pictures from fifaaddict), the scan covers every card of the DB, a refusal makes it wait longer
+  and go on instead of stopping, and *Download all missing* fetches every kind in one run.
 - **Reward names with a language pack** (issue #36): with the Vietnamese pack the achievement list
   showed "undefined" before each reward and a UI error, as the server named reward items in
   Indonesian and Korean only. Every client language gets a name now.
@@ -316,6 +319,18 @@ Added, passing the tests but not yet checked in the client:
   cache or fifaaddict.com) for every
   card of his or one card only (issue #36; `gamedata/faces/p<id>.png`, served before the cache's; the
   3D Face field also finds heads by player name). Kits and new clubs are not done.
+- **3D face from a photo** (Database tab, card dialog): for a player with a generic face, a close-up photo
+  from the front becomes the face skin on another player's scanned 3D head (the donor: its head shape and
+  hair come along, its eyes stay). Click 11 points on the photo (eyes, nose, mouth corners, chin, forehead,
+  temples, jaw), pick the donor and press Make; Terapkan ke game puts the head in the client (`data_7.big`,
+  rebuilt from its original) for every card of his that shows his player id row or a generic head. Saved
+  in `gamedata/photo_heads`. It looks like the photo at match distance, with the photo's light and the
+  donor's head shape.
+  *Take from the picture* fills in the photo, its points and a donor from the player's FO3 picture (the cache's,
+  else fifaaddict.com's): the YuNet face detector (OpenCV Zoo, MIT; fetched once into `gamedata/yunet`) finds
+  the eyes, nose and mouth, the donor is the scanned head closest in skin colour and hair (colour and shape,
+  from its own picture), clean-shaven. The Database tab's button does it for every generic player of the club
+  who has a picture (new players without an FO3 picture are left out).
 - **Classic FO3 world** (issue #38): the Database tab's *Dunia game* picks Modern (the AI clubs, the
   club picker and This Season packs use 26 LIVE cards, as before; own seasons also show in the Market
   search) or Classic FO3: every club plays FO3's own 2017 squad, This Season is '17, and the added seasons
@@ -426,8 +441,9 @@ Not done: online play against other people (ranked PvP, friendly, King of the Hi
 | `tools/eatrax_song.py` | Puts a song first in the game's EA Trax menu music as EALayer3, replacing TrackID 1 (edits `data_0.big` / `data_1.big` by appending; `--restore` puts the originals back). Crashes the game after matches, see the known issue. |
 | `tools/fa_sync.py` | fifaaddict.com price sync. |
 | `tools/fo4_season.py` | Adds FIFA Online 4's 26 LIVE and 25 LIVE cards (fifaaddict data, stats as +0) as two new seasons with FO4's season badges: `fetch`, `collect` + `import`, `build`, `install` (rewrites entries of `data_0.big` in place, as its size must not change, and appends to `Label.big` and `Module.big`; `restore` puts them back). `hud` patches only `Module.big`, for a client installed before it: a match's player name boxes showed the '17 badge on every 2017 and FO4 card, now each card's own. `wc18` reads the 2018 World Cup's best 300 squad players for `build` (futwiz's FIFA 18 World Cup ratings, Wikipedia's squads and clubs): season WC18 (code 78), a card at +1 showing its World Cup rating - 5, with an "18" badge in the green of FO3's own World Cup ones; team colors "2018 WC All-Star" (the season) and "18 WC <nation>" (each nation's cards), Karakteristik from the player's FO3 card and his FIFA 18 card. |
-| `tools/fa_faces.py` | Adds the player mini faces missing from the client's cache (fifaaddict serves the same 128x128 PNGs); `--crests` adds the missing club crests (most clubs have none in the cache, so the game shows a default one); `--staffs` adds the staff pictures (the cache has 7 of the 71 the server hands out). Resumable, `--remove` undoes it. |
+| `tools/fa_faces.py` | Adds the player mini faces missing from the client's cache (fifaaddict serves the same 128x128 PNGs); `--crests` adds the missing club crests (most clubs have none in the cache, so the game shows a default one); `--staffs` adds the staff pictures (the cache has 7 of the 71 the server hands out). Resumable, `--remove` undoes it. Player pictures fifaaddict lacks come from FC Online (FO4); `--all` fetches every kind. |
 | `tools/club_history.py` | Club careers up to the running season for the player info's Karakteristik tab: Wikidata's footballers matched to FO3's players by birth date and name, their clubs (P54: years, loans; no national or youth teams) mapped to EA team ids (FO3's own history, then the TEAMNAMES names, else a new id named in TEAMNAMES), into `gamedata/club_history.json`; `fo4_season.py install` puts them in the client. `show NAME` prints a player's rows. |
+| `tools/photo_head.py` | 3D faces from photos: reads and writes the client's scanned head files (RX3 / chunkzip, a 512×512 DXT1 face texture), warps a photo onto the face texture over 11 points and blends it in (OpenCV), and rebuilds `data_7.big` with the photo heads' files (the donor's mesh and hair under a new head id from 99,000,000). `uv HEADASSETID OUT.png` saves a head's face texture. The points can come from YuNet (`landmarks`) and the donor from `donor_looks` / `suggest`. |
 | `tools/draft_icons.py` | Draws the draft packs' Shop icons (the client's cache has no draft pictures) into `assets/externalAssets/shop/`, which the server serves before the client's own images; `<icon> <tag> <picks>` draws one more, for a pack made on the admin page. Needs Pillow. |
 | `tools/re/` | Reverse-engineering helpers: `bigdir.py` (BIg4 archive tables), `refpack.py` (RefPack codec), `eadb.py` (EA "DB" database tables), `abc*.py` (AS3 bytecode parser / grep / schema miner), `gfxx.py` (UI SWFs), `memgrab.py`, `dbwin.py` (the client's debug output), `relay_emu.py` (PvP relay packet codec and test relay), `gamectl.ps1` (drive the client window for tests). |
 | `blaze.py`, `server.py`, `test_client.py`, `analyze_capture.py` | EA Blaze framing (Fire/TDF) and a loopback test server from the first phase of the project; the client turned out to use REST + the messenger instead. |

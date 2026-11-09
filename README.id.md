@@ -313,6 +313,9 @@ Sudah ditambahkan dan lolos tes, tapi belum dicek di client:
   satu waktu; bisa dihentikan dan dilanjutkan kapan saja). Tab ini menjalankan `tools/fa_faces.py`, yang
   sekarang juga menerima `--leagues`. "Default ball" di layar pengaturan game menampilkan bola EA SPORTS,
   bendera kecil memakai gambar bendera besar, dan layar Cup mendapat trofi dan skin-nya.
+  Foto pemain yang tidak ada (atau ditolak) di fifaaddict diambil dari FC Online (FO4) (id pemain EA
+  yang sama; pemain baru server dapat gambar kartu FO4-nya dari fifaaddict), pemindaian mencakup semua kartu di database, penolakan
+  membuat unduhan menunggu lebih lama lalu lanjut, dan *Unduh semua yang belum ada* mengambil semua jenis sekaligus.
 - **Nama hadiah saat memakai paket bahasa** (issue #36): dengan paket bahasa Vietnam, daftar achievement
   menampilkan "undefined" sebelum tiap hadiah dan memunculkan error UI, karena server hanya memberi nama
   item hadiah dalam bahasa Indonesia dan Korea. Sekarang item hadiah punya nama di tiap bahasa client.
@@ -336,6 +339,18 @@ Sudah ditambahkan dan lolos tes, tapi belum dicek di client:
   lain (dari cache atau fifaaddict.com) untuk semua kartunya
   atau satu kartu saja (issue #36; `gamedata/faces/p<id>.png`, disajikan sebelum foto cache; kolom Wajah
   3D juga mencari kepala dengan nama pemain). Jersey dan klub baru belum ada.
+- **Wajah 3D dari foto** (tab Database, dialog kartu): untuk pemain berwajah generik, foto close-up dari
+  depan menjadi kulit wajah pada kepala 3D pemain lain yang sudah di-scan (donor: bentuk kepala dan
+  rambutnya ikut, matanya tetap milik donor). Klik 11 titik di foto (mata, hidung, sudut mulut, dagu, dahi,
+  pelipis, rahang), pilih donor, tekan Buat; Terapkan ke game memasang kepalanya di client (`data_7.big`,
+  dibangun ulang dari aslinya) untuk semua kartu pemain itu yang memakai baris player id-nya atau kepala
+  generik. Tersimpan di `gamedata/photo_heads`. Dari jarak kamera pertandingan mirip fotonya, dengan
+  cahaya dari foto dan bentuk kepala donor.
+  *Ambil dari ikon* mengisi foto, titik, dan donor dari ikon FO3 pemain (dari cache, kalau tidak ada dari
+  fifaaddict.com): detektor wajah YuNet (OpenCV Zoo, MIT; diunduh sekali ke `gamedata/yunet`) mencari mata,
+  hidung, dan mulut, donornya kepala scan yang paling mirip warna kulit dan rambutnya (warna dan bentuk, dari
+  ikonnya sendiri), tanpa janggut. Tombol di tab Database melakukannya untuk semua pemain generik di klub yang
+  punya ikon (pemain baru tanpa ikon FO3 dilewati).
 - **Dunia FO3 klasik** (issue #38): *Dunia game* di tab Database memilih Modern (klub AI, pilihan klub
   dan pak This Season memakai kartu 26 LIVE, seperti sebelumnya; musim buatan juga muncul di pencarian
   Market) atau Klasik FO3: semua klub memakai skuad 2017 asli FO3, This Season = '17, dan musim tambahan
@@ -450,8 +465,9 @@ Belum dikerjakan: main online melawan orang lain (ranked PvP, friendly, King of 
 | `tools/eatrax_song.py` | Menaruh lagu di urutan pertama musik menu EA Trax sebagai EALayer3, mengganti TrackID 1 (mengubah `data_0.big` / `data_1.big` dengan menambahkan di akhir; `--restore` mengembalikan aslinya). Membuat game crash setelah pertandingan, lihat masalah yang diketahui. |
 | `tools/fa_sync.py` | Sinkronisasi harga fifaaddict.com. |
 | `tools/fo4_season.py` | Menambahkan kartu 26 LIVE dan 25 LIVE FIFA Online 4 (data fifaaddict, stat dianggap +0) sebagai dua season baru dengan badge season FO4: `fetch`, `collect` + `import`, `build`, `install` (menulis ulang isi `data_0.big` di tempat, karena ukurannya tidak boleh berubah, dan menambahkan di akhir `Label.big` dan `Module.big`; `restore` mengembalikan semuanya). `hud` hanya menambal `Module.big`, untuk client yang sudah di-install sebelumnya: kotak nama pemain di match dulu menampilkan badge '17 pada semua kartu 2017 dan FO4, sekarang badge season kartunya sendiri. `wc18` mengambil 300 pemain skuad terbaik Piala Dunia 2018 untuk `build` (rating FIFA 18 World Cup dari futwiz, skuad dan klub dari Wikipedia): season WC18 (kode 78), kartu di +1 bernilai rating Piala Dunia - 5, dengan badge "18" hijau seperti badge Piala Dunia FO3 sendiri; team color "2018 WC All-Star" (season) dan "18 WC <negara>" (kartu tiap negara), Karakteristik dari kartu FO3 pemain dan kartu FIFA 18-nya. |
-| `tools/fa_faces.py` | Menambahkan wajah mini pemain yang tidak ada di cache client (fifaaddict menyajikan PNG 128x128 yang sama); `--crests` menambahkan logo klub yang tidak ada (kebanyakan klub tidak punya di cache, jadi game menampilkan logo bawaan); `--staffs` menambahkan foto staff (cache hanya punya 7 dari 71 staff yang diberikan server). Bisa dilanjutkan, `--remove` membatalkannya. |
+| `tools/fa_faces.py` | Menambahkan wajah mini pemain yang tidak ada di cache client (fifaaddict menyajikan PNG 128x128 yang sama); `--crests` menambahkan logo klub yang tidak ada (kebanyakan klub tidak punya di cache, jadi game menampilkan logo bawaan); `--staffs` menambahkan foto staff (cache hanya punya 7 dari 71 staff yang diberikan server). Bisa dilanjutkan, `--remove` membatalkannya. Foto pemain yang tidak ada di fifaaddict diambil dari FC Online (FO4); `--all` mengambil semua jenis. |
 | `tools/club_history.py` | Karir klub sampai musim berjalan untuk tab Karakteristik di info pemain: pemain bola di Wikidata dicocokkan ke pemain FO3 lewat tanggal lahir dan nama, klubnya (P54: tahun, pinjaman; tanpa timnas dan tim junior) dipetakan ke ID tim EA (riwayat FO3, lalu nama di TEAMNAMES, kalau tidak ada ID baru yang diberi nama di TEAMNAMES), disimpan di `gamedata/club_history.json`; `fo4_season.py install` memasangnya di client. `show NAMA` menampilkan riwayat seorang pemain. |
+| `tools/photo_head.py` | Wajah 3D dari foto: membaca dan menulis file kepala scan client (RX3 / chunkzip, tekstur wajah DXT1 512×512), me-warp foto ke tekstur wajah lewat 11 titik dan memadukannya (OpenCV), lalu membangun ulang `data_7.big` dengan file kepala foto (mesh dan rambut donor dengan id kepala baru mulai 99.000.000). `uv HEADASSETID OUT.png` menyimpan tekstur wajah sebuah kepala. Titik bisa dari YuNet (`landmarks`) dan donor dari `donor_looks` / `suggest`. |
 | `tools/draft_icons.py` | Menggambar ikon Shop untuk pak draft (cache client tidak punya gambar draft) ke `assets/externalAssets/shop/`, yang dilayani server sebelum gambar milik client; `<icon> <tag> <picks>` menggambar satu lagi, untuk pak buatan halaman admin. Butuh Pillow. |
 | `tools/re/` | Alat bantu reverse engineering: `bigdir.py` (tabel arsip BIg4), `refpack.py` (codec RefPack), `eadb.py` (tabel database "DB" EA), `abc*.py` (parser / grep / penambang skema bytecode AS3), `gfxx.py` (SWF UI), `memgrab.py`, `dbwin.py` (output debug client), `relay_emu.py` (codec paket relay PvP dan relay uji), `gamectl.ps1` (mengendalikan jendela client untuk tes). |
 | `blaze.py`, `server.py`, `test_client.py`, `analyze_capture.py` | Framing EA Blaze (Fire/TDF) dan server tes loopback dari fase pertama proyek; ternyata client memakai REST + messenger. |

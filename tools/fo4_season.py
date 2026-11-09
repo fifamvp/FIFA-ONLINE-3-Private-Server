@@ -381,6 +381,25 @@ def _same_name(a, b):
     return (ta[-1] == tb[-1] or inside) + difflib.SequenceMatcher(None, a, b).ratio()
 
 
+def new_player_cards():
+    """{spid: fifaaddict card id (its uid)} of the FO4 cards of the players FO3 does not have: a card's
+    birth date and name give his player id as they did when build made him (PIDS). fifaaddict has
+    each card's picture by that id (fa_faces.FA4; user: "pemain baru kenapa tidak di search by nama")."""
+    try:
+        with open(PIDS) as f:
+            pids = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    out = {}
+    for uid, card in load_cards().items():
+        db = card.get("db")
+        if db and card.get("season") and db.get("birthdate"):
+            pid = pids.get(f"{'-'.join(map(str, _date(db['birthdate'])))}|{_key(db['name'])}")
+            if pid:
+                out[card["season"] * 1000000 + pid] = uid
+    return out
+
+
 def cmd_build(a):
     cards = {u: c for u, c in load_cards().items() if "attr" in c}
     pids = json.load(open(PIDS)) if os.path.exists(PIDS) else {}
@@ -1434,6 +1453,31 @@ def custom_seasons():
         return {}
 
 
+def _wear(t, fld, row, face):
+    """The row with the FACE fields of row `face` (raw bits: a float too)."""
+    for name in FACE:
+        ty, bo, dep = t.fields[fld[name][0]]
+        row = t.set(row, fld[name][0], int.from_bytes(face, "little") >> bo & (1 << dep) - 1)
+    return row
+
+
+def photo_heads(t, fld, by):
+    """The admin page's photo heads (tools/photo_head.py) on the engine DB: a player's id row and
+    his other rows with a generic head wear his (its donor's FACE fields, its own head id). The id
+    row is what most of his cards show: a 2017 card (season 88) shows it even with a row of its
+    own (live-checked: Kroos 88182521). Returns how many rows."""
+    import photo_head
+    heads = {h["pid"]: (hid, by.get(h["row"])) for hid, h in photo_head.load().items()
+             if os.path.isfile(os.path.join(photo_head.DIR, f"{hid}.png"))}  # as photo_head.files()
+    sn, n = fld["headassetid"][0], 0
+    for k in [k for k in by if k % 1000000 in heads]:
+        hid, face = heads[k % 1000000]
+        if face is not None and (k < 1000000 or t.get(by[k], fld["headclasscode"][0]) == 1):
+            by[k] = t.set(_wear(t, fld, by[k], face), sn, hid - fld["headassetid"][1])
+            n += 1
+    return n
+
+
 def card_looks(t, fld, by):
     """The admin page's rows in the engine DB: a card of one of its seasons gets a copy of the
     row of the card it was copied from (so it looks the same), and a card's look edits go on its
@@ -1465,9 +1509,8 @@ def card_looks(t, fld, by):
         if not look or not own(key, spid % 1000000):
             continue
         row, face = by[key], by.get(look.get("face"))
-        for name in FACE if face is not None else ():
-            ty, bo, dep = t.fields[fld[name][0]]
-            row = t.set(row, fld[name][0], int.from_bytes(face, "little") >> bo & (1 << dep) - 1)  # raw bits (a float too)
+        if face is not None:
+            row = _wear(t, fld, row, face)
         for name in LOOK:
             if name in look:
                 row = put(row, name, int(look[name]))
@@ -1482,7 +1525,7 @@ def engine_db(db, meta):
     id ('17 cards have only their player id's row); a player with neither crashed the client.
     The row is a copy of the 2017 player whose generic head build gave him (fo4_heads.json),
     with his own id, height, weight, nationality and foot; rows stay sorted by player id. Then
-    the admin page's rows (card_looks)."""
+    the admin page's rows (photo_heads, card_looks)."""
     import struct, eadb
     heads = {int(k): v for k, v in json.load(open(HEADS)).items()}
     t, fld, by, i, raws, base = ng_players(db, meta)
@@ -1500,7 +1543,7 @@ def engine_db(db, meta):
             if 0 <= v < 1 << t.fields[sn][2]:
                 row = t.set(row, sn, v)
         by[pid] = row
-    looks = card_looks(t, fld, by)
+    looks = photo_heads(t, fld, by) + card_looks(t, fld, by)
     t.rows = [by[k] for k in sorted(by)]
     raws[i] = t.raw()
     out, pos = bytearray(db[:base]), 0  # table offsets, sizes and checksums (as tools/eatrax_song.py)
@@ -1639,13 +1682,17 @@ def cmd_install(a):
     gfx, dds = label_with_icons(gfx, dds, icons)
     bigdir.patch(label, {LABEL_GFX: gfx, LABEL_DDS: (refpack(dds), len(dds))})
     _patch_module(module)
-    import club_history
+    import club_history, photo_head
     clubs = club_history.install_names(a.game)  # the club careers' clubs FO3 has no name for
+    heads = 0
+    if photo_head.load() or os.path.isfile(os.path.join(BACKUP, "data_7.big")):  # the photo heads' files
+        _original(os.path.join(a.game, photo_head.ARCHIVE))
+        heads = photo_head.install(a.game, os.path.join(BACKUP, "data_7.big"))
     # check what the client will read
     for entry, plain_db in want.items():
         assert bytes(decrypt(bigdir.read(data0, entry))[16:]) == plain_db[16:], entry
     assert os.path.getsize(data0) == os.path.getsize(os.path.join(BACKUP, "data_0.big"))
-    print(f"installed into {a.game}: {len(names)} new names, {clubs} new club names, season icons "
+    print(f"installed into {a.game}: {len(names)} new names, {clubs} new club names, {heads} photo heads, season icons "
           f"{', '.join(SEASON_NAMES[s] for s in sorted(icons))}")
 
 
@@ -1676,6 +1723,8 @@ def cmd_restore(a):
         big = os.path.join(a.game, "data", "ui", "localization", f"{lang}.big")
         if os.path.isfile(os.path.join(BACKUP, os.path.basename(big))):
             _original(big)
+    if os.path.isfile(os.path.join(BACKUP, "data_7.big")):  # the photo heads' files
+        _original(os.path.join(a.game, "data", "data_7.big"))
     c = sqlite3.connect(FIFADB)
     seasons = (*CLASSES.values(), WC18)
     for t in ("players", *PERM_TABLES):
