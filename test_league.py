@@ -4,7 +4,7 @@
 
 Runs a whole season through the handlers against a temporary copy of gamedata/state.json.
 """
-import copy, json, os, re, shutil, sys, tempfile, time
+import calendar, copy, json, os, random, re, shutil, sys, tempfile, time
 from collections import Counter
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -1033,9 +1033,9 @@ def main():
         base = round(hc.enhance_rate({"grade": 6}, {"grade": 2}) * 100)
         assert pv(0, -1)["probability"] == base and pv(0, -1)["grade"] == 7 and pv(0, -1)["needes"] == 70
         assert pv(1, 1000052)["probability"] == base + 10 + 15
-        # the never-ending Upgrade event (+10% for targets +1..+9)
+        # the never-ending Upgrade event (+10% for targets +1..+9), then the play time rewards' "dt" one
         ev = body(hc.ENDPOINTS["/events"]("", b""))["events"]
-        assert [e["condition"]["type"] for e in ev] == ["enhance"] and ev[0]["active"] and ev[0]["reason"] == []
+        assert [e["condition"]["type"] for e in ev] == ["enhance", "dt"] and ev[0]["active"] and ev[0]["reason"] == []
         assert all(isinstance(r, list) for r in ev[0]["reward"])  # getEnhanceGradeRange: Array entries
         assert pv(0, -1, ev[0]["eventid"])["probability"] == base + 10 and pv(0, -1, 999)["probability"] == base
         # upgrade points in Shop > Paket: credited to money.es at once
@@ -1252,6 +1252,40 @@ def main():
         assert not body(hc.route(f"/bag/{e1['_id']}/unpack")("", b"{}"))["result"]  # already taken
         assert list(body(hc.ENDPOINTS["/static/cache/item"]("", json.dumps({"itemids": [1]}).encode()))) == ["1"]
         st = hc._state(); hc.my_coach(st).pop("items", None); hc._save(st)  # packs from the rewards (shop test counts)
+        # today's login reward as an event notification (EventRewardPopup), once a day; PUT
+        # /events/rewards/daily (the client, early in a session) gives the day's reward if not yet
+        st = hc._state(); kept_daily = copy.deepcopy(hc.my_coach(st)["daily"]); hc.my_coach(st).pop("daily"); hc._save(st)
+        n0 = len(pushed)
+        assert body(hc.ENDPOINTS["/events/rewards/daily"]("", b"{}"))["result"]
+        uri, n = pushed[n0]
+        assert uri == "/inbox/my/notifications/latest" and (n["category"], n["type"]) == ("event", "reward") and n["stackable"]
+        d = n["details"]
+        assert d["type"] == "daily" and d["rewardindex"] == 0 and d["messages"]["popup"]["name"] and d["opts"]["dailytype"] != "separated"
+        assert [(i["itemid"], i["count"]) for i in d["items"]] == [(i["itemid"], i["count"]) for i in hc.reward_items(table[0])]
+        assert all("staticdata" in i for i in d["items"]) and len(hc.my_coach(hc._state())["bag"]) == 1
+        body(hc.ENDPOINTS["/events/rewards/daily"]("", b"{}"))
+        assert len(pushed) == n0 + 1  # once a day
+        # play time rewards: the "dt" event (its steps in seconds, the seconds played today); a step's
+        # reward once its time is played (into the Bag, with a notification), not before
+        hc.PLAYTIME_FILE = os.path.join(tmp, "playtime_rewards.json")  # the defaults; the admin test writes here
+        hc.PLAYTIME["pending"] = 0
+        st = hc._state(); c = hc.my_coach(st); c["daily"] = kept_daily; c["bag"] = []; c.pop("dt", None); c["playtime"] = 5000; hc._save(st)
+        ev = {e["eventid"]: e for e in body(hc.ENDPOINTS["/events"]("", b""))["events"]}
+        dt = ev[hc.DT_EVENTID]["condition"]["dt"]
+        assert ev[hc.DT_EVENTID]["condition"]["type"] == "dt" and hc.ENHANCE_EVENT in ev.values()
+        assert dt["timeline"] == [600, 1800, 3600] and dt["endline"] == 3600 and dt["rewarded"] == 0 and dt["time"]["prevsession"] == 0
+        assert isinstance(dt["time"]["beginningat"], int)  # ms: TimerUtil.convertToUTCTime adds to it
+        assert all(r[0]["items"][0]["itemid"] and "staticdata" in r[0]["items"][0] for r in ev[hc.DT_EVENTID]["reward"])  # reward[step][0].items[0]
+        claim_dt = lambda: body(hc.ENDPOINTS["/events/rewards/dt"]("", b"{}"))
+        r = claim_dt()
+        assert not r["result"] and r["resources"][0]["uri"] == "/events"  # nothing played yet today
+        st = hc._state(); hc.my_coach(st)["playtime"] = 5000 + 700; hc._save(st)
+        n0 = len(pushed)
+        r = claim_dt()
+        assert r["result"] and r["resources"][0]["body"]["events"][1]["condition"]["dt"]["rewarded"] == 1
+        assert pushed[n0][1]["details"]["type"] == "dt" and len(hc.my_coach(hc._state())["bag"]) == 1
+        assert not claim_dt()["result"]  # the next step is at 30 minutes
+        st = hc._state(); hc.my_coach(st)["bag"] = []; hc._save(st)
         # --- manager level rewards (issue #35, FO3's table): each level reached puts its EP and items in
         # the Bag, the post-match popup lists them once, the coming levels' table is served, and the
         # reward-only packs stay out of the Shop
@@ -1701,11 +1735,57 @@ def main():
             # chat: my line comes back to me, a member answers a greeting
             n0 = len(pushed)
             assert q("/club/me/message", "POST", message="Halo semua", hint=None)["result"]
-            assert pushed[n0] == ("/club/me/message", {"type": "chat", "coachid": hc.my_coach(hc._state())["_id"],
-                                                       "coachname": hc.my_coach(hc._state())["name"], "message": "Halo semua", "hint": None})
+            notime = lambda b: {k: v for k, v in b.items() if k != "time"}  # each line's clock (TextArea): when said
+            assert pushed[n0][1]["time"].endswith(".000Z") and (pushed[n0][0], notime(pushed[n0][1])) == ("/club/me/message", {
+                "type": "chat", "coachid": hc.my_coach(hc._state())["_id"], "coachname": hc.my_coach(hc._state())["name"],
+                "message": "Halo semua", "hint": None})
             while timers:
                 fn, args = timers.pop(0); fn(*args)
             assert pushed[n0 + 1][1]["message"] in [s for v in lines["hello"].values() for s in v]
+            # global chat: my line comes back to me, an online manager answers (no line about a club);
+            # any channel 1-99
+            kept_reply, hc.CHANNEL_REPLY = hc.CHANNEL_REPLY, (1, 0)
+            n0 = len(pushed)
+            assert body(hc.ENDPOINTS["/chat/my/channel/message"]("", json.dumps({"message": "Halo semua", "hint": None}).encode()))["result"]
+            me_ = hc.my_coach(hc._state())
+            assert (pushed[n0][0], notime(pushed[n0][1])) == ("/chat/my/channel/messages/latest", {
+                "type": "chat", "coachid": me_["_id"], "coachname": me_["name"], "message": "Halo semua", "hint": None})
+            while timers:
+                fn, args = timers.pop(0); fn(*args)
+            uri, said = pushed[n0 + 1]
+            assert uri == "/chat/my/channel/messages/latest" and said["message"] in [s for v in lines["hello"].values() for s in v]
+            assert "klub" not in said["message"].lower() and said["coachid"] in {vm["_id"] for vm in hc.channel_online()} and said["time"]
+            hc.CHANNEL_REPLY = kept_reply
+            assert body(hc.route("/chat/channel/7")("", b"{}")) == {"result": True, "channelid": 7, "created": False, "reason": ""}
+            assert not body(hc.route("/chat/channel/100")("", b"{}"))["result"]
+            assert body(hc.ENDPOINTS["/chat/channel"]("", json.dumps({"channelid": 3}).encode()))["channelid"] == 3
+            assert body(hc.route("/chat/coach/x/channel/detail")("", b""))["result"]
+            assert "setcontroller" in body(hc.ep_account("", b""))["guides"]  # else the lobby has no chat window
+            # the day's football in the channel: the region's trends about football first, then the news
+            # headlines (" - Source" cut, no repeats); a manager posts one, others answer
+            trends = b"""<rss xmlns:ht="https://trends.google.com/trending/rss"><channel>
+              <item><title>bitcoin</title><ht:news_item><ht:news_item_title>Harga Bitcoin naik</ht:news_item_title></ht:news_item></item>
+              <item><title>persib</title><ht:news_item><ht:news_item_title>Persib menang di Liga 1 &amp; puncak</ht:news_item_title>
+                <ht:news_item_source>Bola.net</ht:news_item_source></ht:news_item></item></channel></rss>"""
+            gnews = b"""<rss><channel><item><title>Timnas Indonesia lolos - Kompas.com</title><source>Kompas.com</source></item>
+              <item><title>Persib menang di Liga 1 &amp; puncak - Detik</title><source>Detik</source></item>
+              <item><title>Pemain ditangkap polisi - X</title><source>X</source></item></channel></rss>"""  # no small talk about crime
+            got = hc.news_fetch("ID", get=lambda u: trends if "trends.google" in u else gnews)
+            assert got == [{"title": "Persib menang di Liga 1 & puncak", "source": "Bola.net", "trend": "persib"},
+                           {"title": "Timnas Indonesia lolos", "source": "Kompas.com", "trend": ""}]
+            kept_news = dict(hc.NEWS)
+            hc.NEWS.update(key=((), "x"), at=time.time(), items=[{**i, "region": "ID"} for i in got]
+                           + [{"title": "Haaland scores again", "source": "BBC", "trend": "", "region": ""}])
+            online = hc.channel_online()[:3]
+            talk = hc.channel_news(online, random.Random(1))
+            assert talk and talk[0][0] is online[0] and any(i["title"] in talk[0][1] for i in hc.NEWS["items"]) and talk[0][2] == 0
+            assert all(vm in online[1:] and d > 0 for vm, _, d in talk[1:])
+            kinds = {hc.channel_news(online, random.Random(s))[0][1].split('"')[0] for s in range(40)}
+            assert len(kinds) > 2  # the country's lines, the general ones, ...
+            assert ("country", "Timnas Indonesia", {"timnas", "indonesia"}) in hc.vm_likes(online[0], ["ID"])
+            assert all(k != "country" for k, _, _ in hc.vm_likes(online[0], []))  # no country ticked: the global only
+            hc.NEWS.clear(); hc.NEWS.update(kept_news)
+            assert hc.channel_news(online) == [] or hc.NEWS["items"]  # no topics: nothing to say
             # the board, the news, the records, the friends ranking's club tab, the chat's member list
             assert q("/club/me/post/", "POST", msg="Latihan malam ini")["result"]
             posts = q("/club/me/posts")
@@ -1910,7 +1990,27 @@ def main():
         assert A("ep", set=5000)["ep"] == 5000 and A("ep", add=-9000)["ep"] == 0 and A("ep", add=1500)["ep"] == ep() == 1500
         # the Rank opponents' chat: on/off and language (gamedata/vm_chat.json)
         assert A("vm_chat")["enabled"] and A("vm_chat")["lang"] == "id" and refused("vm_chat_set", enabled=True, lang="xx")
-        assert A("vm_chat_set", enabled=False, lang="vi") == hc.vm_chat_cfg() == {"enabled": False, "lang": "vi"}
+        # ... and the global chat's football topics: the global ones always, plus the countries ticked by
+        # hand; they come by themselves once a WIB day (again when the ticks change)
+        kept_timer, refreshes = hc.threading.Timer, []  # a changed tick fetches at once, in the background
+        hc.threading.Timer = lambda t, fn, args=(): type("T", (), {"start": lambda self: refreshes.append(fn)})()
+        assert refused("vm_chat_set", enabled=True, lang="id", newsregions=["XX"]) and refused("vm_chat_set", enabled=True, lang="id", newsregions="ID")
+        v = A("vm_chat_set", enabled=True, lang="id", newsregions=["VN", "ID"])
+        assert refreshes == [hc.news_refresh] and A("vm_chat_set", enabled=True, lang="id", newsregions=["ID", "VN"]) and len(refreshes) == 1
+        assert v == hc.vm_chat_cfg() and v["newsregions"] == ["ID", "VN"] and "news" not in v
+        assert list(A("vm_chat")["regions"]) == ["ID", "MY", "VN", "TH", "KR"] and isinstance(A("vm_chat")["topics"], list)
+        kept_fetch, kept_news = hc.news_fetch, dict(hc.NEWS)
+        fetched = []
+        hc.news_fetch = lambda region, get=None: fetched.append(region) or [{"title": f"topic {region or 'global'}", "source": "", "trend": ""}]
+        hc.NEWS.update(key=None, at=0, items=[])
+        t0 = calendar.timegm((2026, 11, 9, 3, 0, 0))  # 10:00 WIB
+        hc.news_refresh(t0); hc.news_refresh(t0 + 3600 * 12)  # the same WIB day: once
+        assert fetched == ["", "ID", "VN"] and A("vm_chat")["topics"] == [["Global", ["topic global"]], ["Indonesia", ["topic ID"]], ["Việt Nam", ["topic VN"]]]
+        hc.news_refresh(t0 + 3600 * 15)  # 01:00 WIB the next day
+        A("vm_chat_set", enabled=True, lang="id", newsregions=[]); hc.news_refresh(t0 + 3600 * 16)
+        assert fetched == ["", "ID", "VN"] * 2 + [""]  # nothing ticked: the global only
+        hc.news_fetch = kept_fetch; hc.NEWS.clear(); hc.NEWS.update(kept_news); hc.threading.Timer = kept_timer
+        assert A("vm_chat_set", enabled=False, lang="vi") == hc.vm_chat_cfg() == {"enabled": False, "lang": "vi", "newsregions": []}
         # Generate ulang (the virtual managers' generation): only the admin page changes it, at once;
         # a new crowd with the same ids, generation 0 is the crowd as it always was
         kept_gen = (hc.VM_GEN_FILE, hc.VM_GEN)
@@ -2056,8 +2156,16 @@ def main():
         assert buy_gp(shop[1])["resources"][0]["body"]["gpdata"]["point"] == 5 and buy_gp(shop[1])["reason"] == "NOT_ENOUGH_GP"
         # the admin page's Misi tab: on/off, language, targets and rewards
         assert A("missions")["enabled"] and refused("missions_set", enabled=True, lang="xx", targets=1, rewards=1)
+        # the Daily reward tab's play time rewards: minutes rising, each step EP or a pack
+        assert A("playtime")["table"] == hc.PLAYTIME_DEFAULT
+        assert refused("playtime_set", table=[{"minutes": 30, "ep": 1}, {"minutes": 10, "ep": 1}])  # not rising
+        assert refused("playtime_set", table=[{"minutes": 30}]) and refused("playtime_set", table=[{"minutes": 5, "pack": 1}])
+        A("playtime_set", table=[{"minutes": 5, "ep": 500}, {"minutes": 20, "pack": 28007, "count": 2}])
+        assert hc.playtime_table() == [{"minutes": 5, "ep": 500}, {"minutes": 20, "pack": 28007, "count": 2}]
+        os.remove(hc.PLAYTIME_FILE)
         assert refused("missions_set", enabled=True, lang="en", targets=0, rewards=1)
-        assert A("missions_set", enabled=True, lang="en", targets=2, rewards=0.5) == hc.missions_cfg() == \
+        cfg = A("missions_set", enabled=True, lang="en", targets=2, rewards=0.5)
+        assert cfg == hc.missions_cfg() and {k: cfg[k] for k in ("enabled", "lang", "targets", "rewards")} == \
             {"enabled": True, "lang": "en", "targets": 2.0, "rewards": 0.5}
         d902 = next(d for d in body(hc.ENDPOINTS["/static/info/ACHIEVEMENT"]("", b""))["list"] if d["id"] == 902)
         assert d902["name"] == "Daily: Wins" and d902["rewards"][0]["todo"] == 4
@@ -2065,6 +2173,37 @@ def main():
         A("missions_set", enabled=False, lang="id", targets=1, rewards=1)
         assert ach()["achievement"] == [] and "quest" not in body(hc.ep_account("", b""))["features"]["freeroambuttons"]
         A("missions_set", enabled=True, lang="id", targets=1, rewards=1)
+        # its weekly quest editor (the list a week draws from, how many, the reward boxes): a quest done
+        # stays done and paid once when the list changes; reset = the built-in ones
+        m = A("missions")
+        assert [(q["stat"], q["todo"], q["gp"]) for q in m["quests"]] == list(hc.QUESTS) and m["questcount"] == hc.QUEST_COUNT
+        assert [q["name"] for q in m["thisweek"]] == [q[0] for q in hc.week_quests(hc.missions_cfg(), hc.week_end())]
+        assert set(m["stats"]) == set(hc.QUEST_STATS) and [501, "Lucky EP"] in m["items"]
+        st = hc._state(); done = dict(hc.missions_state(st)["quests"])
+        assert done and all(":" in k for k in done)
+        own = [{"stat": "goal", "todo": 2, "gp": 7, "name": "Gol {0}x"}, {"stat": "win", "todo": 999, "gp": 9, "name": ""}]
+        assert refused("quests_set", quests=own, questcount=3, gpshop=m["gpshop"])  # more a week than the list
+        assert refused("quests_set", quests=[{**own[0], "stat": "level"}], questcount=1, gpshop=m["gpshop"])
+        assert refused("quests_set", quests=own, questcount=2, gpshop=[{"itemid": 1, "gp": 5}])  # not an item
+        assert refused("quests_set", quests=own, questcount=2, gpshop=m["gpshop"] * 2)  # 10 boxes
+        A("quests_set", quests=own, questcount=2, gpshop=[{"itemid": 501, "gp": 15}])
+        assert hc.missions_cfg()["lang"] == "id"  # the other settings kept
+        bank = body(hc.ENDPOINTS["/static/info/request"]("", b""))
+        assert sorted(q["name"] for q in bank["current"]) == ["Gol 2x", "Menangi 999 pertandingan"]
+        assert [(e["product"]["itemid"], e["product"]["staticdata"]["bunches"][0]["price"])
+                for e in body(hc.ENDPOINTS["/shop/list/GPSHOP"]("", b""))] == [(501, 15)]
+        gp0 = hc.missions_state(hc._state())["gp"]
+        st = hc._state(); hc.mission_event(st, match=1); hc._save(st)  # this week's goals already make 2
+        assert hc.missions_state(hc._state())["gp"] == gp0 + 7
+        assert sorted("completedat" in q for q in ach()["quest"]) == [False, True]  # the goal one only
+        A("quests_set", reset=True)
+        assert hc.missions_cfg() == {**hc.MISSIONS_DEFAULT, "lang": "id"}
+        st = hc._state(); hc.mission_event(st, match=1); hc._save(st)
+        assert hc.missions_state(hc._state())["gp"] == gp0 + 7  # the built-in ones done before: not paid again
+        # a done quest saved by its place in the list (before the editor) is moved to its counter and target
+        st = hc._state(); m_ = hc.missions_state(st); m_["quests"] = {"0": "x"}
+        first = hc.week_quests(hc.missions_cfg(), m_["week"])[0]
+        assert hc.missions_state(st)["quests"] == {hc.quest_key(first[1], first[2]): "x"}
         A("ep", set=ep_before)
         # issue #31, pre-match settings: Rank's game setting screen has the steppers (its stadium list is
         # GET /stadium/list, a change is PUT /match/<id>/gamesettings); Liga and Cup only show the values,
@@ -2155,6 +2294,26 @@ def main():
         hc._save({"coaches": [], "defaultcoachid": "", "teams": {}})
         hc.ENDPOINTS["/coach/1"]("", json.dumps({"id": 241, "coachName": "Eco"}).encode())
         assert hc._state()["coaches"][0]["ep"] == 5000
+        # issue #40: each manager keeps his own Liga (and Cup, club, ...): switching managers swaps
+        # them; another club's league saved before the fix shows the creation screen
+        hc._save({"coaches": [], "defaultcoachid": "", "teams": {}})
+        for slot, club in ((0, 241), (1, 1)):  # Barcelona (LaLiga), Arsenal (Premier League)
+            sp = [p["spid"] for p in hc.roster(club)["team"]["players"]]
+            assert body(hc.ENDPOINTS[f"/coach/{slot}/new/step/3"]("", json.dumps({"id": club, "spids": sp}).encode()))["result"]
+            assert body(hc.ENDPOINTS[f"/coach/{slot}"]("", json.dumps({"id": club, "coachName": f"M{slot}"}).encode()))["result"]
+        use_coach = lambda s: body(hc.ENDPOINTS[f"/coach/{s}/default"]("", b""))
+        l2_now = lambda: body(hc.ENDPOINTS["/league2/me"]("", b""))
+        start_l2 = lambda: body(hc.ENDPOINTS["/league2/calendar"]("", json.dumps({"difficulty": 10}).encode()))
+        use_coach(0); start_l2()
+        assert (l2_now()["leagueid"], l2_now()["league"]["teams"][0]) == (53, 241)
+        use_coach(1)
+        assert "league" not in l2_now() and l2_now()["sponsoroffice"]["season"]["status"] == "none"  # his own creation screen
+        start_l2()
+        assert (l2_now()["leagueid"], l2_now()["league"]["teams"][0]) == (13, 1)
+        use_coach(0)
+        assert (l2_now()["leagueid"], l2_now()["league"]["teams"][0]) == (53, 241)  # the first one's season is back
+        st = hc._state(); st["league2"] = next(c for c in st["coaches"] if c["slot"] == 1)["clubdata"]["league2"]; hc._save(st)
+        assert "league" not in l2_now() and l2_now()["teamid"] == 241
         hc.STATE = live
         # the dynamic Market: a player's price moves day by day (the same for every grade), the band
         # goes to 105% (a slower buyer; the fee takes that back), the managers list bargains, the
@@ -2241,6 +2400,65 @@ def main():
         assert dear > hc.pack_ev(small) * 1.0025 and dear * 0.9975 <= hc.product_price(small, 1), (small, dear)
         A("economy_set", players=1, packs=1, start_ep=1000000, dynamic=False, shopfree=True)
         assert hc.card_price(m88) == p1 and hc.pack_price(pk) == pp1 and hc.market_value(m88, 1) == p1 and hc.SHOP_FREE
+        # Live Center > LIVE BOOST: the newest Team of the Week (a fake fut.gg here: 11 of my club's
+        # players in week 2, plus a woman and a wrong birth date, who are left out), its players by FO3
+        # id, the features flag, /static/db/LIVEBOOST, a match's boostweekid, the reward once a week
+        hc.LIVEBOOST = os.path.join(tmp, "live_boost.json")
+        assert hc.live_boost() is None and hc.live_boost_weekid() == 0
+        assert "livecenter" not in body(hc.ENDPOINTS["/account"]("", b""))["features"]
+        assert body(hc.ENDPOINTS["/static/db/LIVEBOOST"]("", b""))["liveplayers"] == {}
+        snap = hc._state(); mine = snap["teams"]["0"]["players"]
+        with hc.closing(hc._db()) as c:
+            born = {pid: c.execute("SELECT birthdate FROM players WHERE playerid = ?", (pid,)).fetchone()[0].split()[0]
+                    for pid in {int(p["spid"]) % 1000000 for p in mine}}
+        xi = sorted(born)[:11]
+
+        def card(pid, ovr, day, gender=1, dob=None, pos="CM"):
+            m_, d_, y_ = (int(x) for x in (dob or born[pid]).split("/"))
+            return {"basePlayerEaId": pid, "overall": ovr, "gender": gender, "birthDate": y_ * 10000 + m_ * 100 + d_,
+                    "position": pos, "commonName": f"P{pid}", "createdAt": f"2026-{day}T18:00:44.769558Z"}
+        week1 = [card(pid, 80, "10-28") for pid in xi[:3]]
+        week2 = [card(pid, 90 - i, "11-04", pos="GK" if i < 2 else "ST") for i, pid in enumerate(xi)] + \
+            [card(xi[0], 99, "11-04", gender=2), card(xi[1], 99, "11-05", dob="1/1/1900")]
+        calls = []
+
+        def futgg(path):
+            calls.append(path)
+            assert path == f"/players/v2/27/?page={len(calls)}&rarity_id=3"
+            return {"data": (week1 + week2)[:9] if len(calls) == 1 else (week1 + week2)[9:], "next": 2 if len(calls) == 1 else None}
+        now = calendar.timegm((2026, 11, 9, 0, 0, 0))
+        lb = hc.totw_fetch(now, futgg)
+        assert (lb["game"], lb["week"], lb["released"]) == (27, 2, calendar.timegm((2026, 11, 4, 18, 0, 44)))
+        assert [p["pid"] for p in lb["players"]] == xi and len(lb["missing"]) == 2
+        assert all(p["boost"] == 5 for p in lb["players"])  # user: "jika masuk totw rating tambah 5"
+        # a 4-3-3: 1 GK (the other on the bench), 3 FW, then the next strikers in midfield and defence
+        assert [p["best11"] for p in lb["players"]] == [True, False] + [True] * 9
+        assert [p["position"] for p in lb["players"]] == ["GK"] * 2 + ["ST"] * 3 + ["CM"] * 3 + ["CB"] * 3
+        assert hc.live_boost() == lb and hc.live_boost_weekid() == 2702
+        calls.clear()
+        assert hc.totw_fetch(now, futgg) == lb  # the same week: kept as it is
+        assert body(hc.ENDPOINTS["/account"]("", b""))["features"]["livecenter"]["boost"] == {}
+        s = body(hc.ENDPOINTS["/static/db/LIVEBOOST"]("", b""))
+        assert (s["weekid"], s["month"], s["weekofmonth"]) == (2702, 11, 1)
+        assert hc._utc(s["expiretime"]) > time.time() and list(s["liveplayers"]) == [str(hc.LIVEBOOST_GROUP)]
+        assert s["liveplayers"]["2900"][0] == {"pid": xi[0], "boost": 5, "best11": True, "position": "GK"}
+        assert hc.new_match("x", {"team": {"teamid": 1}}, {"team": {"teamid": 2}})["boostweekid"] == 2702
+        claim = lambda week=2702, league=2900: body(hc.ENDPOINTS["/live/boost/collecting/rewards"](
+            "", json.dumps({"weekid": week, "leagueid": league}).encode()))
+        bad = {"result": False, "reason": "invalid week and league data"}
+        assert claim() == bad  # a new club's cards are +0: not counted
+        st = hc._state()
+        for p in st["teams"]["0"]["players"]:
+            p["grade"] = 1 if int(p["spid"]) % 1000000 in xi else p.get("grade", 0)
+        hc._save(st)
+        assert claim(2701) == bad and claim(league=13) == bad
+        assert not body(hc.ENDPOINTS["/live/boost/info"]("", b""))["info"]["rewarded"]
+        bag = len(hc.my_coach(hc._state()).get("bag", []))
+        r = claim()
+        assert r["result"] and r["items"][0]["itemid"] == hc.EP_ITEM and r["items"][0]["count"] == int(hc.LIVEBOOST_REWARD_EP * hc.ECONOMY["players"])
+        assert len(hc.my_coach(hc._state())["bag"]) == bag + 1 and body(hc.ENDPOINTS["/live/boost/info"]("", b""))["info"]["rewarded"]
+        assert claim() == {"result": False, "reason": "rewarded"}
+        hc._save(snap)  # grades, Bag and reward as before
         # the client's string pack is served with the setting screens' labels fixed: day "Siang" (was
         # "Waktu"), weather 3 "Mendung" (was "Malam"); built once, the rest untouched
         src = hc.asset_path(hc.LANG_PACK)
@@ -2249,8 +2467,9 @@ def main():
             out = hc.language_pack(src)
             fixed, orig = (json.loads(hc.client_big(f, hc.LANG_ENTRY).decode("utf-8-sig")) for f in (out, src))
             assert out == hc.LANG_FIXED and (fixed["COMMON_TIME_DAY"], fixed["COMMON_WEATHER_DUSK"]) == ("Siang", "Mendung")
-            assert {k: v for k, v in fixed.items() if k not in ("COMMON_TIME_DAY", "COMMON_WEATHER_DUSK")} == \
-                {k: v for k, v in orig.items() if k not in ("COMMON_TIME_DAY", "COMMON_WEATHER_DUSK")}
+            assert fixed["LIVEBOOST_CUSTOM_2900"] == "Team of the Week"  # Live Boost's one group
+            keep = ("COMMON_TIME_DAY", "COMMON_WEATHER_DUSK", "LIVEBOOST_CUSTOM_2900")
+            assert {k: v for k, v in fixed.items() if k not in keep} == {k: v for k, v in orig.items() if k not in keep}
             assert hc.language_pack(src) == out and hc.cdn_file(hc.LANG_PACK)[1] == open(out, "rb").read()
             built = os.stat(out).st_mtime_ns
             assert hc.language_pack(src) == out and os.stat(out).st_mtime_ns == built  # built once

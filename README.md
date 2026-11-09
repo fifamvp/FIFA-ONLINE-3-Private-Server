@@ -303,6 +303,27 @@ Added, passing the tests but not yet checked in the client:
   the arrows or Pilih Team, invite a friend from the list (a virtual manager, who joins with a club of
   his own and is ready), then Siap plays both clubs' own squads. Five matches a day; your cards earn no
   EXP from them. The Live Center opens without its two old UI errors.
+- **Live Boost from EA FC's Team of the Week**: Tim > Live Boost shows this week's
+  Team of the Week (from fut.gg; the server fetches the new one after its Wednesday release, so it needs
+  the internet). Every card of those players gets +5 on every stat for the week (rating +5): squads,
+  Market and matches. Only players FO3 has (and the 26 LIVE new players) are listed, no women's cards.
+  Owning 11 of them (+1 or higher) gives 100,000 EP once a week (Terima).
+- **Weekly quest editor** (admin Misi tab): the quests a week draws from (type, target, GP, an own name
+  with {0} for the target), how many a week (up to 6) and the Quest window's GP reward boxes (up to 5),
+  with this week's and next week's draw. A quest already done this week stays done.
+- **Daily login reward in the game**: the day's reward still goes to the Bag at the first login; a
+  notification now says so, and its entry opens a popup with the day number and the items.
+- **Play time rewards**: a reward when today's play time reaches 10, 30 and 60 minutes (the day starts
+  at 00:00 WIB; breaks over 20 minutes do not count), into the Bag with the same notification. The
+  steps are set on the admin page's Daily reward tab.
+- **Global chat**: the chat window's Channel tab works: your lines show, and the online virtual
+  managers answer now and then and chat by themselves (in the AI chat tab's language).
+- **Football talk in the global chat**: the virtual managers in the Channel tab discuss the day's
+  football: Google's rising searches that are about football and Google News headlines, worldwide and of the
+  ticked countries in their language (X, Instagram and TikTok need a login, Reddit refuses a server), fetched once a day. Each
+  one likes to bring up his club, his star player or his country when the news has them, and others
+  answer. The global news is always on; Indonesia, Malaysia, Vietnam, Thailand and Korea are ticked by
+  hand on the admin page's AI chat tab, which also lists the topics now.
 - **Card and club database on the admin page** (issue #38): the Database tab edits one card of a player
   per season (spid = season × 1,000,000 + player id; search by name, spid or player id): the 33
   attributes, positions, preferred and weak foot, skill moves, work rates, traits, club (a transfer) and

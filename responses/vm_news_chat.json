@@ -1,0 +1,137 @@
+{
+ "id": {
+  "general": [
+   "Lagi rame nih: \"{title}\". Gimana menurut kalian?",
+   "Udah baca belum? \"{title}\"",
+   "Berita bola hari ini: \"{title}\". Setuju nggak?",
+   "Trending nih guys: \"{title}\"",
+   "Ada yang ngikutin ini? \"{title}\"",
+   "Barusan lihat di medsos: \"{title}\""
+  ],
+  "club": [
+   "Klub favoritku {name} masuk berita lagi: \"{title}\"",
+   "Fans {name} mana suaranya? \"{title}\"",
+   "Soal {name} nih: \"{title}\". Semoga makin kuat!",
+   "{name} lagi jadi omongan: \"{title}\""
+  ],
+  "player": [
+   "Idolaku {name} lagi trending: \"{title}\"",
+   "{name} memang beda kelas. \"{title}\"",
+   "Kabar {name} hari ini: \"{title}\"",
+   "Ada yang lihat berita {name}? \"{title}\""
+  ],
+  "country": [
+   "Ayo dukung {name}! \"{title}\"",
+   "Kabar {name} hari ini: \"{title}\"",
+   "Bangga sama {name}. \"{title}\"",
+   "{name} jadi bahasan nih: \"{title}\""
+  ],
+  "react": [
+   "Wah iya, aku juga baca itu",
+   "Hmm, menurutku masih terlalu cepat buat menilai",
+   "Kalau {club} sih pasti beda ceritanya",
+   "Setuju! Ini berita besar",
+   "Serius? Nggak nyangka",
+   "Mantap, semoga beneran kejadian",
+   "Aku masih ragu sama berita itu",
+   "Habis baca ini langsung pengen main Rank"
+  ],
+  "mood": {
+   "friendly": [" :)", " ^^", ""],
+   "competitive": ["", ".", " Fokus menang."],
+   "funny": [" wkwk", " xD", " wkwkwk"],
+   "confident": [" B)", " :P", ""],
+   "playful": [" :P", " hehe", " :D"]
+  }
+ },
+ "en": {
+  "general": [
+   "Everyone's talking about this: \"{title}\". Thoughts?",
+   "Did you see this? \"{title}\"",
+   "Today's football news: \"{title}\". Agree?",
+   "Trending right now: \"{title}\"",
+   "Anyone following this? \"{title}\"",
+   "Just saw this on social media: \"{title}\""
+  ],
+  "club": [
+   "My club {name} is in the news again: \"{title}\"",
+   "Any {name} fans here? \"{title}\"",
+   "About {name}: \"{title}\". Hope it makes us stronger!",
+   "{name} is the talk of the day: \"{title}\""
+  ],
+  "player": [
+   "My favourite {name} is trending: \"{title}\"",
+   "{name} is on another level. \"{title}\"",
+   "{name} today: \"{title}\"",
+   "Did anyone see the {name} news? \"{title}\""
+  ],
+  "country": [
+   "Come on {name}! \"{title}\"",
+   "{name} news today: \"{title}\"",
+   "Proud of {name}. \"{title}\"",
+   "{name} is the topic today: \"{title}\""
+  ],
+  "react": [
+   "Yeah, I read that too",
+   "Hmm, too early to judge if you ask me",
+   "With {club} it would be a different story",
+   "Agreed! Big news",
+   "Really? Didn't see that coming",
+   "Nice, hope it actually happens",
+   "Not sure I believe that one",
+   "Reading this makes me want to play Rank"
+  ],
+  "mood": {
+   "friendly": [" :)", " ^^", ""],
+   "competitive": ["", ".", " Focus on winning."],
+   "funny": [" lol", " xD", " haha"],
+   "confident": [" B)", " :P", ""],
+   "playful": [" :P", " hehe", " :D"]
+  }
+ },
+ "vi": {
+  "general": [
+   "Đang hot nè: \"{title}\". Mọi người nghĩ sao?",
+   "Đọc tin này chưa? \"{title}\"",
+   "Tin bóng đá hôm nay: \"{title}\". Đồng ý không?",
+   "Đang trending đó: \"{title}\"",
+   "Có ai theo dõi vụ này không? \"{title}\"",
+   "Vừa thấy trên mạng xã hội: \"{title}\""
+  ],
+  "club": [
+   "CLB yêu thích của mình {name} lại lên báo: \"{title}\"",
+   "Fan {name} đâu rồi? \"{title}\"",
+   "Về {name} nè: \"{title}\". Mong đội mạnh hơn!",
+   "{name} đang được bàn tán: \"{title}\""
+  ],
+  "player": [
+   "Thần tượng {name} đang hot: \"{title}\"",
+   "{name} đúng là đẳng cấp. \"{title}\"",
+   "Tin {name} hôm nay: \"{title}\"",
+   "Có ai xem tin về {name} chưa? \"{title}\""
+  ],
+  "country": [
+   "Cố lên {name}! \"{title}\"",
+   "Tin {name} hôm nay: \"{title}\"",
+   "Tự hào về {name}. \"{title}\"",
+   "{name} đang là chủ đề nóng: \"{title}\""
+  ],
+  "react": [
+   "Ừ, mình cũng đọc rồi",
+   "Hmm, mình thấy còn sớm để nói",
+   "Với {club} thì chuyện sẽ khác",
+   "Đồng ý! Tin lớn đó",
+   "Thật hả? Không ngờ luôn",
+   "Hay đó, mong là thành sự thật",
+   "Mình vẫn chưa tin lắm",
+   "Đọc xong muốn vào đánh Rank liền"
+  ],
+  "mood": {
+   "friendly": [" :)", " ^^", ""],
+   "competitive": ["", ".", " Tập trung thắng thôi."],
+   "funny": [" haha", " xD", " kkk"],
+   "confident": [" B)", " :P", ""],
+   "playful": [" :P", " hihi", " :D"]
+  }
+ }
+}

@@ -451,6 +451,13 @@ def ep_account(query, body):
     # featuresAt("/friendlymatch"); none = an empty screen): against AI, see room_kind
     acc["features"]["friendlymatch"] = {"quickmatch": {}, "randommatch": {}, "custommatch": {}}
     acc["features"].setdefault("esports", {})["regionalleague"] = {}  # King of the Hill (issue #36)
+    if live_boost():  # Tim > Live Boost (the Team of the Week)
+        acc["features"].setdefault("livecenter", {})["boost"] = {}
+    # guides = the Beginner's Guide chapters done (BeginnersGuideManager.isChapterCompleted). Until
+    # "setcontroller" is done MenuScreen.onFreeRoamLoadingFinished starts that guide instead of
+    # attaching the chat window, so the top bar's chat button did nothing (user: "global chat belum
+    # ada"); the controller is chosen in Opsi anyway
+    acc["guides"] = sorted({*acc.get("guides", []), "setcontroller"})
     return _json(acc)
 
 
@@ -733,7 +740,9 @@ def client_stadium_names():
 # Liga/Cup's screen still shows weather 3 as "Salju": its code reuses the snow label.
 LANG_PACK, LANG_ENTRY = "externalAssets/language_ind.big", "data/ui/external/LANGUAGESTRING_IND.json"
 LANG_FIXES = {b'"COMMON_TIME_DAY": "Waktu"': b'"COMMON_TIME_DAY": "Siang"',
-              b'"COMMON_WEATHER_DUSK": "Malam"': b'"COMMON_WEATHER_DUSK": "Mendung"'}
+              b'"COMMON_WEATHER_DUSK": "Malam"': b'"COMMON_WEATHER_DUSK": "Mendung"',
+              # Live Boost's one group (LIVEBOOST_GROUP) is the Team of the Week
+              b'"LIVEBOOST_CUSTOM_2900": "Europe Weekly Best"': b'"LIVEBOOST_CUSTOM_2900": "Team of the Week"'}
 LANG_FIXED = os.path.join(HERE, "gamedata", "language_ind.big")
 LANG_LOCK = threading.Lock()
 
@@ -781,7 +790,7 @@ def new_match(mtype, left, right, **extra):
     match = {"id": mid, "type": mtype, "created": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime()),
              "stage": "created", "side": {"left": left, "right": right},
              "elo": {"left": {"rating": 1000}, "right": {"rating": 1000}},
-             "result": None, "reward": None, "boostweekid": 0,
+             "result": None, "reward": None, "boostweekid": live_boost_weekid(),  # the client's LIVEBOOST weekid
              # native ApplyGameSettings gets this object as-is.
              # kit: [left uniform id, right uniform id] as STRINGS: AS3 reads them in
              # processMatchSideStandingPlayerResource, native (0x9480D0) with asCString
@@ -1986,10 +1995,27 @@ def ep_coach_onready(query, body):
                   + [{"uri": "/inbox/my/notifications", "body": notes}]})
 
 
+# The account-wide club data (Liga, Cup, the last match, Tukar, the club) is the default manager's.
+# Issue #40 ("Can't play league match when using team in other league than la liga"): a second
+# manager got the first one's Liga, his own club missing from it (no HOME side, "-1 of 18 matches",
+# nothing to play). Now the data goes with its manager while another one is played.
+CLUB_DATA = ("league2", "cups", "match", "trade", "club")
+
+
+def switch_default_coach(st, cid):
+    old = next((c for c in st["coaches"] if c["_id"] == st.get("defaultcoachid")), None)
+    if old is None or old["_id"] != cid:
+        if old is not None:
+            old["clubdata"] = {k: st.pop(k) for k in CLUB_DATA if k in st}
+        new = next((c for c in st["coaches"] if c["_id"] == cid), {})
+        st.update(new.pop("clubdata", {}))
+    st["defaultcoachid"] = cid
+
+
 def ep_default_coach(slot, query, body):
     # PUT /coach/<slot>/default: the client calls setLocalCoachId(body.resources[0].body.id);
     # resources are also fed to cached resources, so /coach/me (CoachProxy) goes first.
-    st = _state(); st["defaultcoachid"] = coach_id(slot)
+    st = _state(); switch_default_coach(st, coach_id(slot))
     daily_login(st)  # first login of the day: today's reward goes to the Bag
     if str(slot) in st["teams"]:
         balance_first_team(st["teams"][str(slot)])
@@ -2148,6 +2174,8 @@ def l2_me(st):
     """GET /league2/me body; LeagueCupProxy.fetch* read each key as a path."""
     teamid = my_teamid(st)
     lg = st.get("league2") or {}
+    if lg.get("league") and teamid not in lg["league"]["teams"]:  # another club's (saved before issue #40)
+        lg = {"difficultyselect": lg.get("difficultyselect", 10)}
     me = {"teamid": teamid, "leagueid": lg.get("leagueid") or roster_summary(teamid).get("league", {}).get("id", 0),
           # creation screen: selectable = difficultybest - 10 (24 unlocks all 10 normal + 5
           # ultimate levels), preselected = difficultyselect - 10
@@ -5091,7 +5119,7 @@ def ep_shop_purchase(query, body):
     items go to Item saya, a package's contents too."""
     req = json.loads(body or b"{}")
     shopid = int(req.get("shopid") or 0)
-    gp = shopid >= GP_SHOPID and dict(GP_SHOP).get(shopid - GP_SHOPID)  # a Quest window reward box: GP
+    gp = shopid >= GP_SHOPID and gp_shop_prices().get(shopid - GP_SHOPID)  # a Quest window reward box: GP
     itemid = int(req.get("productid") or 0) or (shopid - GP_SHOPID if gp else shopid % MP_SHOPID % STSHOPID)
     if itemid in SHOP_HIDDEN and not gp or not any(itemid in t for t in (PACKS, ITEMS, PACKAGES, MONTHLY)):
         return _json({"result": False, "reason": "NOT_EXIST_PRODUCT"})
@@ -5318,6 +5346,121 @@ def today_wib(ts=None):
 def reward_items(reward):
     return ([{"itemid": EP_ITEM, "count": int(reward["ep"])}] if reward.get("ep") else []) + \
            ([{"itemid": int(reward["pack"]), "count": int(reward.get("count") or 1)}] if reward.get("pack") else [])
+
+
+def daily_note(st, now=None):
+    """Today's login reward as an event notification, once a day (user: "daily login belum ada"):
+    its toast (EVENT_GET_MESSAGE) and a list entry that opens EventRewardPopup (SystemMessageUtil
+    event.reward: details = the event {type daily, opts.dailytype, rewardindex (day - 1),
+    messages.popup {name, description}, assets, items}), or None."""
+    d, today = my_coach(st).get("daily") or {}, today_wib(now)
+    if d.get("last") != today or d.get("noted") == today:
+        return None
+    d["noted"] = today
+    table, n = daily_table(), d["streak"]
+    items = [{**it, "staticdata": item_def(it["itemid"])} for it in reward_items(table[(n - 1) % len(table)])]
+    return {**note("event", "reward", {
+        "type": "daily", "opts": {"dailytype": "continuous"}, "rewardindex": n - 1, "assets": {}, "items": items,
+        "title": "Hadiah login harian", "messages": {"popup": {"name": "Hadiah login harian", "description":
+            f"Login {n} hari berturut-turut. Hadiahnya sudah masuk Bag (Item saya)."}}}, now), "stackable": True}
+
+
+def ep_event_daily(query, body):
+    """PUT /events/rewards/daily: InGameEventController asks for it 0-2 minutes into a session and
+    when the UTC date turns. Today's login reward if not given yet, and its notification."""
+    st = _state()
+    daily_login(st)
+    n = daily_note(st)
+    _save(st)
+    if n:
+        messenger_push("/inbox/my/notifications/latest", n)
+    return _json({"result": True})
+
+
+# Play time rewards (user: "sama hadiah berapa lama player login"): InGameEventController's "dt"
+# event in GET /events: condition.dt {time {beginningat, prevsession (s)}, timeline [s per step],
+# endline (s), rewarded}, limit.reward (rounds a day). The client counts prevsession + its clock
+# since beginningat (ms, a number: TimerUtil.convertToUTCTime adds -timezone minutes to it, as to
+# the server time, so its "UTC" day is the WIB day of /info/server/time's timezone -420; a W3C string
+# made an invalid date, read as midnight), starts over at 00:00 WIB (prevsession 0, rewarded 0), and
+# once a step of the timeline is passed asks PUT /events/rewards/dt; done = rewarded >= steps x
+# limit.reward. The time is the server's play time (note_activity: request gaps up to PLAYTIME_GAP)
+# since that WIB day began.
+PLAYTIME_FILE = os.path.join(HERE, "gamedata", "playtime_rewards.json")
+PLAYTIME_DEFAULT = [{"minutes": 10, "ep": 10000}, {"minutes": 30, "ep": 30000}, {"minutes": 60, "pack": 28007}]
+DT_EVENTID = 1002
+
+
+def playtime_table():
+    try:
+        with open(PLAYTIME_FILE, encoding="utf-8") as f:
+            return json.load(f) or PLAYTIME_DEFAULT
+    except (OSError, ValueError):
+        return PLAYTIME_DEFAULT
+
+
+def played_today(st, now=None):
+    """(my coach's "dt" record, seconds played since 00:00 WIB): its base is the play time then."""
+    coach = my_coach(st)
+    total = coach.get("playtime", 0) + PLAYTIME["pending"]
+    day = today_wib(now)
+    if (coach.get("dt") or {}).get("day") != day:
+        coach["dt"] = {"day": day, "base": total, "rewarded": 0}
+    return coach["dt"], int(total - coach["dt"]["base"])
+
+
+def dt_event(st, now=None):
+    now = time.time() if now is None else now
+    d, secs = played_today(st, now)
+    table = playtime_table()
+    timeline = [int(r["minutes"]) * 60 for r in table]
+    return {"eventid": DT_EVENTID, "active": True, "reason": [],
+            "condition": {"type": "dt", "timeset": ENHANCE_EVENT["condition"]["timeset"],
+                          "targetuser": ENHANCE_EVENT["condition"]["targetuser"],
+                          "dt": {"time": {"beginningat": int(now * 1000), "prevsession": secs}, "timeline": timeline,
+                                 "endline": timeline[-1], "rewarded": d["rewarded"]}},
+            # a step's reward: [{items: [...]}] (InGameDTEventViewer.updateRewardIcon shows
+            # reward[step][0].items[0]; a bare item list threw TypeError #1010 entering the lobby)
+            "limit": {"reward": 1}, "reward": [[{"items": [{**it, "staticdata": item_def(it["itemid"])} for it in reward_items(r)]}]
+                                                for r in table],
+            "messages": {"main": {"name": "Hadiah waktu bermain", "description": "Main " + ", ".join(
+                f"{r['minutes']}" for r in table) + " menit hari ini (sejak 00:00 WIB): tiap target memberi hadiah ke Bag."}}}
+
+
+def events_body(st):
+    return {"events": [ENHANCE_EVENT, dt_event(st)] if st.get("coaches") else [ENHANCE_EVENT]}
+
+
+def ep_events(query, body):
+    st = _state()
+    out = events_body(st)
+    _save(st)
+    return _json(out)
+
+
+def ep_event_dt(query, body):
+    """PUT /events/rewards/dt: the next step's reward once its time is played (2 minutes' slack: the
+    client counts its own clock), then the event as it is now."""
+    st, now = _state(), time.time()
+    d, secs = played_today(st, now)
+    table = playtime_table()
+    i = d["rewarded"]
+    ok = i < len(table) and secs + 120 >= int(table[i]["minutes"]) * 60
+    n = None
+    if ok:
+        d["rewarded"] = i + 1
+        items = reward_items(table[i])
+        bag_add(st, f"Hadiah main {table[i]['minutes']} menit", items, msg=f"Kamu sudah main {table[i]['minutes']} menit hari ini.")
+        n = {**note("event", "reward", {
+            "type": "dt", "opts": {}, "rewardindex": i, "assets": {}, "title": "Hadiah waktu bermain",
+            "items": [{**it, "staticdata": item_def(it["itemid"])} for it in items],
+            "messages": {"popup": {"name": "Hadiah waktu bermain", "description":
+                f"Main {table[i]['minutes']} menit hari ini. Hadiahnya sudah masuk Bag (Item saya)."}}}, now), "stackable": True}
+    out = events_body(st)
+    _save(st)
+    if n:
+        messenger_push("/inbox/my/notifications/latest", n)
+    return _json({"result": ok, "resources": [{"uri": "/events", "body": out}]})
 
 
 def bag_add(st, title, items=(), players=(), msg=""):
@@ -5986,10 +6129,11 @@ def ep_bag_unpackall(query, body):
 #    lapses at the reset, CoachProxy.clearGP) for the window's reward boxes (GET /shop/list/GPSHOP,
 #    up to 5; /shop/purchase charges GP for them).
 # The admin page's Misi tab (gamedata/missions.json): on/off, the texts' language, a multiplier on
-# the targets and one on the rewards; EP rewards also follow the Ekonomi tab's player prices.
+# the targets and one on the rewards; EP rewards also follow the Ekonomi tab's player prices. Its
+# weekly quest editor (user: "tambah editor untuk quest mingguan di admin panel"): the quests a week
+# draws from (counter, target, GP, an own name), how many a week, the reward boxes (item, GP).
 # --------------------------------------------------------------------------- #
 MISSIONS_FILE = os.path.join(HERE, "gamedata", "missions.json")
-MISSIONS_DEFAULT = {"enabled": True, "lang": "id", "targets": 1.0, "rewards": 1.0}
 MISSION_LANGS = {"id": "Bahasa Indonesia", "en": "English", "vi": "Tiếng Việt"}
 # (id, group, counter or "level" / "grade" / "value" (from the coach and the club now), targets
 # of its grades, stars). Daily ones: one grade, counted today
@@ -6005,6 +6149,11 @@ QUESTS = (("match", 10, 30), ("win", 6, 30), ("goal", 15, 25), ("upgrade", 3, 20
 QUEST_COUNT = 5
 GP_SHOP = ((50021, 40), (501, 20), (8223601, 50), (1000053, 30), (50122, 60))  # (itemid, GP): the reward boxes
 GP_SHOPID = 920_000_000
+QUEST_STATS = ("match", "win", "goal", "rank", "rankwin", "upgrade")  # the counters mission_event keeps a week
+QUEST_MAX, GP_SHOP_MAX = 6, 5  # the window's quest list shows 6; it has 5 reward boxes (REWARD_BOX_COUNT)
+MISSIONS_DEFAULT = {"enabled": True, "lang": "id", "targets": 1.0, "rewards": 1.0,
+                    "quests": [{"stat": s, "todo": t, "gp": g, "name": ""} for s, t, g in QUESTS],
+                    "questcount": QUEST_COUNT, "gpshop": [{"itemid": i, "gp": g} for i, g in GP_SHOP]}
 MISSION_TEXT = {  # counter: {lang: (name, the goal ({0} = target), the goal said in full)}
     "level": {"id": ("Level manajer", "Capai level {0}", "Naikkan level manajer sampai level {0}."),
               "en": ("Manager level", "Reach level {0}", "Raise your manager to level {0}."),
@@ -6087,11 +6236,19 @@ def mission_defs(cfg):
 
 
 def week_quests(cfg, week_end_ts):
-    """The week's quests: [(name, counter, target, GP)], the same draw for the same week."""
-    lang = cfg["lang"]
-    return [(MISSION_TEXT[stat][lang][1].format(f"{mission_target(todo, cfg):,}"), stat, mission_target(todo, cfg),
-             max(1, round(gp * cfg["rewards"])))
-            for stat, todo, gp in random.Random(f"quests/{week_end_ts}").sample(QUESTS, QUEST_COUNT)]
+    """The week's quests: [(name, counter, target, GP)], the same draw for the same week and list.
+    A quest's own name may say its target as {0}."""
+    out, pool = [], cfg["quests"]
+    for q in random.Random(f"quests/{week_end_ts}").sample(pool, min(cfg["questcount"], len(pool))):
+        todo = mission_target(q["todo"], cfg)
+        name = (q.get("name") or MISSION_TEXT[q["stat"]][cfg["lang"]][1]).replace("{0}", f"{todo:,}")
+        out.append((name, q["stat"], todo, max(1, round(q["gp"] * cfg["rewards"]))))
+    return out
+
+
+def quest_key(stat, todo):
+    """A done quest in coach missions.quests: its counter and target (an edited list keeps it)."""
+    return f"{stat}:{todo}"
 
 
 def mission_gp(coach):
@@ -6108,6 +6265,10 @@ def missions_state(st, now=None):
         m.update(day=day, daily={}, dailyclaimed=[])
     if m.get("week") != week:
         m.update(week=week, weekly={}, quests={}, gp=0)
+    if any(k.isdigit() for k in m["quests"]):  # by its place in the week's list, before the quest editor
+        qs = week_quests(missions_cfg(), week)
+        m["quests"] = {quest_key(*qs[int(k)][1:3]) if k.isdigit() and int(k) < len(qs) else k: v
+                       for k, v in m["quests"].items()}
     for k, v in (("total", {}), ("claimed", {}), ("groups", {}), ("badges", []), ("currentbadge", 0)):
         m.setdefault(k, v)
     return m
@@ -6123,9 +6284,9 @@ def mission_event(st, now=None, **counts):
     for k, n in counts.items():
         for scope in ("daily", "weekly", "total"):
             m[scope][k] = m[scope].get(k, 0) + int(n)
-    for i, (_, stat, todo, gp) in enumerate(week_quests(cfg, m["week"])):
-        if str(i) not in m["quests"] and m["weekly"].get(stat, 0) >= todo:
-            m["quests"][str(i)] = w3c(now)
+    for _, stat, todo, gp in week_quests(cfg, m["week"]):
+        if quest_key(stat, todo) not in m["quests"] and m["weekly"].get(stat, 0) >= todo:
+            m["quests"][quest_key(stat, todo)] = w3c(now)
             m["gp"] += gp
 
 
@@ -6160,7 +6321,7 @@ def achievement_me(st, now=None):
     # date whenever there is one (none was 1.1.1970 on an unlit row)
     out = rows + [{"id": g, "complete": True, "completedat": m["groups"][g]} for g in groups if g in m["groups"]]
     quests = [{"id": i, "progress": {"detail": {"current": min(m["weekly"].get(stat, 0), todo)}},
-               **({"completedat": m["quests"][str(i)]} if str(i) in m["quests"] else {})}
+               **({"completedat": m["quests"][quest_key(stat, todo)]} if quest_key(stat, todo) in m["quests"] else {})}
               for i, (_, stat, todo, _) in enumerate(week_quests(cfg, m["week"]))]
     return {"summary": {"done": done, "total": len(rows), "rewardable": sum(r["rewards"]["available"] for r in rows)},
             "achievement": out, "quest": quests}
@@ -6220,10 +6381,15 @@ def ep_quest_bank(query, body):
     return _json({"expire": expire, "current": bank(end), "next": bank(end + 7 * 86400)})
 
 
+def gp_shop_prices():
+    """{itemid: GP} of the Quest window's reward boxes (the admin page's list)."""
+    return {b["itemid"]: b["gp"] for b in missions_cfg()["gpshop"]}
+
+
 def gp_shop_list():
     """The Quest window's reward boxes: Shop entries priced in GP."""
     out = []
-    for itemid, gp in GP_SHOP:
+    for itemid, gp in gp_shop_prices().items():
         e = shop_entry(itemid, "GPSHOP", GP_SHOPID + itemid)
         e["product"]["staticdata"]["bunches"] = [{"bunch": 1, "price": gp}]
         out.append(e)
@@ -7023,6 +7189,7 @@ def presence_loop():
                 v = club_view(st)
                 now = {m["_id"]: vm_status(m) for m in vm_friends() + [m["vm"] for m in (v["members"] if v else []) if m["vm"]]}
                 club_idle(st)
+                channel_idle()
             for vid, s in now.items():
                 if last.get(vid) not in (None, s):
                     messenger_push(f"/presence/{vid}", {"status": s})
@@ -7657,7 +7824,7 @@ def ladder_record(st, i, vm, mine, theirs, sh=0, sa=0):
 # "santai" "tai", "pass" "ass"; test_league.py checks); no emoji (the font has none).
 # --------------------------------------------------------------------------- #
 VM_CHAT_FILE = os.path.join(HERE, "gamedata", "vm_chat.json")
-VM_CHAT_DEFAULT = {"enabled": True, "lang": "id"}
+VM_CHAT_DEFAULT = {"enabled": True, "lang": "id", "newsregions": []}  # newsregions: the global chat's news besides the global
 VM_CHAT_LANGS = {"id": "Bahasa Indonesia", "en": "English", "vi": "Tiếng Việt"}  # responses/vm_chat.json
 VM_PERSONALITIES = ("friendly", "competitive", "funny", "confident", "playful")
 VM_CHAT_ODDS = {"hello": 0.9, "goal": 1, "conceded": 0.85, "miss": 0.5, "save": 0.45, "reply": 0.6}
@@ -7670,7 +7837,8 @@ def vm_chat_cfg():
     try:
         with open(VM_CHAT_FILE, encoding="utf-8") as f:
             cfg = {**VM_CHAT_DEFAULT, **json.load(f)}
-        return cfg if cfg["lang"] in VM_CHAT_LANGS else {**cfg, "lang": VM_CHAT_DEFAULT["lang"]}
+        cfg = cfg if cfg["lang"] in VM_CHAT_LANGS else {**cfg, "lang": VM_CHAT_DEFAULT["lang"]}
+        return {**cfg, "newsregions": [r for r in NEWS_REGIONS if r in (cfg.get("newsregions") or [])]}
     except (OSError, ValueError, TypeError):  # missing, broken, or not an object
         return dict(VM_CHAT_DEFAULT)
 
@@ -8067,11 +8235,19 @@ def club_add_member(st, vm, at=None):
         club_chat_reply(st, "welcome", 5, besides=vm["_id"])
 
 
+def chat_push(uri, who, text, delay=0, **extra):
+    """A line {type, coachid, coachname, message, time} into a chat tab, now or after delay s. time
+    (W3C, when it is said) is the line's clock (TextArea.getHeaderByTarget); without it every line
+    showed 7:00 (the epoch in WIB)."""
+    go = lambda: messenger_push(uri, {"type": "chat", "coachid": who["_id"], "coachname": who["name"], "message": text,
+                                      **extra, "time": w3c(time.time())})
+    threading.Timer(delay, go).start() if delay else go()
+
+
 def club_say(vm, trigger, delay):
     """Member vm's line for trigger into the Klub chat tab after delay s."""
     if vm_chat_cfg()["enabled"]:
-        threading.Timer(delay, messenger_push, ("/club/me/message", {
-            "type": "chat", "coachid": vm["_id"], "coachname": vm["name"], "message": club_line(vm, trigger)})).start()
+        chat_push("/club/me/message", vm, club_line(vm, trigger), delay or 0.01)
 
 
 def club_online(st, besides=None):
@@ -8100,8 +8276,7 @@ def ep_club_message(query, body):
     st = _state()
     if text and st.get("club"):
         coach = my_coach(st)
-        messenger_push("/club/me/message", {"type": "chat", "coachid": coach["_id"], "coachname": coach["name"],
-                                            "message": text, "hint": req.get("hint")})
+        chat_push("/club/me/message", coach, text, hint=req.get("hint"))
         low = text.lower()
         trigger = ("thanks" if any(w in low for w in CLUB_THANKS) else
                    "hello" if any(re.search(rf"\b{re.escape(w)}\b", low) for w in CLUB_HELLO) else "reply")
@@ -8115,6 +8290,260 @@ def club_after_match(st, gf, ga, act):
         return
     club_earn(st, act, {"LEAGUE": "Match_League_league", "CUP": "Match_Cup_PvE"}.get(act, "Match_general"))
     club_chat_reply(st, "win" if gf > ga else "loss" if gf < ga else "draw", 8, odds=(0.7, 0.2))
+
+
+# Global chat (user: "global chat belum ada"): the Chatting window's Channel tab. ChattingController
+# joins a channel (POST /chat/channel {channelid} or PUT /chat/channel/<id> -> {result, channelid,
+# created, reason}; GET /chat/coach/<name>/channel/detail {result, channelid, coachid} for "go to
+# his channel"); a line is POST /chat/my/channel/message {message, hint}, and every line of the
+# channel, mine too (the client shows nothing of its own), comes as the pushed resource
+# /chat/my/channel/messages/latest {type: "chat", coachid, coachname, message} (MessagingGroupProxy).
+# The others in it are the online virtual managers: one or two may answer (the club chat's lines in
+# the chat language, without the ones about a club) and now and then one talks by himself.
+CHANNEL_MAX = 99
+CHANNEL_REPLY = (0.7, 0.25)  # odds the first / second online manager answers
+CHANNEL_IDLE = 0.1  # a minute
+
+
+def channel_line(vm, trigger):
+    lines = club_chat_file(os.path.getmtime(os.path.join(RESPONSES, "vm_club_chat.json")))[
+        vm_chat_cfg()["lang"]][trigger][vm_personality(vm)]
+    return random.choice([s for s in lines if not re.search(r"klub|club|clb", s, re.I)] or lines)
+
+
+def channel_say(vm, trigger, delay):
+    channel_say_text(vm, channel_line(vm, trigger), delay)
+
+
+def channel_online():
+    return [vm for vm in virtual_managers() if vm_status(vm) != "offline"]
+
+
+def ep_channel_message(query, body):
+    """POST /chat/my/channel/message {message, hint}: my line back to me, and maybe answers."""
+    req = json.loads(body or b"{}")
+    text = str(req.get("message") or "")[:200]
+    if text:
+        coach = my_coach(_state())
+        chat_push("/chat/my/channel/messages/latest", coach, text, hint=req.get("hint"))
+        low = text.lower()
+        trigger = ("thanks" if any(w in low for w in CLUB_THANKS) else
+                   "hello" if any(re.search(rf"\b{re.escape(w)}\b", low) for w in CLUB_HELLO) else "reply")
+        online = channel_online()
+        random.shuffle(online)
+        for i, vm in enumerate(online[:2]):
+            if random.random() < CHANNEL_REPLY[i]:
+                channel_say(vm, trigger, 2 + 3 * i + random.uniform(0, 3))
+    return _json({"result": True})
+
+
+def ep_channel_join(cid, query, body):
+    """POST /chat/channel {channelid} | PUT /chat/channel/<id>: any channel 1..CHANNEL_MAX."""
+    cid = int(cid or json.loads(body or b"{}").get("channelid") or 1)
+    if not 1 <= cid <= CHANNEL_MAX:
+        return _json({"result": False, "reason": "channel does not exist", "channelid": cid})
+    return _json({"result": True, "channelid": cid, "created": False, "reason": ""})
+
+
+# The day's football in the channel (user: "virtual manager diskusi tentang trending sepakbola hari
+# itu dari medsos untuk umum atau klub atau pemain atau negara yang mereka suka, ... negara regional
+# bisa di setting di admin panel"; "Indonesia, Malaysia, Vietnam, Thailand, Korea pilih manual, global
+# selalu aktif"). Topics: the global ones always, plus each country ticked on the admin page's Chat AI
+# tab: Google Trends' searches rising there today whose news are about football, then Google News'
+# football headlines in its language (X, Instagram and TikTok need a login; Reddit refuses a server),
+# fetched once a day ("update sehari sekali tidak usah manual"); the channel talks always, not tied
+# to the Rank chat's switch. A manager posts one: his club, his best card's player or his country (one
+# of the ticked, his for good) when the news has them (vm_news_chat.json's lines for each), else a
+# topic of the day; one or two others answer.
+NEWS_GLOBAL = ("Global", "en-GB", "GB", "GB:en", "football", ())
+NEWS_REGIONS = {  # region: (name, Google News hl, gl, ceid, query, words for its national team)
+    "ID": ("Indonesia", "id", "ID", "ID:id", "sepak bola", ("timnas", "indonesia")),
+    "MY": ("Malaysia", "ms", "MY", "MY:ms", "bola sepak", ("harimau malaya", "malaysia")),
+    "VN": ("Việt Nam", "vi", "VN", "VN:vi", "bóng đá", ("tuyển việt nam", "việt nam")),
+    "TH": ("ประเทศไทย", "th", "TH", "TH:th", "ฟุตบอล", ("ช้างศึก", "ทีมชาติไทย")),
+    "KR": ("대한민국", "ko", "KR", "KR:ko", "축구", ("대표팀", "한국")),
+}
+NEWS_COUNTRY = {"ID": "Timnas Indonesia", "MY": "Harimau Malaya", "VN": "ĐT Việt Nam", "TH": "ช้างศึก", "KR": "대표팀"}  # as a line names it
+FOOTBALL_WORDS = ("sepak bola", "bola", "liga", "timnas", "gol ", "pelatih", "striker", "football", "soccer", "premier league",
+                  "laliga", "la liga", "serie a", "bundesliga", "ligue 1", "champions league", "fifa", "uefa", "bóng đá",
+                  "ฟุตบอล", "축구", "transfer", "manchester", "madrid", "barcelona", "arsenal", "liverpool", "chelsea",
+                  "juventus", "bayern", "psg", "inter ", "milan")
+# never small talk: crime, deaths, violence, abuse, racism, drugs, gambling, disasters (a cheerful
+# "Udah baca belum?" under an assault headline came up in the first try)
+NEWS_SKIP = ("assault", "sexual", "rape", "murder", "kill", "dies", "died", "death", "dead", "abuse", "racis", "arrest",
+             "court", "jail", "prison", "police", "crash", "tragedy", "funeral", "suicide", "cancer", "war ", "bomb",
+             "shooting", "stabb", "drug", "gambl", "betting", "violence", "victim", "meninggal", "tewas", "wafat",
+             "pelecehan", "perkosa", "pembunuhan", "kekerasan", "ditangkap", "polisi", "penjara", "narkoba", "rasis",
+             "kecelakaan", "berduka", "judi", "korban", "qua doi", "tu vong", "cuong hiep", "bat giu", "ma tuy",
+             "tai nan", "เสียชีวิต", "ข่มขืน", "ยาเสพติด", "사망", "성폭", "마약", "폭행")
+NEWS = {"key": None, "at": 0, "items": []}  # the topics of the day: [{title, source, trend, region}]
+CHANNEL_NEWS = 0.7  # share of the channel's idle lines that are about the news
+
+
+def _plain(s):
+    import unicodedata
+    return "".join(ch for ch in unicodedata.normalize("NFKD", s or "") if not unicodedata.combining(ch)).lower()
+
+
+def is_football(text):
+    t = f" {_plain(text)} "
+    return any(_plain(w) in t for w in FOOTBALL_WORDS)
+
+
+def news_fetch(region, get=None):
+    """The football topics now of a region ("" = the global ones), trends first: [{title, source,
+    trend}] (at most 40)."""
+    import urllib.parse, urllib.request, xml.etree.ElementTree as ET
+    get = get or (lambda u: urllib.request.urlopen(urllib.request.Request(u, headers=FUTGG_UA), timeout=20).read())
+    _, hl, gl, ceid, q, _ = NEWS_REGIONS[region] if region else NEWS_GLOBAL
+    ns = {"ht": "https://trends.google.com/trending/rss"}
+    items = []
+    try:  # optional: a region without trends still has the news
+        for it in ET.fromstring(get(f"https://trends.google.com/trending/rss?geo={gl}")).iter("item"):
+            news = [(n.findtext("ht:news_item_title", "", ns), n.findtext("ht:news_item_source", "", ns))
+                    for n in it.findall("ht:news_item", ns)]
+            hit = next(((t, s) for t, s in news if is_football(t)), None)
+            if hit or is_football(it.findtext("title", "")):
+                t, s = hit or (news[0] if news else (it.findtext("title", ""), ""))
+                items.append({"title": html.unescape(t).strip(), "source": s, "trend": it.findtext("title", "")})
+    except Exception as e:
+        print(f"news trends {region}: {e!r}", flush=True)
+    url = "https://news.google.com/rss/search?" + urllib.parse.urlencode({"q": q, "hl": hl, "gl": gl, "ceid": ceid})
+    for it in ET.fromstring(get(url)).iter("item"):
+        t, s = html.unescape(it.findtext("title", "")), it.findtext("source", "")
+        items.append({"title": (t[:-len(s) - 3] if s and t.endswith(" - " + s) else t).strip(), "source": s, "trend": ""})
+    seen, out = set(), []
+    for i in items:
+        if i["title"] and i["title"].lower() not in seen and not any(w in f" {_plain(i['title'])} " for w in NEWS_SKIP):
+            seen.add(i["title"].lower())
+            out.append(i)
+    return out[:40]
+
+
+def news_refresh(now=None):
+    """The global topics and the ticked countries', once a WIB day (again when the ticks change, or
+    10 minutes after a fetch that got none); NEWS as it is now."""
+    now = time.time() if now is None else now
+    key = (tuple(vm_chat_cfg()["newsregions"]), today_wib(now))
+    if NEWS["key"] != key or not NEWS["items"] and now - NEWS["at"] > 600:
+        NEWS.update(key=key, at=now, items=[])
+        items = []
+        for region in ("", *key[0]):
+            try:
+                items += [{**i, "region": region} for i in news_fetch(region)]
+            except Exception as e:  # one source down: the others still talk
+                print(f"news {region or 'global'}: {e!r}", flush=True)
+        NEWS["items"] = items
+    return NEWS
+
+
+def news_loop():
+    """The server's thread: the channel's topics of the day (offline: none, the old idle lines)."""
+    while True:
+        try:
+            news_refresh()
+        except Exception as e:
+            print(f"news: {e!r}", flush=True)
+        time.sleep(600)
+
+
+@functools.lru_cache(maxsize=1)
+def team_names():
+    """{teamid: name} from the client's eng.db (data_0.big), {} without it."""
+    try:
+        from extract_fifadb import decrypt
+        raw = client_big(os.path.join(GAME, "data", "data_0.big"), "data/db2/eng.db.db2")
+        db = decrypt(bytes(raw))
+        db[:16] = b"SQLite format 3\x00"
+        with closing(sqlite3.connect(":memory:")) as c:
+            c.deserialize(bytes(db))
+            return dict(c.execute("SELECT teamid, teamname FROM team"))
+    except Exception:
+        return {}
+
+
+NAME_SKIP = {"real", "club", "city", "united", "sporting", "athletic", "atletico", "calcio", "olympique", "borussia"}
+
+
+def vm_likes(vm, regions):
+    """[(kind, name, words)]: his club, his best card's player, his country (his for good of the
+    ticked ones; none ticked, none)."""
+    out = []
+    club = team_names().get(vm["teamid"])
+    if club:
+        words = {_plain(club)} | {w for w in _plain(club).split() if len(w) >= 5 and w not in NAME_SKIP}
+        out.append(("club", club, words))
+    try:
+        best = max(vm_team(vm["_id"])["players"], key=lambda p: card_ovr(p["spid"]))
+        star = card_name(best["spid"])
+        if not star.isdigit() and len(star.split()[-1]) >= 4:
+            out.append(("player", star, {_plain(star.split()[-1])}))
+    except (ValueError, KeyError):
+        pass
+    if regions:
+        region = random.Random(vmseed("newsregion" + vm["_id"])).choice(sorted(regions))
+        out.append(("country", NEWS_COUNTRY[region], set(NEWS_REGIONS[region][5])))
+    return out
+
+
+@functools.lru_cache(maxsize=1)
+def news_chat_lines(mtime):
+    with open(os.path.join(RESPONSES, "vm_news_chat.json"), encoding="utf-8") as f:
+        return json.load(f)
+
+
+def news_line(vm, kind, **words):
+    """His line of kind (general, club, player, country, react) in the chat language, his mood."""
+    lines = news_chat_lines(os.path.getmtime(os.path.join(RESPONSES, "vm_news_chat.json")))[vm_chat_cfg()["lang"]]
+    return random.choice(lines[kind]).format(**words) + random.choice(lines["mood"][vm_personality(vm)])
+
+
+def channel_news(online, rng=random):
+    """A topic of the day by one online manager and answers from one or two others: [(vm, line, delay)]."""
+    items = NEWS["items"]
+    if not items or not online:
+        return []
+    who = rng.sample(online, min(3, len(online)))
+    likes = vm_likes(who[0], sorted({i["region"] for i in items} - {""}))
+    mine = {}  # kind: [(name, item)] of the news about what he likes
+    for k, name, words in likes:
+        mine[k] = [(name, i) for i in items if any(w in f" {_plain(i['title'])} " for w in words)]
+    kinds = [k for k in mine if mine[k]] + ["general"]  # one kind at a time: a country's own team is in most of its news
+    kind = rng.choice(kinds)
+    if kind == "general":  # the day's top ones of one source (the global, or a ticked country)
+        src = rng.choice(sorted({i["region"] for i in items}))
+        name, item = "", rng.choice([i for i in items if i["region"] == src][:15])
+    else:
+        name, item = rng.choice(mine[kind])
+    title = item["title"] if len(item["title"]) <= 110 else item["title"][:107].rstrip() + "..."
+    out = [(who[0], news_line(who[0], kind, title=title, name=name), 0)]
+    for i, vm in enumerate(who[1:]):
+        if rng.random() < (0.85, 0.45)[i]:
+            club = team_names().get(vm["teamid"]) or "timku"
+            for _ in range(5):  # not the answer before his
+                line = news_line(vm, "react", title=title, name=name, club=club)
+                if not any(line.rstrip(" .:)^PDBx") [:20] == o[1][:20] for o in out[1:]):
+                    break
+            out.append((vm, line, 4 + 5 * i + rng.uniform(0, 4)))
+    return out
+
+
+def channel_say_text(vm, text, delay):
+    """Into the Channel tab after delay s: always (the AI chat switch is the Rank opponents')."""
+    chat_push("/chat/my/channel/messages/latest", vm, text, delay or 0.01)
+
+
+def channel_idle():
+    """Once a minute (presence_loop): now and then an online manager talks in the channel, mostly
+    about the day's football when there are topics."""
+    online = channel_online()
+    if not online or random.random() >= CHANNEL_IDLE:
+        return
+    talk = channel_news(online) if random.random() < CHANNEL_NEWS else []
+    for vm, text, delay in talk:
+        channel_say_text(vm, text, delay)
+    if not talk:
+        channel_say(random.choice(online), "idle", 0)
 
 
 def club_idle(st):
@@ -8840,6 +9269,219 @@ ENDPOINTS.update({
     "/exhibition/info/points": lambda q, b: _json({"point": exhibition_played(_state()), "maxpoint": EXHIBITION_PLAYS}),
     "/exhibition/room": ep_exhibition_room,
     "/livematch/info/fixture": lambda q, b: _json({"prev": [], "curr": [], "remainedsecs": 86400})})
+
+
+# --------------------------------------------------------------------------- #
+# Tim > Live Boost (user: "implementasikan fitur live boost ambil dari totw ea efc update perminggu";
+# the account's mainmenu.teammanagement.liveboost; Market > Beli gets a "Terbaik minggu" tab too). The
+# client has all of it (LiveCenterLiveBoostScreen, Module.big's PlayerBoostController) once
+# features.livecenter.boost is on:
+#  * GET /static/db/LIVEBOOST {weekid, month, weekofmonth, expiretime, liveplayers {groupid: [{pid,
+#    boost, best11, position}]}}: kept while expiretime is ahead (an older one is dropped, "Received
+#    Old Live Boost Data", and the button stays off), fetched again after it. Every card of a listed
+#    player gets +boost (1..10) on every stat in the client: squad lists, the Market's rating, both
+#    match sides (PlayerListUtil.checkBoostPlayer; not in Road to World).
+#  * The screen: a stepper entry per group (LEAGUENAME(id), else LIVEBOOST_CUSTOM_<id>), its best11
+#    in a 4-3-3 (1 GK, 4 DF, 3 MF, 3 FW by Enums.PLAYERPOSITION), 7 more as subs, each player as his
+#    best card of any season (findPlayersInDB). Owning 11 of a group (grade > 0, not rental) turns on
+#    "Terima": POST /live/boost/collecting/rewards {weekid, leagueid} -> {result, items} | {result:
+#    false, reason: "rewarded" | "invalid week and league data"}; GET /live/boost/info {info.rewarded}.
+#  * A PvP match's boostweekid must be that weekid: MatchController.processMatchWeekIDResource
+#    fetches the data again on a mismatch before it sends ready (new_match).
+# The players are EA FC's Team of the Week from fut.gg's API (EA's pages have no list; futbin, futwiz
+# and fifplay answer a server with a Cloudflare challenge): the current FC's Team of the Week cards
+# (rarity 3), the newest batch (a week's 23 come at once, Wednesday 18:00 UK), each +5 (user: "jika
+# masuk totw rating tambah 5"); men only (FO3 has no women); each as his FO3 player id: EA's own id when
+# fifadb has him with that birth date, else the 26 LIVE new player of that birth date and name
+# (tools/fo4_season.py PIDS). One group, 2900 (the pack's LIVEBOOST_CUSTOM_2900, renamed in
+# LANG_FIXES): 23 players of many leagues would never make 11 of one league. live_boost_loop checks
+# every hour and fetches when a new week is due.
+LIVEBOOST = os.path.join(HERE, "gamedata", "live_boost.json")
+LIVEBOOST_GROUP = 2900
+LIVEBOOST_BOOST = 5  # on every stat of every card of a Team of the Week player (the client takes 1..10)
+LIVEBOOST_OWN = 11  # LiveCenterLiveBoostScreen.PLAYER_COUNT_FOR_REWARD
+LIVEBOOST_REWARD_EP = 100_000  # x the player price setting
+FUTGG, FUTGG_UA = "https://www.fut.gg/api/fut", {"User-Agent": "Mozilla/5.0"}  # urllib's own is refused
+WEEK = 7 * 86400
+LIVEBOOST_LINES = {"GK": 1, "DF": 4, "MF": 3, "FW": 3}
+LIVEBOOST_LINE = {**dict.fromkeys(("RB", "LB", "CB", "RWB", "LWB"), "DF"),
+                  **dict.fromkeys(("CDM", "CM", "CAM", "RM", "LM"), "MF"),
+                  **dict.fromkeys(("RW", "LW", "ST", "CF", "RF", "LF"), "FW"), "GK": "GK"}
+
+
+def _futgg(path):
+    import urllib.request
+    with urllib.request.urlopen(urllib.request.Request(FUTGG + path, headers=FUTGG_UA), timeout=30) as r:
+        return json.load(r)
+
+
+def _utc(s):
+    """fut.gg's "2026-11-04T18:00:44.769558Z" as a timestamp."""
+    return calendar.timegm(time.strptime(s[:19], "%Y-%m-%dT%H:%M:%S"))
+
+
+def totw_cards(now, get=_futgg):
+    """(game, week, release time, cards) of the newest Team of the Week: FC <game> from September
+    (the year before until a new FC has its first week), a week = the cards made within 3 days."""
+    t = time.gmtime(now)
+    game = t.tm_year % 100 + (t.tm_mon >= 9)
+    for g in (game, game - 1):
+        cards, page = [], 1
+        while page:
+            d = get(f"/players/v2/{g}/?page={page}&rarity_id=3")
+            cards += d.get("data") or []
+            page = d.get("next")
+        if cards:
+            break
+    else:
+        raise ValueError("fut.gg has no Team of the Week cards")
+    cards.sort(key=lambda c: c["createdAt"])
+    weeks = [[cards[0]]]
+    for c in cards[1:]:
+        if _utc(c["createdAt"]) - _utc(weeks[-1][-1]["createdAt"]) > 3 * 86400:
+            weeks.append([])
+        weeks[-1].append(c)
+    return g, len(weeks), _utc(weeks[-1][0]["createdAt"]), weeks[-1]
+
+
+def totw_pid(card, c, pids, fo4):
+    """A Team of the Week card's FO3 player id, or None."""
+    b = str(card.get("birthDate") or "")
+    if len(b) != 8:
+        return None
+    y, m, d = int(b[:4]), int(b[4:6]), int(b[6:])
+    row = c.execute("SELECT birthdate FROM players WHERE playerid = ? LIMIT 1", (int(card["basePlayerEaId"]),)).fetchone()
+    if row and str(row[0]).split()[0] == f"{m}/{d}/{y}":
+        return int(card["basePlayerEaId"])
+    name = card.get("commonName") or f"{card.get('firstName') or ''} {card.get('lastName') or ''}"
+    best = max(((fo4._same_name(name, k.split("|", 1)[1]), pid) for k, pid in pids.items()
+                if k.startswith(f"{y}-{m}-{d}|")), default=(0, None))
+    return best[1] if best[0] >= 1.5 else None
+
+
+def totw_fetch(now=None, get=_futgg):
+    """Fetch the newest Team of the Week into LIVEBOOST (the week kept as it is when it is not new)."""
+    import importlib.util
+    now = time.time() if now is None else now
+    game, week, released, cards = totw_cards(now, get)
+    old = live_boost()
+    if old and (old["game"], old["week"]) == (game, week):
+        return old
+    spec = importlib.util.spec_from_file_location("fo4_season", os.path.join(HERE, "tools", "fo4_season.py"))
+    fo4 = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fo4)
+    try:
+        with open(fo4.PIDS) as f:
+            pids = json.load(f)
+    except (OSError, ValueError):
+        pids = {}
+    players, missing = [], []
+    with closing(_db()) as c:
+        for card in sorted(cards, key=lambda x: -x["overall"]):
+            name = card.get("commonName") or f"{card.get('firstName')} {card.get('lastName')}"
+            pid = totw_pid(card, c, pids, fo4) if card.get("gender") == 1 else None
+            if pid is None or any(p["pid"] == pid for p in players):
+                missing.append(name)
+                continue
+            players.append({"pid": pid, "name": name, "overall": card["overall"], "position": card.get("position") or "CM",
+                            "boost": LIVEBOOST_BOOST})
+    left = dict(LIVEBOOST_LINES)
+    for p in players:  # the best in each line of a 4-3-3 start
+        line = LIVEBOOST_LINE.get(p["position"], "MF")
+        p["best11"] = left[line] > 0
+        left[line] -= p["best11"]
+    # the screen fills a line's empty places with copies of its last player (4 x van Hecke): the
+    # next best play there instead, out of position (the nearest line; nobody else in goal)
+    order = ("FW", "MF", "DF")
+    for p in players:
+        line = LIVEBOOST_LINE.get(p["position"], "MF")
+        free = [x for x in order if left[x]]
+        if not p["best11"] and line != "GK" and free:
+            spot = min(free, key=lambda x: abs(order.index(x) - order.index(line)))
+            p.update(best11=True, position={"FW": "ST", "MF": "CM", "DF": "CB"}[spot])
+            left[spot] -= 1
+    lb = {"game": game, "week": week, "released": released, "fetched": now, "players": players, "missing": missing}
+    os.makedirs(os.path.dirname(LIVEBOOST), exist_ok=True)
+    with open(LIVEBOOST + ".tmp", "w", encoding="utf-8") as f:
+        json.dump(lb, f, ensure_ascii=False, indent=1)
+    os.replace(LIVEBOOST + ".tmp", LIVEBOOST)
+    print(f"live boost: FC {game} Team of the Week {week}, {len(players)} players ({len(missing)} not in FO3)", flush=True)
+    return lb
+
+
+def live_boost():
+    """The Team of the Week the server has (LIVEBOOST), or None."""
+    try:
+        with open(LIVEBOOST, encoding="utf-8") as f:
+            lb = json.load(f)
+        return lb if lb.get("players") else None
+    except (OSError, ValueError):
+        return None
+
+
+def live_boost_weekid(lb=None):
+    """FC 27's week 8 = 2708 (0 without a Team of the Week)."""
+    lb = lb or live_boost()
+    return lb["game"] * 100 + lb["week"] if lb else 0
+
+
+def live_boost_loop():
+    """The server's thread: the Team of the Week at start and whenever a new week is due (hourly)."""
+    while True:
+        lb = live_boost()
+        if not lb or time.time() >= lb["released"] + WEEK:
+            try:
+                totw_fetch()
+            except Exception as e:  # offline, fut.gg down: the last week stays
+                print(f"live boost: {e!r}", flush=True)
+        time.sleep(3600)
+
+
+def ep_liveboost_static(query, body):
+    """GET /static/db/LIVEBOOST. expiretime = the next week's release, or an hour on while it is late."""
+    lb, now = live_boost(), time.time()
+    if not lb:
+        return _json({"weekid": 0, "month": 1, "weekofmonth": 1, "expiretime": w3c(now - 60), "liveplayers": {}})
+    rel = time.gmtime(lb["released"])
+    nxt = lb["released"] + WEEK
+    return _json({"weekid": live_boost_weekid(lb), "month": rel.tm_mon, "weekofmonth": (rel.tm_mday - 1) // 7 + 1,
+                  "expiretime": w3c(nxt if nxt > now + 600 else now + 3600),
+                  "liveplayers": {str(LIVEBOOST_GROUP): [{k: p[k] for k in ("pid", "boost", "best11", "position")}
+                                                         for p in lb["players"]]}})
+
+
+def ep_liveboost_info(query, body):
+    """GET /live/boost/info: this week's reward taken or not."""
+    return _json({"info": {"rewarded": live_boost_weekid() in my_coach(_state()).get("liveboostrewards", [])}})
+
+
+def ep_liveboost_reward(query, body):
+    """POST /live/boost/collecting/rewards {weekid, leagueid}: EP to the Bag for owning 11 of this
+    week's players (grade > 0, as the screen counts), once a week."""
+    req = json.loads(body or b"{}")
+    lb, st = live_boost(), _state()
+    week, coach = live_boost_weekid(lb), my_coach(st)
+    team = st["teams"].get(str(_default_slot(st))) or {"players": []}
+    owned = {int(p["spid"]) % 1000000 for p in team["players"] if grade_of(p) > 0}
+    if not lb or str(req.get("weekid")) != str(week) or str(req.get("leagueid")) != str(LIVEBOOST_GROUP) \
+            or len(owned & {p["pid"] for p in lb["players"]}) < LIVEBOOST_OWN:
+        return _json({"result": False, "reason": "invalid week and league data"})
+    if week in coach.get("liveboostrewards", []):
+        return _json({"result": False, "reason": "rewarded"})
+    items = [{"itemid": EP_ITEM, "count": int(LIVEBOOST_REWARD_EP * ECONOMY["players"])}]
+    bag_add(st, f"Hadiah LIVE BOOST - Team of the Week {lb['week']}", items,
+            msg=f"Kamu memiliki {LIVEBOOST_OWN} pemain Team of the Week {lb['week']}.")
+    coach.setdefault("liveboostrewards", []).append(week)
+    _save(st)
+    return _json({"result": True, "items": [{**it, "staticdata": item_def(it["itemid"])} for it in items]})
+
+
+ENDPOINTS.update({"/chat/my/channel/message": ep_channel_message,  # global chat
+                  "/chat/channel": lambda q, b: ep_channel_join(None, q, b)})
+ROUTES += [(re.compile(r"/chat/channel/(\d+)"), ep_channel_join),
+           (re.compile(r"/chat/coach/[^/]+/channel/detail"), lambda q, b: _json({"result": True, "channelid": 1, "coachid": ""}))]
+ENDPOINTS.update({"/static/db/LIVEBOOST": ep_liveboost_static, "/live/boost/info": ep_liveboost_info,
+                  "/live/boost/collecting/rewards": ep_liveboost_reward})
 ENDPOINTS.update({  # King of the Hill (issue #36)
     "/static/initialize": lambda q, b: _json({"resources": [
         {"uri": "/static/db/ESPORTS2_BALANCING_DEFAULT", "body": {"divisions": ladder_divisions()}}]}),
@@ -8901,7 +9543,7 @@ ENDPOINTS.update({
     "/static/db/PE2STATICVALUES": lambda q, b: _json(PE2STATICVALUES),
     "/static/db/LOCKERROOMITEM": lambda q, b: _json(lockerroom_items()),
     "/player/enhance2.5/restore": ep_enhance25_restore,
-    "/events": lambda q, b: _json({"events": [ENHANCE_EVENT]}),
+    "/events": ep_events, "/events/rewards/daily": ep_event_daily, "/events/rewards/dt": ep_event_dt,
     "/static/db/STATICVALUES/max_coachlevel": lambda q, b: _json(COACH_MAX_LEVEL),
     "/static/info/teamcolor": ep_teamcolor,
     "/shop/list": lambda q, b: _json(shop_list(_state())), "/shop/list/STSHOP": ep_stshop,
@@ -9031,4 +9673,6 @@ if __name__ == "__main__":
     threading.Thread(target=warm_packs, daemon=True, name="packs").start()
     threading.Thread(target=presence_loop, daemon=True, name="presence").start()
     threading.Thread(target=market_loop, daemon=True, name="market").start()
+    threading.Thread(target=live_boost_loop, daemon=True, name="liveboost").start()
+    threading.Thread(target=news_loop, daemon=True, name="news").start()
     srv.serve_forever()

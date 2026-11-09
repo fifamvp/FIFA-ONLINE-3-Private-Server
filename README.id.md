@@ -323,6 +323,28 @@ Sudah ditambahkan dan lolos tes, tapi belum dicek di client:
   dengan tombol panah atau Pilih Team, undang teman dari daftar (manajer virtual, yang masuk dengan klub
   pilihannya sendiri dan langsung siap), lalu Siap memainkan skuad asli kedua klub. Lima match sehari;
   kartumu tidak mendapat EXP dari match ini. Live Center terbuka tanpa dua error UI yang dulu muncul.
+- **Live Boost dari Team of the Week EA FC**: Tim > Live Boost menampilkan Team of the
+  Week minggu ini (dari fut.gg; server mengambil yang baru setelah rilis hari Rabu, jadi butuh internet).
+  Semua kartu pemain itu mendapat +5 di setiap atribut selama seminggu (rating +5): skuad, Market dan
+  match. Hanya pemain yang ada di FO3 (dan pemain baru 26 LIVE) yang tampil, tanpa kartu pemain wanita.
+  Memiliki 11 di antaranya (+1 ke atas) memberi 100.000 EP sekali seminggu (Terima).
+- **Editor quest mingguan** (tab Misi di admin): daftar quest yang diundi tiap minggu (jenis, target, GP,
+  nama sendiri dengan {0} untuk targetnya), jumlah per minggu (maks. 6) dan kotak hadiah GP di jendela
+  Quest (maks. 5), plus pratinjau minggu ini dan minggu depan. Quest yang sudah selesai minggu ini tetap
+  selesai.
+- **Hadiah login harian di game**: hadiah hari ini tetap masuk Bag saat login pertama; sekarang muncul
+  notifikasi, dan entrinya membuka popup berisi hari ke berapa dan itemnya.
+- **Hadiah waktu bermain**: hadiah saat waktu main hari ini mencapai 10, 30 dan 60 menit (hari dihitung
+  dari 00:00 WIB; jeda lebih dari 20 menit tidak dihitung), masuk Bag dengan notifikasi yang sama.
+  Targetnya diatur di tab Daily reward di halaman admin.
+- **Global chat**: tab Channel di jendela chat sekarang jalan: pesanmu tampil, dan manajer virtual yang
+  online sesekali membalas dan mengobrol sendiri (dalam bahasa tab Chat AI).
+- **Obrolan sepak bola di global chat**: manajer virtual di tab Channel membahas sepak bola hari itu:
+  pencarian Google yang sedang naik dan soal sepak bola serta judul Google News, global dan dari negara
+  yang dicentang dalam bahasanya (X, Instagram dan TikTok butuh login, Reddit menolak server), diambil sekali sehari. Tiap manajer
+  suka membahas klubnya, pemain bintangnya atau negaranya kalau ada di berita, lalu yang lain menanggapi.
+  Berita global selalu aktif; Indonesia, Malaysia, Vietnam, Thailand dan Korea dicentang manual di tab
+  Chat AI di halaman admin, yang juga menampilkan topik saat ini.
 - **Database kartu dan klub di halaman admin** (issue #38): tab Database mengubah satu kartu pemain per
   musim (spid = musim × 1.000.000 + player id; cari dengan nama, spid atau player id): 33 atribut,
   posisi, kaki utama dan kaki lemah, skill move, work rate, karakteristik, klub (transfer) dan tampilan

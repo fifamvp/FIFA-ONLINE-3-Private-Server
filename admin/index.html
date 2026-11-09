@@ -300,6 +300,16 @@
         <button class="b" id="dailyAdd" data-i18n="daily_add"></button>
         <button class="b primary" id="dailySave" data-i18n="daily_save"></button>
       </div>
+      <h3 data-i18n="ptr_title"></h3>
+      <p class="lead" id="ptrLead"></p>
+      <div class="table-wrap"><table>
+        <thead><tr><th data-i18n="ptr_minutes"></th><th>EP</th><th data-i18n="pack"></th><th data-i18n="pack_count"></th><th></th></tr></thead>
+        <tbody id="ptrRows"></tbody>
+      </table></div>
+      <div class="row">
+        <button class="b" id="ptrAdd" data-i18n="ptr_add"></button>
+        <button class="b primary" id="ptrSave" data-i18n="save"></button>
+      </div>
     </section>
 
     <section id="match" hidden>
@@ -366,8 +376,12 @@
       <div class="row">
         <label class="check"><input type="checkbox" id="chatOn"> <span data-i18n="chat_on"></span></label>
         <label class="f"><span data-i18n="chat_lang"></span><select id="chatLang"></select></label>
+        <fieldset class="f"><legend data-i18n="news_region"></legend><span id="newsRegions"></span></fieldset>
         <button class="b primary" id="chatSave" data-i18n="save"></button>
       </div>
+      <h3 data-i18n="news_title"></h3>
+      <p class="lead" id="newsLead"></p>
+      <ul id="newsTopics"></ul>
       <h3 data-i18n="vm_title"></h3>
       <p class="lead" data-i18n="vm_lead"></p>
       <div class="row">
@@ -507,6 +521,30 @@
         <label class="f"><span data-i18n="mis_targets"></span><input type="number" id="misTargets" min="0.1" max="10" step="0.1"></label>
         <label class="f"><span data-i18n="mis_rewards"></span><input type="number" id="misRewards" min="0" max="10" step="0.1"></label>
         <button class="b primary" id="misSave" data-i18n="save"></button>
+      </div>
+      <h3 data-i18n="wq_title"></h3>
+      <p class="lead" id="qLead"></p>
+      <div class="table-wrap"><table>
+        <thead><tr><th data-i18n="wq_th_stat"></th><th data-i18n="wq_th_todo"></th><th>GP</th><th data-i18n="wq_th_name"></th><th></th></tr></thead>
+        <tbody id="qRows"></tbody>
+      </table></div>
+      <div class="row">
+        <button class="b" id="qAdd" data-i18n="wq_add"></button>
+        <label class="f"><span data-i18n="wq_count"></span><input type="number" id="qCount" min="1" max="6"></label>
+      </div>
+      <h3 data-i18n="wq_shop_title"></h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th data-i18n="wq_th_item"></th><th data-i18n="wq_th_price"></th><th></th></tr></thead>
+        <tbody id="qShopRows"></tbody>
+      </table></div>
+      <div class="row">
+        <button class="b" id="qShopAdd" data-i18n="wq_shop_add"></button>
+        <button class="b primary" id="qSave" data-i18n="save"></button>
+        <button class="b danger" id="qReset" data-i18n="wq_reset"></button>
+      </div>
+      <div class="grid2">
+        <div><h3 id="qThisTitle"></h3><div class="table-wrap"><table><tbody id="qThis"></tbody></table></div></div>
+        <div><h3 data-i18n="wq_next"></h3><div class="table-wrap"><table><tbody id="qNext"></tbody></table></div></div>
       </div>
     </section>
 
@@ -703,6 +741,9 @@ const loaders = {
       [t("f_last"), st.last || t("never")], [t("f_today_wib"), d.today],
     ]);
     renderDaily(d.table);
+    const pt = await api("playtime");
+    $("#ptrLead").textContent = t("ptr_lead", pt.minutes, pt.rewarded, pt.file);
+    renderPlaytime(pt.table);
   },
   async match() {
     if (!SHOP) SHOP = await api("shop");  // the prize list: packs and items
@@ -740,6 +781,7 @@ const loaders = {
     $("#chatLead").textContent = t("chat_lead", d.file);
     $("#chatOn").checked = d.enabled;
     $("#chatLang").innerHTML = Object.entries(d.langs).map(([k, v]) => `<option value="${k}"${k === d.lang ? " selected" : ""}>${esc(v)}</option>`).join("");
+    showNews(d);
     showVmGen(await api("vm_gen"));
   },
   async missions() {
@@ -749,6 +791,14 @@ const loaders = {
     $("#misLang").innerHTML = Object.entries(d.langs).map(([k, v]) => `<option value="${k}"${k === d.lang ? " selected" : ""}>${esc(v)}</option>`).join("");
     $("#misTargets").value = d.targets;
     $("#misRewards").value = d.rewards;
+    $("#qLead").textContent = t("wq_lead", "{0}");
+    QSTATS = d.stats; QITEMS = d.items;
+    renderQuests(d.quests); renderGpShop(d.gpshop);
+    $("#qCount").max = d.questmax; $("#qCount").value = d.questcount;
+    $("#qShopAdd").disabled = d.gpshop.length >= d.gpshopmax;
+    $("#qThisTitle").textContent = t("wq_this", new Date(d.weekend).toLocaleString(t("locale")));
+    const week = list => list.map(q => `<tr><td>${esc(q.name)}</td><td class="num">${fmt(q.gp)} GP</td></tr>`).join("");
+    $("#qThis").innerHTML = week(d.thisweek); $("#qNext").innerHTML = week(d.nextweek);
   },
   async scout() {
     const s = await api("summary");
@@ -811,6 +861,64 @@ function readDaily() {
     const v = k => tr.querySelector(`[data-k="${k}"]`).value;
     return {ep: Number(v("ep")) || 0, pack: v("pack") ? Number(v("pack")) : null, count: Number(v("count")) || 1};
   });
+}
+
+/* ---------- the global chat's football topics (Chat AI tab) ---------- */
+function showNews(d) {
+  $("#newsRegions").innerHTML = Object.entries(d.regions).map(([k, v]) =>
+    `<label class="check"><input type="checkbox" value="${k}"${d.newsregions.includes(k) ? " checked" : ""}> ${esc(v)}</label>`).join(" ");
+  $("#newsLead").textContent = t("news_lead", d.topicsat ? new Date(d.topicsat * 1000).toLocaleString(t("locale")) : "-");
+  $("#newsTopics").innerHTML = d.topics.length ? d.topics.map(([src, list]) =>
+    list.map(s => `<li><span class="muted">${esc(src)}</span> ${esc(s)}</li>`).join("")).join("") : `<li class="muted">${esc(t("news_none"))}</li>`;
+}
+
+/* ---------- play time rewards (Daily reward tab) ---------- */
+function renderPlaytime(table) {
+  $("#ptrRows").innerHTML = table.map((r, i) => `<tr>
+    <td><input type="number" min="1" max="1440" value="${r.minutes}" data-k="minutes" aria-label="${esc(t("ptr_minutes"))} ${i + 1}"></td>
+    <td><input type="number" min="0" step="1000" value="${r.ep || 0}" data-k="ep" aria-label="EP ${i + 1}"></td>
+    <td><select data-k="pack" aria-label="${esc(t("pack"))} ${i + 1}"><option value="">${esc(t("no_pack"))}</option>${packOpts(r.pack)}</select></td>
+    <td><input type="number" min="1" max="99" value="${r.count || 1}" data-k="count" aria-label="${esc(t("pack_count"))} ${i + 1}"></td>
+    <td><button class="b small danger" data-drop="${i}">${esc(t("wq_drop"))}</button></td>
+  </tr>`).join("");
+}
+function readPlaytime() {
+  return [...$("#ptrRows").rows].map(tr => {
+    const v = k => tr.querySelector(`[data-k="${k}"]`).value;
+    return {minutes: Number(v("minutes")), ep: Number(v("ep")) || 0, pack: v("pack") ? Number(v("pack")) : null, count: Number(v("count")) || 1};
+  });
+}
+
+/* ---------- weekly quests (Misi tab) ---------- */
+let QSTATS = {}, QITEMS = [];
+const questName = (stat, todo) => (QSTATS[stat] || "").replace("{0}", fmt(Number(todo) || 0));
+function renderQuests(list) {
+  $("#qRows").innerHTML = list.map((q, i) => `<tr>
+    <td><select data-k="stat" aria-label="${esc(t("wq_th_stat"))} ${i + 1}">${Object.keys(QSTATS).map(k =>
+      `<option value="${k}"${k === q.stat ? " selected" : ""}>${esc(QSTATS[k].replace("{0}", "N"))}</option>`).join("")}</select></td>
+    <td><input type="number" min="1" max="10000" value="${q.todo}" data-k="todo" aria-label="${esc(t("wq_th_todo"))} ${i + 1}"></td>
+    <td><input type="number" min="1" max="10000" value="${q.gp}" data-k="gp" aria-label="GP ${i + 1}"></td>
+    <td><input type="text" maxlength="60" value="${esc(q.name || "")}" data-k="name" placeholder="${esc(questName(q.stat, q.todo))}" aria-label="${esc(t("wq_th_name"))} ${i + 1}"></td>
+    <td><button class="b small danger" data-drop="${i}">${esc(t("wq_drop"))}</button></td>
+  </tr>`).join("");
+}
+function readQuests() {
+  return [...$("#qRows").rows].map(tr => {
+    const v = k => tr.querySelector(`[data-k="${k}"]`).value;
+    return {stat: v("stat"), todo: Number(v("todo")), gp: Number(v("gp")), name: v("name").trim()};
+  });
+}
+function renderGpShop(list) {
+  $("#qShopRows").innerHTML = list.map((b, i) => `<tr>
+    <td><select data-k="itemid" aria-label="${esc(t("wq_th_item"))} ${i + 1}">${QITEMS.map(([id, n]) =>
+      `<option value="${id}"${id === b.itemid ? " selected" : ""}>${esc(n)} · ${id}</option>`).join("")}</select></td>
+    <td><input type="number" min="1" max="100000" value="${b.gp}" data-k="gp" aria-label="${esc(t("wq_th_price"))} ${i + 1}"></td>
+    <td><button class="b small danger" data-drop="${i}">${esc(t("wq_drop"))}</button></td>
+  </tr>`).join("");
+}
+function readGpShop() {
+  return [...$("#qShopRows").rows].map(tr => ({itemid: Number(tr.querySelector('[data-k="itemid"]').value),
+                                              gp: Number(tr.querySelector('[data-k="gp"]').value)}));
 }
 
 /* ---------- Shop ---------- */
@@ -1119,6 +1227,14 @@ $("#dailyRows").addEventListener("click", e => {
   const tb = readDaily(); tb.splice(Number(i), 1); renderDaily(tb);
 });
 $("#dailyAdd").addEventListener("click", () => { const tb = readDaily(); tb.push({ep: 10000}); renderDaily(tb); });
+$("#ptrRows").addEventListener("click", e => {
+  const i = e.target.dataset.drop; if (i === undefined) return;
+  const tb = readPlaytime(); tb.splice(Number(i), 1); renderPlaytime(tb);
+});
+$("#ptrAdd").addEventListener("click", () => {
+  const tb = readPlaytime(); tb.push({minutes: (tb.length ? tb[tb.length - 1].minutes : 0) + 30, ep: 10000}); renderPlaytime(tb);
+});
+$("#ptrSave").addEventListener("click", () => act(async () => { await api("playtime_set", {table: readPlaytime()}); await loaders.harian(); }, t("ptr_saved")));
 $("#dailySave").addEventListener("click", () => act(async () => { await api("daily_set", {table: readDaily()}); await loaders.harian(); }, t("daily_saved")));
 $("#dailyGrant").addEventListener("click", () => act(async () => { const r = await api("daily_grant", {}); await loaders.harian(); say(t("sent_bag", r.title), "ok"); }));
 $("#dailyReset").addEventListener("click", () => { if (confirm(t("confirm_reset_streak"))) act(async () => { await api("daily_reset", {}); await loaders.harian(); }, t("streak_reset")); });
@@ -1192,7 +1308,8 @@ $("#vmRegen").addEventListener("click", () => {
 });
 $("#vmReset").addEventListener("click", () => act(async () => showVmGen(await api("vm_regenerate", {reset: true})), t("vm_reset_done")));
 $("#chatSave").addEventListener("click", () => act(async () => {
-  await api("vm_chat_set", {enabled: $("#chatOn").checked, lang: $("#chatLang").value});
+  await api("vm_chat_set", {enabled: $("#chatOn").checked, lang: $("#chatLang").value,
+                            newsregions: $$("#newsRegions input:checked").map(i => i.value)});
   await loaders.chat();
 }, t("chat_saved")));
 $("#misSave").addEventListener("click", () => act(async () => {
@@ -1200,6 +1317,30 @@ $("#misSave").addEventListener("click", () => act(async () => {
                              targets: Number($("#misTargets").value), rewards: Number($("#misRewards").value)});
   await loaders.missions();
 }, t("mis_saved")));
+$("#qRows").addEventListener("click", e => {
+  const i = e.target.dataset.drop; if (i === undefined) return;
+  const q = readQuests(); q.splice(Number(i), 1); renderQuests(q);
+});
+$("#qRows").addEventListener("input", e => {  // the automatic name follows the type and target
+  const tr = e.target.closest("tr");
+  if (tr) $('[data-k="name"]', tr).placeholder = questName($('[data-k="stat"]', tr).value, $('[data-k="todo"]', tr).value);
+});
+$("#qAdd").addEventListener("click", () => { const q = readQuests(); q.push({stat: "match", todo: 10, gp: 30, name: ""}); renderQuests(q); });
+$("#qShopRows").addEventListener("click", e => {
+  const i = e.target.dataset.drop; if (i === undefined) return;
+  const b = readGpShop(); b.splice(Number(i), 1); renderGpShop(b); $("#qShopAdd").disabled = false;
+});
+$("#qShopAdd").addEventListener("click", () => {
+  const b = readGpShop(); b.push({itemid: QITEMS[0][0], gp: 30}); renderGpShop(b);
+  $("#qShopAdd").disabled = b.length >= 5;
+});
+$("#qSave").addEventListener("click", () => act(async () => {
+  await api("quests_set", {quests: readQuests(), questcount: Number($("#qCount").value), gpshop: readGpShop()});
+  await loaders.missions();
+}, t("wq_saved")));
+$("#qReset").addEventListener("click", () => {
+  if (confirm(t("wq_confirm_reset"))) act(async () => { await api("quests_set", {reset: true}); await loaders.missions(); }, t("wq_reset_done"));
+});
 // the login notice: the chosen picture fitted (or filled) into the popup's 800x720 box, sent as PNG
 let noticeImg = null;
 function drawNotice() {

@@ -297,6 +297,27 @@ Item saya, Gudang bên dưới là tên màn hình trong game, được giữ ng
   hoặc Pilih Team, mời bạn từ danh sách (HLV ảo, vào phòng với CLB tự chọn và sẵn sàng ngay), rồi Siap để
   đá với đội hình thật của hai CLB. Mỗi ngày 5 trận; thẻ của bạn không nhận EXP từ các trận này. Live Center
   mở được mà không còn hai lỗi UI.
+- **Live Boost từ Team of the Week của EA FC**: Tim > Live Boost hiện Team of the Week
+  tuần này (lấy từ fut.gg; máy chủ tải tuần mới sau khi công bố vào thứ Tư nên cần internet). Mọi thẻ của
+  các cầu thủ đó được +5 mọi chỉ số trong tuần (OVR +5): đội hình, chợ chuyển nhượng và trận đấu. Chỉ hiện
+  cầu thủ FO3 có (và cầu thủ mới của 26 LIVE), không có thẻ nữ. Có đủ 11 người (+1 trở lên) nhận 100.000 EP
+  mỗi tuần một lần (Terima).
+- **Trình sửa nhiệm vụ hằng tuần** (tab Misi trang quản trị): danh sách nhiệm vụ được bốc mỗi tuần (loại,
+  mục tiêu, GP, tên riêng với {0} là mục tiêu), số nhiệm vụ mỗi tuần (tối đa 6) và các hộp quà GP của cửa
+  sổ Quest (tối đa 5), kèm xem trước tuần này và tuần sau. Nhiệm vụ đã xong trong tuần vẫn được giữ.
+- **Thưởng đăng nhập hằng ngày trong game**: thưởng của ngày vẫn vào Túi ở lần đăng nhập đầu; giờ có thông
+  báo, và mục đó mở popup cho biết ngày thứ mấy cùng vật phẩm.
+- **Thưởng thời gian chơi**: nhận thưởng khi thời gian chơi hôm nay đạt 10, 30 và 60 phút (ngày tính từ
+  00:00 WIB; nghỉ quá 20 phút không tính), vào Túi kèm thông báo như trên. Mốc thưởng chỉnh ở tab Daily
+  reward của trang quản trị.
+- **Chat toàn cầu**: tab Channel của cửa sổ chat đã hoạt động: tin nhắn của bạn hiện lên, các HLV ảo đang
+  online thỉnh thoảng trả lời và tự trò chuyện (theo ngôn ngữ của tab Chat AI).
+- **Bàn chuyện bóng đá trong chat toàn cầu**: các HLV ảo ở tab Channel bàn về bóng đá trong ngày: các tìm
+  kiếm Google đang tăng ở một khu vực liên quan đến bóng đá và tiêu đề Google News bằng ngôn ngữ đó (X,
+  Instagram và TikTok cần đăng nhập, Reddit từ chối máy chủ), cập nhật mỗi ngày một lần. Mỗi HLV thích nhắc đến CLB,
+  cầu thủ ngôi sao hoặc đất nước của mình khi có trong tin, rồi người khác trả lời. Tin toàn cầu luôn
+  bật; Indonesia, Malaysia, Việt Nam, Thái Lan và Hàn Quốc chọn tay ở tab Chat AI của trang quản trị, nơi
+  cũng hiện các chủ đề hiện tại.
 - **Cơ sở dữ liệu thẻ và CLB trên trang quản trị** (issue #38): tab Database sửa từng thẻ cầu thủ theo mùa
   (spid = mùa × 1.000.000 + player id; tìm theo tên, spid hoặc player id): 33 chỉ số, vị trí, chân thuận và
   chân không thuận, kỹ năng, tỷ lệ công/thủ, đặc điểm, CLB (chuyển nhượng) và ngoại hình 3D (đầu của bất kỳ
