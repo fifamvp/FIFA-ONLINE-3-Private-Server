@@ -362,6 +362,8 @@ Sudah ditambahkan dan lolos tes, tapi belum dicek di client:
   pemain mereka yang tadinya ada di timnas kembali ke klubnya. Serie A di Liga sekarang 19 klub, dan
   pemilih klub juga menampilkannya. Caranya: fetch, collect + import, build, lalu install dengan game
   tertutup (atau Terapkan ke game di halaman admin).
+  Kartu FO3 lama pemain klub Italia yang tadinya di Rest of the World (mis. Pirlo '06 di Milan; 322
+  kartu) juga kembali ke klubnya; `restore` mengembalikannya.
 - **Database kartu dan klub di halaman admin** (issue #38): tab Database mengubah satu kartu pemain per
   musim (spid = musim × 1.000.000 + player id; cari dengan nama, spid atau player id): 33 atribut,
   posisi, kaki utama dan kaki lemah, skill move, work rate, karakteristik, klub (transfer) dan tampilan

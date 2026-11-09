@@ -340,6 +340,8 @@ Added, passing the tests but not yet checked in the client:
   own '17 cards of their players, which sat on a national team, are at the club again. Liga's Serie A now
   has 19 clubs; the club picker lists them too. To get it: fetch, collect + import, build, then install
   with the game closed (or Terapkan ke game on the admin page).
+  FO3's older cards of Italian clubs' players that sat on Rest of the World (Pirlo '06 at Milan & co.,
+  322 cards) are at their club again too; `restore` puts them back.
 - **Card and club database on the admin page** (issue #38): the Database tab edits one card of a player
   per season (spid = season × 1,000,000 + player id; search by name, spid or player id): the 33
   attributes, positions, preferred and weak foot, skill moves, work rates, traits, club (a transfer) and

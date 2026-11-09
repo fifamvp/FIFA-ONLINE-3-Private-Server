@@ -502,7 +502,8 @@ def cmd_build(a):
             for t in NAME_TABLES:
                 c.execute(f"INSERT OR REPLACE INTO {t} (playerid, full, short, full_eng, short_eng, jersey) VALUES (?,?,?,?,?,?)",
                           (pid, full, short, full, short, jersey))
-    moved = open_clubs_move(c)
+    careers = careers_of(c)
+    moved, row = open_clubs_move(c, careers), rest_of_world_move(c, careers)
     edited = apply_card_edits(c, seasons)
     sys.path.insert(0, ROOT)
     from http_config import POSOVR  # exactly the client's own +0 rating + PLUS1, as on FO3's cards
@@ -515,30 +516,42 @@ def cmd_build(a):
     json.dump(heads, open(HEADS, "w"))
     per = collections.Counter(card["season"] for card in cards.values())
     print(f"{len(cards)} cards ({', '.join(f'{SEASON_NAMES[s]} {n}' for s, n in sorted(per.items()))}): "
-          f"{found} players FO3 has, {new} new, {moved} '17 cards back at their club, {edited} edited on the admin page -> {FIFADB}")
+          f"{found} players FO3 has, {new} new, {moved} '17 cards back at their club, {row} Rest of the World cards "
+          f"back at their Italian club, {edited} edited on the admin page -> {FIFADB}")
 
 
-def club_2017(stints):
-    """The club of a career [[teamid, joined, left (-1 = still), loan]] in 2017/18: the newest one
-    joined by 2017 and left in 2018 or later (else in 2017), or None."""
-    held = [x for x in stints if x[1] <= 2017 and (x[2] in (-1, None) or x[2] >= 2018)] or \
-           [x for x in stints if x[1] <= 2017 <= (x[2] if x[2] not in (-1, None) else 9999)]
+def club_in(stints, year=2017):
+    """The club of a career [[teamid, joined, left (-1 = still), loan]] in year/year+1: the newest
+    one joined by year and left in year+1 or later (else in year), or None."""
+    held = [x for x in stints if x[1] <= year and (x[2] in (-1, None) or x[2] > year)] or \
+           [x for x in stints if x[1] <= year <= (x[2] if x[2] not in (-1, None) else 9999)]
     return max(held, key=lambda x: x[1])[0] if held else None
 
 
-def open_clubs_move(c):
-    """FO3's '17 cards (seasons 0 and 88) on a national team whose player was at an OPEN_CLUBS club
-    in 2017/18 (tools/club_history.py's careers, else FO3's own) go to that club; their national team
-    stays as nationalteamid. Returns how many."""
+def club_joined(stints, year):
+    """The club a career joined in year (not a loan, if both), or None (none, or two clubs)."""
+    hit = [x for x in stints if x[1] == year]
+    hit = [x for x in hit if not x[3]] or hit
+    return hit[0][0] if hit and len({x[0] for x in hit}) == 1 else None
+
+
+def careers_of(c):
+    """{playerid: career} from tools/club_history.py's careers, else FO3's own playerhistory."""
     import club_history
-    careers = {int(k): v for k, v in ((club_history.load() or {}).get("players") or {}).items()}
-    fo3 = collections.defaultdict(list)
+    out = collections.defaultdict(list)
     for pid, team, joined, left, loan in c.execute("SELECT playerid, teamid, joinedyear, endyear, loan FROM playerhistory"):
-        fo3[pid].append([team, joined, left, loan])
+        out[pid].append([team, joined, left, loan])
+    out.update({int(k): v for k, v in ((club_history.load() or {}).get("players") or {}).items() if v})
+    return out
+
+
+def open_clubs_move(c, careers):
+    """FO3's '17 cards (seasons 0 and 88) on a national team whose player was at an OPEN_CLUBS club
+    in 2017/18 go to that club; their national team stays as nationalteamid. Returns how many."""
     moved = 0
     for spid, pid in c.execute("SELECT spid, playerid FROM players WHERE leagueid = 78 AND nationalteamid = teamid "
                                "AND (spid < 1000000 OR spid / 1000000 = 88)").fetchall():
-        club = club_2017(careers.get(pid) or fo3.get(pid) or [])
+        club = club_in(careers.get(pid, []))
         if club in OPEN_CLUBS:
             c.execute("UPDATE players SET teamid = ?, leagueid = ? WHERE spid = ?", (club, OPEN_CLUBS[club][0], spid))
             moved += 1
@@ -549,6 +562,44 @@ def open_clubs_back(c):
     """open_clubs_move undone: those cards back on their national team."""
     c.execute(f"UPDATE players SET teamid = nationalteamid, leagueid = 78 WHERE teamid IN ({','.join(map(str, OPEN_CLUBS))}) "
               "AND (spid < 1000000 OR spid / 1000000 = 88)")
+
+
+# FO3's own seasons -> the club season (year/year+1) of their cards: the year whose careers' clubs
+# match FO3's club cards best (75-95%; 16 and '17 ~55%, newer moves missing in the careers)
+SEASON_YEAR = {6: 2006, 7: 2007, 8: 2008, 9: 2009, 10: 2010, 11: 2011, 14: 2014, 15: 2015, 16: 2016, 0: 2017, 88: 2017,
+               22: 2017, 23: 2017, 24: 2017, 35: 2015, 47: 2009, 53: 2014, 63: 2006, 65: 2006, 67: 2007, 69: 2010, 77: 2013}
+ITALY = (31, 32)
+ROW_MOVED = os.path.join(ROOT, "gamedata", "row_moved.json")  # [spid] rest_of_world_move took off Rest of the World
+
+
+def rest_of_world_move(c, careers):
+    """FO3's own cards on Rest of the World whose player was at an Italian club of the client (user:
+    "pemain2 rest of world Serie A kembalikan ke klubnya yang sesuai") go to it: the career's club
+    in the card's season and the club joined in its playerjointeamdate year must both be that club
+    (right for 90% of FO3's own Italian club cards; the misses are mostly loans). Returns how many."""
+    ita = dict(c.execute(f"SELECT teamid, leagueid FROM players WHERE leagueid IN {ITALY} "
+                         "AND (spid < 1000000 OR spid / 1000000 = 88)").fetchall())  # the client's league
+    ita.update({t: lg for t, (lg, _) in OPEN_CLUBS.items()})
+    moved = set(json.load(open(ROW_MOVED)) if os.path.isfile(ROW_MOVED) else [])
+    n = 0
+    for spid, pid, joined in c.execute("SELECT spid, playerid, playerjointeamdate FROM players WHERE teamid = ?",
+                                       (REST_OF_WORLD[0],)).fetchall():
+        year, m, career = SEASON_YEAR.get(spid // 1000000), re.search(r"\d{4}", joined or ""), careers.get(pid, [])
+        club = club_in(career, year) if year and m else None
+        if club in ita and club == club_joined(career, int(m[0])):
+            c.execute("UPDATE players SET teamid = ?, leagueid = ? WHERE spid = ?", (club, ita[club], spid))
+            moved.add(spid)
+            n += 1
+    json.dump(sorted(moved), open(ROW_MOVED, "w"))
+    return n
+
+
+def rest_of_world_back(c):
+    """rest_of_world_move undone."""
+    if os.path.isfile(ROW_MOVED):
+        c.executemany("UPDATE players SET teamid = ?, leagueid = ? WHERE spid = ?",
+                      [(*REST_OF_WORLD, s) for s in json.load(open(ROW_MOVED))])
+        os.remove(ROW_MOVED)
 
 
 # The admin page's Database tab (issue #38) edits cards in gamedata/fifadb.sqlite and keeps each
@@ -1872,6 +1923,7 @@ def cmd_restore(a):
         _original(os.path.join(a.game, "data", "data_7.big"))
     c = sqlite3.connect(FIFADB)
     open_clubs_back(c)
+    rest_of_world_back(c)
     seasons = (*CLASSES.values(), WC18)
     for t in ("players", *PERM_TABLES):
         c.execute(f"DELETE FROM {t} WHERE spid / 1000000 IN ({','.join('?' * len(seasons))})", seasons)
@@ -1960,8 +2012,9 @@ def cmd_selftest(a=None):
         if new is not None:  # an unpatched client: the patched one parses and is patched
             assert module_with_match_seasons(new) is None and len(new) > len(gfx)
         print("Module.gfx getSeason patch ok" + (" (installed)" if new is None else ""))
-    assert club_2017([[52, 2013, 2017, 0], [47, 2017, 2020, 0]]) == 47 and club_2017([[45, 2010, 2017, 0]]) == 45
-    assert club_2017([[45, 2018, -1, 0]]) is None
+    assert club_in([[52, 2013, 2017, 0], [47, 2017, 2020, 0]]) == 47 and club_in([[45, 2010, 2017, 0]]) == 45
+    assert club_in([[45, 2018, -1, 0]]) is None and club_in([[55, 2008, 2012, 0]], 2010) == 55
+    assert club_joined([[47, 2014, 2016, 0], [12, 2014, 2015, 1]], 2014) == 47 and club_joined([[47, 2014, 2016, 0]], 2015) is None
     game = r"D:\FO3ID\32795"
     if os.path.exists(os.path.join(game, "data", "data_5.big")):  # the clubs into an engine DB, in memory
         import bigdir, eadb
