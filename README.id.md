@@ -454,6 +454,8 @@ Sudah ditambahkan dan lolos tes, tapi belum dicek di client:
   dan legenda musim 26 lainnya, legenda EL / CEL...): install menandai semua kartu bisa
   diperdagangkan di client, karena pencarian Market hanya menampilkan yang begitu, dan daftar musim
   Market mendapat musim yang belum ada (26, 32, 38, 41, 57).
+  Klub yang dipilih di filter pencarian Market juga menampilkan kartu mantan pemainnya (dari karir klub,
+  tabel playerhistory): install mem-patch TransferUtil.teamidQuery di Module.big.
 - **Tim > Klub > Informasi tim** (issue #9) menampilkan tanggal mulai, stadion kandang, dan
   "tahun dibangun / kapasitas" (`coach.career`, `coach.stadium`, `GET /stadium/<id>` dari tabel
   stadion client), dan panel pemainnya (stepper, pemain 3D, harga, grade), yang tetap kosong tanpa

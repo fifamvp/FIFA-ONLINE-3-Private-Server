@@ -429,6 +429,8 @@ Added, passing the tests but not yet checked in the client:
   FO3's untradeable event cards count too (Cafu, Kahn, Rivaldo and the other season-26 legends, the
   EL / CEL legends...): install marks every card tradeable in the client, whose Market search lists
   only those, and the Market's season list gains the seasons it lacked (26, 32, 38, 41, 57).
+  A club picked in the Market search's filter lists its former players' cards too (their club careers,
+  table playerhistory): install patches TransferUtil.teamidQuery in Module.big.
 - **Tim > Klub > Informasi tim** (issue #9) shows the start date, home stadium and "year built /
   capacity" (`coach.career`, `coach.stadium`, `GET /stadium/<id>` from the client's own stadium
   table), and its player panel (stepper, 3D player, price, grade), which stayed empty without a

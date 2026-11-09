@@ -415,6 +415,8 @@ Item saya, Gudang bên dưới là tên màn hình trong game, được giữ ng
   Thẻ sự kiện FO3 vốn không giao dịch được cũng tính (Cafu, Kahn, Rivaldo và các huyền thoại mùa 26 khác,
   huyền thoại EL / CEL...): install đánh dấu mọi thẻ trong client là giao dịch được (tìm kiếm Market chỉ hiện
   những thẻ đó), và danh sách mùa của Market có thêm các mùa còn thiếu (26, 32, 38, 41, 57).
+  CLB chọn trong bộ lọc tìm kiếm Market cũng hiện thẻ của các cựu cầu thủ (theo lịch sử CLB, bảng playerhistory):
+  install vá TransferUtil.teamidQuery trong Module.big.
 - **Tim > Klub > Informasi tim** (issue #9) hiện ngày thành lập, sân nhà và "năm xây / sức chứa"
   (`coach.career`, `coach.stadium`, `GET /stadium/<id>` từ bảng sân của client), và bảng cầu thủ (nút
   chuyển, cầu thủ 3D, giá, cấp thẻ), vốn trống khi không có sân. Tên trong cơ sở dữ liệu của client được

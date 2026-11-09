@@ -1416,20 +1416,62 @@ def match_seasons_abc(d, p):
     return p, a.end, out
 
 
-def module_with_match_seasons(gfx):
-    """Module.gfx (CFX) with PlayerListUtil.getSeason patched, or None when it has the patch."""
+# The Market search's club filter (user: "jika filter klub maka juga filter juga yang histroynya
+# sesuai klub tersebut"): TransferUtil.teamidQuery(teamid, leagueid) adds betweenQuery("teamid",
+# teamid, teamid) = "AND ( teamid BETWEEN t AND t ) " to the client's own SQL over its fifadb (the
+# filter page calls it alone once a club is picked: no league condition). Its club branch now
+# passes MARKET_CLUB[0] + t + MARKET_CLUB[1] + t + MARKET_CLUB[2] as the field, so the club's
+# former players (table playerhistory: install's club careers) show too. (Putting "{1}" in the
+# field does not work: StringUtil.formatStringParams joins only the text around a placeholder's
+# first two pieces.)
+MARKET_CLUB = ("players.playerid IN (SELECT playerid FROM playerhistory WHERE teamid BETWEEN ", " AND ", ") OR teamid")
+
+
+def market_club_abc(d, p):
+    """(start, end, new bytes) of the ABC block at p (TransferUtil's) with teamidQuery's club
+    branch widened to the club's former players, or None when it has the patch already."""
+    a = _Abc(d, p)
+    if MARKET_CLUB[0] in a.strs:
+        return None
+    cls = next(c for c in a.classes if c[0] == "TransferUtil")
+    m = next(ref for name, kind, ref in cls[1] if name == "teamidQuery" and kind == 1)
+    start, end, head, (c0, c1), exc, (t0, t1) = a.bodies[m]
+    code = a.d[c0:c1]
+    team = a.strs.index("teamid")
+    between = next(i for i in range(1, len(a.mn)) if a.name(i) == "betweenQuery")
+    call = b"\xd1\xd1\x46" + _u30(between) + b"\x03\x29\x47"  # betweenQuery(field, teamid, teamid); return
+    tail = b"\xd0\x2c" + _u30(team) + call  # this.betweenQuery("teamid", ...), the club branch
+    j = len(code) - len(tail) - 4  # the national branch's jump over it
+    assert code.endswith(tail) and code[j] == 0x10 and int.from_bytes(code[j + 1:j + 4], "little", signed=True) == len(tail) - 1, \
+        "TransferUtil.teamidQuery changed (unknown client version)"
+    s0 = len(a.strs)
+    club = (b"\xd0\x2c" + _u30(s0) + b"\xd1\xa0\x2c" + _u30(s0 + 1) + b"\xa0\xd1\xa0\x2c" + _u30(s0 + 2) + b"\xa0"  # the field
+            + call)
+    code = code[:j] + b"\x10" + (len(club) - 1).to_bytes(3, "little", signed=True) + club
+    assert not exc, "teamidQuery has exception handlers"
+    body = (_u30(m) + _u30(max(head[0], 4)) + _u30(head[1]) + _u30(head[2]) + _u30(head[3])
+            + _u30(len(code)) + code + b"\x00" + a.d[t0:t1])
+    strs = b"".join(_u30(len(s.encode())) + s.encode() for s in MARKET_CLUB)
+    out = (a.d[p:a.str_count_at] + _u30(len(a.strs) + len(MARKET_CLUB)) + a.d[a.str_start:a.str_end] + strs
+           + a.d[a.str_end:start] + body + a.d[end:a.end])
+    return p, a.end, out
+
+
+def _module_patched(gfx, cls, patch):
+    """Module.gfx (CFX) with patch(body, abc offset) applied to the ABC block that holds class cls,
+    or None when patch finds it done."""
     import zlib
     assert gfx[:3] == b"CFX", gfx[:3]
     body = zlib.decompress(gfx[8:])
     r = _Bits(body, 0); r.u(4 * r.u(5)); p = r.end() + 4
-    while p < len(body):  # the DoABC tag (82: flags, name, ABC) that holds PlayerListUtil
+    while p < len(body):  # the DoABC tag (82: flags, name, ABC) that holds cls
         h = int.from_bytes(body[p:p + 2], "little"); code, ln, hdr = h >> 6, h & 0x3F, 2
         if ln == 0x3F:
             ln, hdr = int.from_bytes(body[p + 2:p + 6], "little"), 6
         q = p + hdr
         abc = body.index(b"\x00", q + 4) + 1 if code == 82 else None
-        if abc is not None and any(c[0] == "PlayerListUtil" for c in _Abc(body, abc).classes):
-            hit = match_seasons_abc(body, abc)
+        if abc is not None and any(c[0] == cls for c in _Abc(body, abc).classes):
+            hit = patch(body, abc)
             if hit is None:
                 return None
             _, end, new = hit
@@ -1439,7 +1481,17 @@ def module_with_match_seasons(gfx):
                                + payload + body[q + ln:])
             return b"CFX" + gfx[3:4] + (len(body) + 8).to_bytes(4, "little") + zlib.compress(body, 9)
         p = q + ln
-    raise SystemExit(f"{MODULE_GFX}: PlayerListUtil not found (unknown client version)")
+    raise SystemExit(f"{MODULE_GFX}: {cls} not found (unknown client version)")
+
+
+def module_with_match_seasons(gfx):
+    """Module.gfx (CFX) with PlayerListUtil.getSeason patched, or None when it has the patch."""
+    return _module_patched(gfx, "PlayerListUtil", match_seasons_abc)
+
+
+def module_with_market_clubs(gfx):
+    """Module.gfx (CFX) with TransferUtil.teamidQuery patched, or None when it has the patch."""
+    return _module_patched(gfx, "TransferUtil", market_club_abc)
 
 
 # --- install / restore -------------------------------------------------------------------------
@@ -1475,14 +1527,21 @@ def _originals(game):
     return [_original(os.path.join(game, p)) for p in (os.path.join("data", "data_0.big"), LABEL_BIG, MODULE_BIG)]
 
 
+MODULE_PATCHES = (module_with_match_seasons, module_with_market_clubs)
+
+
 def _patch_module(module):
-    """The match HUD's season icons into Module.big (module_with_match_seasons), checked."""
+    """The match HUD's season icons and the Market's club filter into Module.big
+    (MODULE_PATCHES), checked."""
     import bigdir
-    new = module_with_match_seasons(bigdir.read(module, MODULE_GFX))
-    if new is not None:
-        bigdir.patch(module, {MODULE_GFX: new})
-    assert module_with_match_seasons(bigdir.read(module, MODULE_GFX)) is None
-    return new is not None
+    gfx = old = bigdir.read(module, MODULE_GFX)
+    for patch in MODULE_PATCHES:
+        gfx = patch(gfx) or gfx
+    changed = gfx is not old
+    if changed:
+        bigdir.patch(module, {MODULE_GFX: gfx})
+    assert all(patch(bigdir.read(module, MODULE_GFX)) is None for patch in MODULE_PATCHES)
+    return changed
 
 
 def _sqlite(plain, edit):
@@ -2017,6 +2076,16 @@ def cmd_selftest(a=None):
         if new is not None:  # an unpatched client: the patched one parses and is patched
             assert module_with_match_seasons(new) is None and len(new) > len(gfx)
         print("Module.gfx getSeason patch ok" + (" (installed)" if new is None else ""))
+        new = module_with_market_clubs(gfx)
+        if new is not None:
+            assert module_with_market_clubs(new) is None
+        t = "47"  # the club filter's SQL as TransferUtil builds it: Milan's former players too
+        cond = "AND ( {0} BETWEEN {1} AND {2} ) ".replace("{0}", MARKET_CLUB[0] + t + MARKET_CLUB[1] + t + MARKET_CLUB[2])
+        with closing(sqlite3.connect(FIFADB)) as c:
+            now, ever = (c.execute(f"SELECT COUNT(*) FROM players WHERE 1 {q}").fetchone()[0]
+                         for q in ("AND ( teamid BETWEEN 47 AND 47 ) ", cond.replace("{1}", t).replace("{2}", t)))
+        assert ever > now > 0, (now, ever)
+        print("Module.gfx Market club filter patch ok" + (" (installed)" if new is None else ""))
     assert club_in([[52, 2013, 2017, 0], [47, 2017, 2020, 0]]) == 47 and club_in([[45, 2010, 2017, 0]]) == 45
     assert club_in([[45, 2018, -1, 0]]) is None and club_in([[55, 2008, 2012, 0]], 2010) == 55
     assert club_joined([[47, 2014, 2016, 0], [12, 2014, 2015, 1]], 2014) == 47 and club_joined([[47, 2014, 2016, 0]], 2015) is None

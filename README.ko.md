@@ -363,6 +363,8 @@ Gudang 등은 게임에 표시되는 화면 이름이라, 게임에서 찾기 �
   거래 불가였던 FO3 이벤트 카드도 포함(카푸, 칸, 히바우두 등 시즌 26 레전드, EL / CEL 레전드...): install이
   클라이언트의 모든 카드를 거래 가능으로 표시(Market 검색은 그런 카드만 보여 줌)하고, Market 시즌 목록에 없던
   시즌(26, 32, 38, 41, 57)을 추가함.
+  Market 검색 필터에서 고른 클럽은 그 클럽 출신 선수의 카드도 보여 줌(클럽 경력, playerhistory 테이블): install이
+  Module.big의 TransferUtil.teamidQuery를 패치함.
 - **Tim > Klub > Informasi tim**(issue #9)에 창단일, 홈 경기장, "건설 연도 / 수용 인원"이 표시됨
   (`coach.career`, `coach.stadium`, 클라이언트 경기장 표에서 가져온 `GET /stadium/<id>`). 경기장 정보가 없으면
   비어 있던 선수 패널(넘기기, 3D 선수, 가격, 강화 등급)도 나옴. 클라이언트 데이터베이스의 이름을 UTF-8로 읽음
