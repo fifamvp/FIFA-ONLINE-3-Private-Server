@@ -1891,11 +1891,54 @@ def _seal(plain_db, shipped):
     return refpack_blocks(bytes(enc)), len(enc)
 
 
+# play.bat runs "install --if-needed" before the game (user, on moving to another PC: "Apakah jika
+# pindah PC pada saat di jalan kan akan terpatch sendiri?" -> "Ya"): it installs only when what
+# install reads (this server's data, the tools) or the client files it writes are not as the last
+# install left them, recorded in STAMP in the game folder (a fresh client has none).
+STAMP = "fo3id_install.json"
+
+
+def _fingerprint(paths):
+    """{path: [size, mtime_ns]} of the files at paths (a folder: every file in it); missing ones are left out."""
+    out = {}
+    for p in paths:
+        for f in [os.path.join(d, n) for d, _, ns in os.walk(p) for n in ns] if os.path.isdir(p) else [p]:
+            if os.path.isfile(f):
+                s = os.stat(f)
+                out[os.path.abspath(f)] = [s.st_size, s.st_mtime_ns]
+    return out
+
+
+def install_state(game):
+    """{"inputs": what install reads, "client": the client files it writes} as fingerprints."""
+    import photo_head, club_history
+    code = [os.path.join(HERE, n) for n in ("fo4_season.py", "photo_head.py", "club_history.py")] + \
+           [os.path.join(HERE, "re", n) for n in ("bigdir.py", "refpack.py", "eadb.py")] + [os.path.join(ROOT, "extract_fifadb.py")]
+    data = [FIFADB, CARD_EDITS, HEADS, CUSTOM_SEASONS, SEASON_ICONS, os.path.join(ROOT, "gamedata", "fo4_icons"),
+            photo_head.DIR, club_history.OUT]
+    client = [os.path.join("data", "data_0.big"), photo_head.ARCHIVE, MODULE_BIG, LABEL_BIG,
+              *(os.path.join("data", "ui", "localization", f"{loc}.big") for loc in LOCALES)]
+    return {"inputs": _fingerprint(code + data), "client": _fingerprint([os.path.join(game, p) for p in client])}
+
+
 def cmd_install(a):
     import bigdir
     from refpack import refpack
     sys.path.insert(0, ROOT)
     from extract_fifadb import decrypt
+    stamp = os.path.join(a.game, STAMP)
+    if getattr(a, "if_needed", False):
+        if not os.path.isfile(FIFADB) or not os.path.isfile(os.path.join(a.game, "data", "data_0.big")):
+            print(f"install skipped: no {FIFADB} or no client in {a.game} (README: Setup)")
+            return
+        try:
+            with open(stamp) as f:
+                if json.load(f) == install_state(a.game):
+                    print(f"{a.game} has this server's latest install")
+                    return
+        except (OSError, ValueError):
+            pass
+        print(f"installing into {a.game} (its data or the server's changed since the last install)", flush=True)
     if _game_running():
         raise SystemExit("close the game first (fifazf.exe is running)")
     data0, label, module = _originals(a.game)
@@ -1950,6 +1993,8 @@ def cmd_install(a):
     for entry, plain_db in want.items():
         assert bytes(decrypt(bigdir.read(data0, entry))[16:]) == plain_db[16:], entry
     assert os.path.getsize(data0) == os.path.getsize(os.path.join(BACKUP, "data_0.big"))
+    with open(stamp, "w") as f:
+        json.dump(install_state(a.game), f)
     print(f"installed into {a.game}: {len(names)} new names, {clubs} new club names, {heads} photo heads, season icons "
           f"{', '.join(SEASON_NAMES[s] for s in sorted(icons))}")
 
@@ -1977,6 +2022,8 @@ def cmd_restore(a):
     if not os.path.isfile(os.path.join(BACKUP, "data_0.big")):
         raise SystemExit("nothing to restore (no backup/fo4season)")
     _originals(a.game)
+    if os.path.isfile(os.path.join(a.game, STAMP)):  # the next install --if-needed installs again
+        os.remove(os.path.join(a.game, STAMP))
     for lang in LOCALES:  # the TEAMNAMES install added club names to
         big = os.path.join(a.game, "data", "ui", "localization", f"{lang}.big")
         if os.path.isfile(os.path.join(BACKUP, os.path.basename(big))):
@@ -2086,6 +2133,15 @@ def cmd_selftest(a=None):
                          for q in ("AND ( teamid BETWEEN 47 AND 47 ) ", cond.replace("{1}", t).replace("{2}", t)))
         assert ever > now > 0, (now, ever)
         print("Module.gfx Market club filter patch ok" + (" (installed)" if new is None else ""))
+    d = tempfile.mkdtemp()  # install --if-needed: a file changed, added or gone changes the fingerprint
+    f = os.path.join(d, "x")
+    open(f, "w").write("a")
+    one = _fingerprint([d])
+    open(f, "w").write("ab")
+    assert _fingerprint([d]) != one and _fingerprint([os.path.join(d, "none")]) == {}
+    shutil.rmtree(d)
+    state = install_state(r"D:\FO3ID\32795")
+    assert FIFADB in state["inputs"] and os.path.abspath(__file__) in state["inputs"]
     assert club_in([[52, 2013, 2017, 0], [47, 2017, 2020, 0]]) == 47 and club_in([[45, 2010, 2017, 0]]) == 45
     assert club_in([[45, 2018, -1, 0]]) is None and club_in([[55, 2008, 2012, 0]], 2010) == 55
     assert club_joined([[47, 2014, 2016, 0], [12, 2014, 2015, 1]], 2014) == 47 and club_joined([[47, 2014, 2016, 0]], 2015) is None
@@ -2124,8 +2180,10 @@ def main():
     w.add_argument("--cache", default=os.path.join(tempfile.gettempdir(), "wc18_cache"))
     sub.add_parser("build")
     sub.add_parser("selftest")
-    for p in (w, *(sub.add_parser(name) for name in ("install", "hud", "restore"))):
-        p.add_argument("--game", default=r"D:\FO3ID\32795")
+    inst = sub.add_parser("install")
+    inst.add_argument("--if-needed", action="store_true", help="only when the client is not as the last install left it")
+    for p in (w, inst, *(sub.add_parser(name) for name in ("hud", "restore"))):
+        p.add_argument("--game", default=os.environ.get("FO3_GAME", r"D:\FO3ID\32795"))
     a = ap.parse_args()
     {"fetch": cmd_fetch, "collect": cmd_collect, "import": cmd_import, "wc18": cmd_wc18, "build": cmd_build,
      "install": cmd_install, "hud": cmd_hud, "restore": cmd_restore, "selftest": cmd_selftest}[a.cmd](a)
