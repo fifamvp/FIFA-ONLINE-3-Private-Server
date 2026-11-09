@@ -431,6 +431,14 @@ Sudah ditambahkan dan lolos tes, tapi belum dicek di client:
   staff apa saja (0.5-5 bintang) ke akun dan menghapusnya; gambar pak taruh di
   `assets/externalAssets/shop/<icon>.png` (170×120: broall, brofw, bromf, brodf, brogk (Basic), silall (Pro), goldall (Premium), position (Technical Director), medical (Premium Medical), staffpack_2103 (free pack)), tanpa itu tile memakai foto staff; pack
   bahasa yang tidak punya nama pak 11-13 (yang Thai) mendapatkannya.
+- **Perkembangan pemain** (Tim > Manajemen pemain > Perkembangan, fitur FO3 yang dimatikan di FO3 ID):
+  kartu level 23 memakai poin taktik untuk menaikkan statnya +1 per langkah, maksimal 60 poin per kartu;
+  biaya tiap langkah tergantung nilai stat (4 di bawah 60 sampai 60 mulai 140, tabel growth FO3 dari
+  fifaaddict). Stat yang naik berlaku di semua tampilan, rating tim, dan pertandingan. Poin taktik didapat
+  dari rekor pertandingan yang dimainkan langsung (gol, assist, operan, tekel, penyelamatan... ditambah
+  hasil; bukan simulasi), sampai total 1.200; layar hadiah setelah match menampilkannya. Item "Reset poin
+  taktik" (Shop) mengembalikan poin satu kartu. Kartu manajer virtual juga berkembang, makin kuat
+  manajernya makin banyak.
 - **Kotak acak bisa dibuka** (Kotak Platinum dan lainnya, issue #12): layar kotak menampilkan
   hadiahnya dari `staticdata.availables`, yang belum ada, jadi tiap kotak gagal saat "Gunakan".
 - **Kartu baru masuk Tim Cadangan**: kartu dari pak, trade, Market, Bag, atau halaman admin tampil
@@ -499,6 +507,10 @@ Belum dikerjakan: main online melawan orang lain (ranked PvP, friendly, King of 
    kali **`play.bat`**: file itu membuka jendela server (`python start_all.py` = `http_config.py 443
    --tls` + `messenger.py`; tutup jendela itu untuk menghentikan server) dan menjalankan game tanpa
    prompt UAC.
+   Sebelumnya ia menjalankan `tools/fo4_season.py install --if-needed`: kalau client belum punya
+   kartu, klub, wajah 3D dan patch server ini (PC lain, client baru, ada perubahan sejak install
+   terakhir), semuanya dipasang (satu-dua menit, game tertutup); install terakhir dicatat di
+   `fo3id_install.json` di folder game. Pindah PC: salin juga `gamedata/` dan `backup/` (tidak ada di git).
 
 6. Atau manual: `python start_all.py`, lalu jalankan client dengan argumen server (yang dikirim
    `launcher/fifalauncher.exe` dan `launch_game.ps1`):

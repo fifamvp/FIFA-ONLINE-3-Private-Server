@@ -309,6 +309,11 @@
   Issue #41：*Rekrut* 一次最多招募 10 名教练；管理后台的 Pak & Bag 页可给账号添加任意教练（0.5-5 星）并删除；
   教练包图片放在 `assets/externalAssets/shop/<icon>.png`（170×120：broall, brofw, bromf, brodf, brogk (Basic), silall (Pro), goldall (Premium), position (Technical Director), medical (Premium Medical), staffpack_2103 (free pack)），没有则显示教练照片；
   缺少第 11-13 包名称的语言包（泰语）会补上。
+- **球员成长**（Tim > Manajemen pemain > Perkembangan，FO3 ID 关闭的 FO3 功能）：23 级球员卡用战术点逐次 +1 提升
+  属性，每张卡最多 60 点；每步花费取决于属性值（60 以下 4 点到 140 以上 60 点，fifaaddict 的 FO3 成长表）。提升的
+  属性在所有界面、球队评分和比赛中生效。战术点来自亲自比赛的数据（进球、助攻、传球、抢断、扑救……加上胜负，模拟
+  不算），累计最多 1,200，赛后奖励界面会显示。"Reset poin taktik" 道具（Shop）可退回一张卡的点数。虚拟经理的
+  球员卡也会成长，经理越强成长越多。
 - **随机箱可以打开**（Kotak Platinum 等，issue #12）：箱子界面从 `staticdata.availables` 列出奖品，
   之前缺少这个字段，所以每个箱子在 "Gunakan"（使用）时都会失败。
 - **新球员卡进入 Tim Cadangan**：从卡包、交易、Market、Bag 或管理后台得到的卡，在 Skuad 的 Tim 一栏显示
@@ -366,6 +371,9 @@
 5. 编译一次启动器（`launcher/fifalauncher.cs`，编译命令写在文件里），然后双击 **`play.bat`**：它会打开
    服务器窗口（`python start_all.py` = `http_config.py 443 --tls` + `messenger.py`；关闭该窗口即停止
    服务器），并在不弹出 UAC 提示的情况下启动游戏。
+   在此之前它会运行 `tools/fo4_season.py install --if-needed`：客户端还没有本服务器的球员卡、俱乐部、3D 脸和补丁时
+   （换了电脑、新客户端、上次 install 之后有改动）就会安装（一两分钟，需关闭游戏）；上次 install 记录在游戏目录的
+   `fo3id_install.json`。换电脑时把 `gamedata/` 和 `backup/` 也复制过去（它们不在 git 里）。
 
 6. 也可以手动：先运行 `python start_all.py`，再用服务器参数启动客户端（即
    `launcher/fifalauncher.exe` 和 `launch_game.ps1` 传入的参数）：

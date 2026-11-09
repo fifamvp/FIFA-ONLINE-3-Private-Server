@@ -408,6 +408,13 @@ Added, passing the tests but not yet checked in the client:
   stars) to the account and removes them; pack pictures go in `assets/externalAssets/shop/<icon>.png`
   (170×120: broall, brofw, bromf, brodf, brogk (Basic), silall (Pro), goldall (Premium), position (Technical Director), medical (Premium Medical), staffpack_2103 (free pack)), else the tile shows a staff picture; a language pack without the names of packs
   11-13 (the Thai one) gets them.
+- **Player Growth** (Tim > Manajemen pemain > Perkembangan, FO3's "Perkembangan pemain", switched off in FO3 ID):
+  a level-23 card spends tactic points ("poin taktik") on +1 steps of its stats, up to 60 points a card; a
+  step costs by the stat's value (4 below 60 up to 60 from 140, fifaaddict's FO3 growth table). Grown stats
+  count everywhere the game shows them, in the team ratings and in matches. Tactic points come from your
+  live matches' records (goals, assists, passes, tackles, saves... plus the result; not simulations), up to
+  1,200 earned; the post-match screen shows them. A "Reset poin taktik" item (Shop) gives a card's points
+  back. Virtual managers' cards are grown too, more the stronger the manager.
 - **Random boxes open** (Kotak Platinum and the rest, issue #12): the box screen lists its prizes
   from `staticdata.availables`, which was missing, so every box failed at "Gunakan".
 - **New cards join Tim Cadangan**: a card from a pack, a trade, the Market, the Bag or the admin
@@ -473,6 +480,11 @@ Not done: online play against other people (ranked PvP, friendly, King of the Hi
    **`play.bat`**: it opens the server window (`python start_all.py` = `http_config.py 443
    --tls` + `messenger.py`; close that window to stop the server) and starts the game without
    the UAC prompt.
+   Before that it runs `tools/fo4_season.py install --if-needed`: when the client lacks this server's
+   cards, clubs, 3D faces and patches (another PC, a fresh client, a change since the last install),
+   it installs them (a minute or two, game closed); the last install is noted in
+   `fo3id_install.json` in the game folder. Moving to another PC: copy `gamedata/` and `backup/` too
+   (they are not in git).
 
 6. By hand instead: `python start_all.py`, then start the client with the server arguments
    (what `launcher/fifalauncher.exe` and `launch_game.ps1` pass):

@@ -344,6 +344,11 @@ Gudang 등은 게임에 표시되는 화면 이름이라, 게임에서 찾기 �
   이슈 #41: *Rekrut*에서 스태프를 한 번에 10명까지 영입; 관리자 페이지 Pak & Bag 탭에서 아무 스태프(0.5-5성)를 계정에
   추가/삭제; 팩 그림은 `assets/externalAssets/shop/<icon>.png`(170×120: broall, brofw, bromf, brodf, brogk (Basic), silall (Pro), goldall (Premium), position (Technical Director), medical (Premium Medical), staffpack_2103 (free pack)), 없으면 스태프 사진;
   팩 11-13 이름이 없는 언어 팩(태국어)에는 이름이 채워짐.
+- **선수 성장**(Tim > Manajemen pemain > Perkembangan, FO3 ID에서 꺼져 있던 FO3 기능): 23레벨 카드는 전술 포인트로
+  능력치를 1씩 올리며 카드당 최대 60포인트; 한 단계 비용은 능력치 값에 따름(60 미만 4부터 140 이상 60까지,
+  fifaaddict의 FO3 성장표). 오른 능력치는 모든 화면, 팀 평점, 경기에 반영. 전술 포인트는 직접 플레이한 경기의
+  기록(골, 어시스트, 패스, 태클, 선방... 그리고 결과, 시뮬레이션 제외)으로 최대 1,200까지 얻고 경기 후 화면에
+  표시됨. "Reset poin taktik" 아이템(Shop)은 카드 한 장의 포인트를 돌려줌. 가상 감독의 카드도 감독이 강할수록 더 성장.
 - **랜덤 박스 열림**(Kotak Platinum 등, issue #12): 박스 화면은 `staticdata.availables`에서 보상 목록을
   가져오는데, 이게 없어서 모든 박스가 "Gunakan"(사용)에서 실패했음.
 - **새 카드는 Tim Cadangan으로**: 팩, 트레이드, Market, Bag, 관리자 페이지에서 얻은 카드는 Skuad의 Tim
@@ -404,6 +409,9 @@ EALayer3(6.5 MB, `tools/re/ealayer3.py`)로 넣어도, 원본보다 작은 음�
 5. 런처를 한 번 빌드하고(`launcher/fifalauncher.cs`, 빌드 명령은 파일 안에 있음) **`play.bat`**을 더블
    클릭: 서버 창을 열고(`python start_all.py` = `http_config.py 443 --tls` + `messenger.py`, 서버를 멈추려면
    그 창을 닫기) UAC 창 없이 게임을 실행합니다.
+   그 전에 `tools/fo4_season.py install --if-needed`를 실행: 클라이언트에 이 서버의 카드, 클럽, 3D 얼굴, 패치가
+   없으면(다른 PC, 새 클라이언트, 마지막 install 이후 변경) 설치함(1~2분, 게임 종료 상태). 마지막 install은 게임
+   폴더의 `fo3id_install.json`에 기록됨. PC를 옮길 때는 `gamedata/`와 `backup/`도 복사(git에 없음).
 
 6. 직접 하려면: `python start_all.py`를 실행한 뒤 서버 인자로 클라이언트를 실행
    (`launcher/fifalauncher.exe`와 `launch_game.ps1`이 넘기는 인자):

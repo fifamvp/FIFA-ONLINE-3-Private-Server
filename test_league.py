@@ -1496,6 +1496,65 @@ def main():
         for k in ("staffs", "staffslots", "staffsmc", "staffrecruit"):
             raw.pop(k, None)
         hc.my_coach(st)["ep"] = ep_kept; hc._save(st)
+        # --- Player Growth (user: "...fo3player_growth.php... apakah fitur ini bisa diaktifkan kembali"):
+        # the feature, its table (an object; every stat reaches tiers without gaps), max_playerlevel, the
+        # coach's tactic points, a max-level card's steps by the tiers within its limit, a reset item, the
+        # points of a live match (none for a simulation), growth in the team rating and for the crowd
+        feats = body(hc.ENDPOINTS["/account"]("", b""))
+        feats = feats.get("features") or json.load(open(os.path.join(hc.RESPONSES, "account_base.json"), encoding="utf-8-sig"))["features"]
+        assert "expansion" in feats["teammanagement"]["playermanagement"]
+        gdb = body(hc.ENDPOINTS["/static/db/PLAYER_EXTRA_GROWTH"]("", b""))
+        assert sorted(gdb["statgroups"]) == sorted(hc.GROWTH_STATS) and len(hc.GROWTH_STATS) == 33
+        tiers = gdb["growth"]["1"]
+        assert tiers[0]["min"] == 0 and all(a["max"] + 1 == b["min"] for a, b in zip(tiers, tiers[1:])) and tiers[-1]["max"] >= 9999
+        assert all(isinstance(t[k], int) for t in tiers for k in ("min", "max", "require"))
+        assert gdb["config"]["point"]["player_limit"] == 60 and all(r["name"].startswith("PGE_") for r in gdb["records"].values())
+        assert body(hc.from_file("/static/db/STATICVALUES"))["max_playerlevel"] == hc.PLAYER_MAX_LEVEL
+        st = hc._state(); team_ = st["teams"][slot]; coach_ = hc.my_coach(st)
+        card = team_["players"][0]; card.pop("sp", None); kept_lv = card.get("levelinfo")
+        card["levelinfo"] = {"level": hc.PLAYER_MAX_LEVEL, "exp": 0}
+        coach_["growth"] = {"total": 50, "used": 0, "exp": 0}; hc._save(st)
+        sp_me = lambda: hc.coach_me(hc._state(), hc._default_slot(hc._state()))["sp"]
+        assert {k: sp_me()[k] for k in ("total", "used", "exp")} == {"total": 50, "used": 0, "exp": 0}
+        k = min(hc.GROWTH_STATS, key=hc.growth_base(card["spid"]).get)  # his weakest stat: 4 points a step
+        base = hc.growth_base(card["spid"])[k]
+        want = sum(hc.growth_cost(base + hc.GROWTH_BASE + i) for i in range(3))
+        got = call(f"/player/{hc.iid(card)}/extra/growth", {"stats": {k: 3}, "_method": "PUT"})
+        mine = lambda: next(p for p in hc._state()["teams"][slot]["players"] if hc.iid(p) == hc.iid(card))
+        assert got["usedsp"] == {"point": want, "detail": {k: 3}} and mine()["sp"] == {"used": want, "stats": {k: 3}}
+        assert sp_me()["used"] == want and got["resources"][0]["uri"] == "/coach/me"
+        got = call(f"/player/{hc.iid(card)}/extra/growth", {"stats": {k: 99}})  # only what the card's 60 / my 50 allow
+        assert mine()["sp"]["used"] <= 50 and sp_me()["used"] == mine()["sp"]["used"] and got["usedsp"]["detail"]
+        xi_id = next(str(s.get("id") or s["spid"]) for s in team_["squad"]["positions"] if s["pos"] >= 20)  # a forward
+        st = hc._state(); fw = next(p for p in st["teams"][slot]["players"] if hc.iid(p) == xi_id)
+        before = hc.xi_ratings(hc.owned_team(st["teams"][slot]))[xi_id]
+        fw["sp"] = {"used": 30, "stats": {"finishing": 6, "positioning": 6}}
+        assert hc.xi_ratings(hc.owned_team(st["teams"][slot]))[xi_id] > before  # growth in the team rating
+        fw.pop("sp"); hc._save(st)
+        low = team_["players"][1]  # a card below the max level takes no step
+        assert call(f"/player/{hc.iid(low)}/extra/growth", {"stats": {"finishing": 1}})["usedsp"]["point"] == 0
+        st = hc._state(); hc.inventory_add(hc.my_coach(st), 3003, 1); hc._save(st)
+        reset = next(i for i in hc.my_coach(hc._state())["items"] if i["itemid"] == 3003)
+        assert hc.coach_items(hc._state(), int(slot))  # the page looks for staticdata.type PLAYER_GROWTH_RESET
+        assert body(hc.route(f"/item/{reset['_id']}/use")("", json.dumps({"id": 3003, "targetid": hc.iid(low)}).encode()))["result"]
+        assert any(i["itemid"] == 3003 for i in hc.my_coach(hc._state())["items"])  # nothing to reset: kept
+        assert body(hc.route(f"/item/{reset['_id']}/use")("", json.dumps({"id": 3003, "targetid": hc.iid(card)}).encode()))["result"]
+        assert "sp" not in mine() and sp_me()["used"] == 0 and not any(i["itemid"] == 3003 for i in hc.my_coach(hc._state())["items"])
+        st = hc._state()
+        stats = {"myTeam": "home", "opponentTeam": "away", "home": {"score": 2, "assists": 1, "saves": 1, "passes": [30, 40]},
+                 "away": {"score": 1}}
+        r = hc.growth_after_match(st, stats)
+        assert r["prev"] == {"total": 50, "exp": 0} and r["descriptions"]["win"] == {"count": 1, "exp": 300}
+        assert r["descriptions"]["passes"] == {"count": 30, "exp": 60} and r["current"]["exp"] > 0
+        assert hc.growth_after_match(st, stats, played=False)["descriptions"] == {}
+        sim = hc.match_reward(copy.deepcopy(st), stats, live=False)["sp"]  # (a copy: it hands out a reward card)
+        assert sim["current"] == sim["prev"] and sim["descriptions"] == {}
+        hc.my_coach(st).pop("growth"); card["levelinfo"] = kept_lv
+        st["teams"][slot]["players"][0]["levelinfo"] = kept_lv or {"level": 1, "exp": 0}; hc._save(st)
+        vms = sorted(hc.virtual_managers(), key=lambda m: max(m["elo"]))  # the crowd grows its cards too
+        assert not any(p.get("sp") for p in hc.vm_team(vms[0]["_id"])["players"])
+        assert all(0 < p["sp"]["used"] <= 60 for p in hc.vm_team(vms[-1]["_id"])["players"] if p.get("sp"))
+        assert any(p.get("sp") for p in hc.vm_team(vms[-1]["_id"])["players"])
         # --- shop: player packs for EP (1 or 10); Item saya opens one card per use
         shop = body(hc.ENDPOINTS["/shop/list"]("", b""))
         cats = Counter(e["shopcategory"] for e in shop)

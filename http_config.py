@@ -1111,6 +1111,166 @@ def gain_exp(owner, n, need, top):
     return prev, make_levelinfo(owner["levelinfo"], need, top)
 
 
+# --------------------------------------------------------------------------- #
+# Player Growth ("Perkembangan", Tim > Manajemen pemain; user: "...fo3player_growth.php?id=88020801
+# apakah fitur ini bisa diaktifkan kembali", "jangan lupa implementasikan untuk virtual manager juga").
+# The client's page (TeamManagementPlayerGrowthExpansionTabPage, feature
+# teammanagement.playermanagement.expansion) lists max-level cards (STATICVALUES max_playerlevel); each
+# +1 step of a stat costs tactic points ("poin taktik", coach sp) by the tier of the stat's value v =
+# fifadb base + GROWTH_BASE + the card's growth so far (PlayerListUtil.convertStatValueForPlayerGrowth:
+# re-based to max level and grade +1), GROWTH_TIERS = fifaaddict's FO3 growth simulator table, one
+# group for every stat; a card takes GROWTH_PLAYER_LIMIT points at most. A card's growth is
+# sp {used, stats {stat: +n}}: with the feature on the client adds sp.stats to the stats it shows and
+# hands the match engine (staticdata.statusAttribute), so a grown card plays grown. Tactic points
+# come from live matches' records (growth_after_match), GROWTH_CONVERSION exp a point, until
+# GROWTH_COACH_LIMIT have been earned; a PLAYER_GROWTH_RESET item gives a card's points back.
+GROWTH_STATS = ("strength stamina acceleration sprintspeed jumping agility balance slidingtackle dribbling ballcontrol "
+                "marking standingtackle crossing shortpassing finishing longpassing shotpower headingaccuracy longshots "
+                "volleys curve freekickaccuracy penalties interceptions positioning vision reactions aggression gkkicking "
+                "gkdiving gkhandling gkpositioning gkreflexes").split()  # PlayerListUtil.PLAYER_STATS
+GROWTH_TIERS = ((0, 59, 4), (60, 79, 5), (80, 89, 7), (90, 99, 10), (100, 109, 12), (110, 119, 15),
+                (120, 129, 20), (130, 139, 30), (140, 9999, 60))  # (lowest v, highest v, points for +1)
+GROWTH_BASE = PLAYER_MAX_LEVEL - 1 + GRADE_BOOST[1]  # v = fifadb value + this + growth
+GROWTH_PLAYER_LIMIT, GROWTH_COACH_LIMIT, GROWTH_CONVERSION, GROWTH_MATCH_LIMIT = 60, 1200, 500, 1000
+GROWTH_IGR = GROWTH_VIP = 1.1  # x the exp of a match, for a warnet player and a VIP (always both here)
+# record of the match stats: (its name, exp each); the records are capped at GROWTH_MATCH_LIMIT a
+# match (the client caps at 1000 too), the result's exp comes on top
+GROWTH_RECORDS = {"score": ("PGE_RECORD_GOALS", 100), "assists": ("PGE_RECORD_ASSISTS", 80),
+                  "passes_inbox": ("PGE_RECORD_CREATE_CHANCE", 40), "intercepts_inbox": ("PGE_RECORD_KEY_CUT", 40),
+                  "saves": ("PGE_RECORD_SAVE", 40), "shotsOnGoal": ("PGE_RECORD_SHOTONTARGET", 25),
+                  "dribble_inbox": ("PGE_RECORD_KEY_DRIBBLE", 25), "tackles_inbox": ("PGE_RECORD_KEY_TACKLE", 25),
+                  "tackles": ("PGE_RECORD_TACKLE_SUCCESS", 8), "shotAttempt": ("PGE_RECORD_SHOOTING", 5),
+                  "passes": ("PGE_RECORD_PASS_SUCCESS", 2), "dribbles": ("PGE_RECORD_DRIBBLE_SUCCESS", 4),
+                  "intercepts": ("PGE_RECORD_CUT_SUCCESS", 8)}
+GROWTH_RESULTS = {"win": ("PGE_RECORD_WIN", 300), "draw": ("PGE_RECORD_DRAW", 150), "lose": ("PGE_RECORD_LOSE", 60)}
+
+
+def growth_db():
+    """/static/db/PLAYER_EXTRA_GROWTH: StaticData reads it at every login and hands it to native
+    SetPlayerGrowthExtData (an object: [] crashed the client, null stalls the login). Page:
+    config.point player_limit, statgroups, growth tiers (numbers); post-match: conversion; the match
+    HUD: match_limit, records (names start PGE_), record.show_*. Not config.show_attainment (the
+    HUD's "x%" steps): the client quit at login with it, as ints or as strings (tried live)."""
+    return {"config": {"point": {"coach_limit": GROWTH_COACH_LIMIT, "player_limit": GROWTH_PLAYER_LIMIT,
+                                 "conversion": GROWTH_CONVERSION, "match_limit": GROWTH_MATCH_LIMIT,
+                                 "igr": GROWTH_IGR, "vip": GROWTH_VIP},
+                       "record": {"show_time_growth": 2, "show_limit_growth": 25}},
+            "records": {k: {"name": name, "standard": exp, "3on3": exp} for k, (name, exp) in {**GROWTH_RECORDS, **GROWTH_RESULTS}.items()},
+            "statgroups": dict.fromkeys(GROWTH_STATS, 1),
+            "growth": {"1": [{"min": lo, "max": hi, "require": n} for lo, hi, n in GROWTH_TIERS]}}
+
+
+def growth_cost(v):
+    """Points for +1 of a stat whose value is v (GROWTH_BASE in)."""
+    return next(n for lo, hi, n in GROWTH_TIERS if lo <= v <= hi)
+
+
+@functools.lru_cache(maxsize=4096)
+def growth_base(spid):
+    """{stat: fifadb value} of a card, all GROWTH_STATS."""
+    with closing(_db()) as c:
+        r = c.execute(f"SELECT {', '.join(GROWTH_STATS)} FROM players WHERE spid = ?", (int(spid),)).fetchone()
+    return dict(zip(GROWTH_STATS, r)) if r else dict.fromkeys(GROWTH_STATS, 0)
+
+
+def growth_add(spid, sp, steps, budget):
+    """Put +1 steps on a card's sp {used, stats} in order (steps: [stat, ...]) while the next one
+    costs no more than budget (and the card's limit) allows; (points spent, {stat: steps taken})."""
+    base, spent, done = growth_base(spid), 0, {}
+    stats = sp.setdefault("stats", {})
+    for k in steps:
+        cost = growth_cost(base[k] + GROWTH_BASE + stats.get(k, 0))
+        if spent + cost > budget or sp.get("used", 0) + cost > GROWTH_PLAYER_LIMIT:
+            continue
+        stats[k] = stats.get(k, 0) + 1
+        sp["used"] = sp.get("used", 0) + cost
+        spent += cost
+        done[k] = done.get(k, 0) + 1
+    return spent, done
+
+
+def coach_sp(coach):
+    """My tactic points: {total earned, used (on the cards), exp toward the next}."""
+    sp = coach.setdefault("growth", {})
+    for k in ("total", "used", "exp"):
+        sp.setdefault(k, 0)
+    return sp
+
+
+def coach_sp_out(coach):
+    """/coach/me sp (CoachProxy.fetchCoachMeSPResource): total, used, exp."""
+    sp = coach.get("growth") or {}
+    return {"total": int(sp.get("total", 0)), "used": int(sp.get("used", 0)), "exp": int(sp.get("exp", 0))}
+
+
+def growth_after_match(st, stats, played=True):
+    """match.reward.sp (PostMatchReward setCoachSP: descriptions {record: {count, exp}}, prev and
+    current {total, exp}; without it the screen broke with the feature on) and the exp it gives:
+    my side's records (count x exp, capped at GROWTH_MATCH_LIMIT) plus the result's, x the warnet and
+    VIP bonus, until GROWTH_COACH_LIMIT points were earned. Not played (an exhibition of another's
+    side): nothing gained."""
+    sp = coach_sp(my_coach(st))
+    prev = {"total": sp["total"], "exp": sp["exp"]}
+    me, opp = stats.get("myTeam", "home"), stats.get("opponentTeam", "away")
+    side = stats.get(me) or {}
+    count = lambda v: int(v[0] if isinstance(v, list) and v else v or 0)  # [succeeded, tried] or a count
+    desc = {k: {"count": count(side.get(k)), "exp": count(side.get(k)) * e} for k, (_, e) in GROWTH_RECORDS.items()
+            if count(side.get(k)) > 0} if played else {}
+    g = lambda s: int((stats.get(s) or {}).get("score") or 0)
+    result = "win" if g(me) > g(opp) else "draw" if g(me) == g(opp) else "lose"
+    if played:
+        desc[result] = {"count": 1, "exp": GROWTH_RESULTS[result][1]}
+    gain = min(GROWTH_MATCH_LIMIT, sum(d["exp"] for k, d in desc.items() if k in GROWTH_RECORDS)) + \
+        sum(d["exp"] for k, d in desc.items() if k in GROWTH_RESULTS)
+    if sp["total"] < GROWTH_COACH_LIMIT:
+        sp["exp"] += round(gain * GROWTH_IGR * GROWTH_VIP)
+        sp["total"] = min(GROWTH_COACH_LIMIT, sp["total"] + sp["exp"] // GROWTH_CONVERSION)
+        sp["exp"] = sp["exp"] % GROWTH_CONVERSION if sp["total"] < GROWTH_COACH_LIMIT else 0
+    return {"descriptions": desc, "prev": prev, "current": {"total": sp["total"], "exp": sp["exp"]}}
+
+
+def ep_player_growth(card_id, query, body):
+    """PUT /player/<id>/extra/growth {stats: {stat: +n}} (the Growth button; a POST with _method
+    PUT): the steps a max-level card of mine can still take within my free points and its limit.
+    The page always says "Pemain X sudah berkembang" and redraws from the pushed /coach/me only, so
+    a refused step simply does not show."""
+    req = json.loads(body or b"{}")
+    st = _state(); slot = _default_slot(st); coach = my_coach(st)
+    p = next((p for p in st["teams"][str(slot)]["players"] if iid(p) == card_id), None)
+    spent, done = 0, {}
+    if p is not None and player_levelinfo(p)["level"] >= PLAYER_MAX_LEVEL:
+        sp, csp = p.get("sp") or {"used": 0, "stats": {}}, coach_sp(coach)
+        steps = [k for k, n in (req.get("stats") or {}).items() if k in GROWTH_STATS and isinstance(n, int) and n > 0
+                 for _ in range(min(n, 99))]
+        spent, done = growth_add(p["spid"], sp, steps, csp["total"] - csp["used"])
+        if spent:
+            p["sp"] = sp
+            csp["used"] += spent
+            _save(st)
+    return _json({"result": True, "usedsp": {"point": spent, "detail": done}, "resources": coach_me_resources(st, slot)})
+
+
+@functools.lru_cache(maxsize=4096)
+def card_role(spid):
+    """The rating role (POS_ROLE) of a card's own position."""
+    with closing(_db()) as c:
+        r = c.execute("SELECT preferredposition1 FROM players WHERE spid = ?", (int(spid),)).fetchone()
+    return POS_ROLE[r[0]] if r and 0 <= r[0] < len(POS_ROLE) else "CM"
+
+
+def vm_growth(vid, spid, role, budget):
+    """A virtual manager's card's growth (user: "jangan lupa implementasikan untuk virtual manager
+    juga"): budget points, each +1 on a stat of the card's role drawn by its weight in the rating
+    (seeded by the manager and the card), as a manager grows his own; None for no budget."""
+    if budget <= 0:
+        return None
+    r = random.Random(vmseed(f"{vid}/growth/{spid}"))
+    w = ROLE_WEIGHTS[role]
+    sp = {"used": 0, "stats": {}}
+    growth_add(spid, sp, r.choices(list(w), list(w.values()), k=60), budget)
+    return sp if sp["used"] else None
+
+
 # Tim > Formasi combobox = coach team.formations (SquadScreenHandler.initializeFormationComboBox:
 # entry 0 is shown with the club's name; picking one runs changeFormation: positions[i] -> squad
 # slot i, offsets[i] -> starting x/y, then SquadUtil.getBestSquadPositions). Entries come from the
@@ -1735,6 +1895,9 @@ def xi_ratings(team):
                 if point > best.get(kind, (0,))[0]:
                     best[kind] = (point, bs)
         add = dict.fromkeys(STAT_COLS, GRADE_BOOST[grade_of(p)] + player_levelinfo(p)["level"] - 1)
+        for k, n in ((p.get("sp") or {}).get("stats") or {}).items():  # his growth (checkGrowthBoostPlayer)
+            if k in add:
+                add[k] += int(n)
         boosts = [(b["type"], b["amount"]) for _, bs in best.values() for b in bs] + \
                  [kn for kind, stat in staff if kind in STAFF_FIT or kind == grp.upper() for kn in stat.items()]
         for kind, n in boosts:
@@ -1958,7 +2121,7 @@ def coach_me(st, slot):
         "igr": True, "vipDetail": VIP_DETAIL, "vipExpireAt": VIP_UNTIL, "vipStatus": {"VIP1": VIP_UNTIL},
         # the Quest window's GP (this week's; CoachProxy.expandMoney: money.gp = gpdata.point, cleared
         # once until passes) and the achievement badges (missions)
-        "sp": {"point": 0}, "gpdata": {"point": mission_gp(coach), "until": w3c(week_end())},
+        "sp": {"point": 0, **coach_sp_out(coach)}, "gpdata": {"point": mission_gp(coach), "until": w3c(week_end())},
         "badges": coach.get("missions", {}).get("badges", []), "currentbadge": coach.get("missions", {}).get("currentbadge", 0),
         # league.leagueid -> CoachProxy.leagueId: Single > Liga builds the league from it
         # statistics.ladder: Multiple > Rank's record tab (LadderMatchController.rebuildLadderRecordInfo
@@ -2561,7 +2724,7 @@ def ep_l2_match(query, body, sim=False):
         match["result"] = sim_result(match, events, match["gamesettings"]["home"])  # the result screen after it
         # then the reward screen: EXP and EP as after a played match (without it the screen stayed
         # empty and the way back to the Liga menu stopped there)
-        match["reward"] = match_reward(st, match["result"])
+        match["reward"] = match_reward(st, match["result"], live=False)  # no tactic points for a simulation
         add_ep(st, match["reward"]["money"]["reward"]["total"])
         lg.pop("pending", None)  # the round is played already
         out.update(leagueparam=param, eventlist=events, score=mine and mine["goals"])
@@ -2844,11 +3007,12 @@ def match_cards_reward(st):
     return {"extra": {"selected": pick, "availables": [prize_item(p) for p in cards]}, "selected": pick}
 
 
-def match_reward(st, stats, own=True):
+def match_reward(st, stats, own=True, live=True):
     """match.reward for PostMatchRewardDefaultScene.onRewardReceived (paths it reads) and its
     player list (PlayerRewardListItemRenderer: id, spid, prev, current, reward.detail.extra).
     Credits EP, coach exp and exp for every player of mine in matchStats (in-match spid = the
-    card's player id, i.e. spid % 1e6), plus a reward card. ponytail: flat exp by result + goals/assists."""
+    card's player id, i.e. spid % 1e6), plus a reward card, and the tactic points of a live match
+    of my own side (growth_after_match). ponytail: flat exp by result + goals/assists."""
     me, opp = stats.get("myTeam", "home"), stats.get("opponentTeam", "away")
     g = lambda s: int((stats.get(s) or {}).get("score") or 0)
     won, drew = g(me) > g(opp), g(me) == g(opp)
@@ -2866,7 +3030,7 @@ def match_reward(st, stats, own=True):
     return {"matchRewardBackType": 0, **match_cards_reward(st),
             "coach": {"reward": coach, "prev": prev, "current": cur},
             "money": {"reward": reward(ep, "MATCH_PLUS_GAMEMONEY")},
-            "players": players, "missions": [], "exptankinfo": {}}
+            "players": players, "missions": [], "exptankinfo": {}, "sp": growth_after_match(st, stats, played=own and live)}
 
 
 def ep_match_get(mid, query, body):
@@ -4764,6 +4928,9 @@ ITEMS = {  # itemid: (name, icon, type, effect, description)
                 "Hadiah acak: 1 juta EP, 06-11 Player Top 50 atau This Season Top 30."),
     3002: ("Ganti nama manager", 3002, "COACHNAME_CHANGE", {}, "Ganti nama manager Anda."),
     3001: ("Ganti tim", 3001, "TEAM_CHANGE", {}, "Pindah ke klub lain (logo, seragam, liga); pemain tetap."),
+    # Player Growth's Reset button (any item of this type; icon drawn for this server)
+    3003: ("Reset poin taktik", 9900200, "PLAYER_GROWTH_RESET", {},
+           "Perkembangan pemain: kembalikan semua poin taktik yang dipakai satu pemain."),
     # Upgrade 2.5 boost items (EnhanceControlPanel lists type ENHANCEMENT_BOOST; names from the
     # client's ENHANCEMENT_BOOST<id>; the cache has no icons of their own, 1000002 = green arrows)
     1000052: ("Enhancement Boost Gold", 1000002, "ENHANCEMENT_BOOST", {"boost": 0.15}, "Upgrade: peluang sukses +15%."),
@@ -4932,7 +5099,7 @@ def product_category(itemid):
 # --------------------------------------------------------------------------- #
 SHOP_FILE = os.path.join(HERE, "gamedata", "shop.json")
 SHOP_ITEM_TYPES = ("EP_LOTTERY", "ITEM_LOTTERY", "COACHNAME_CHANGE", "TEAM_CHANGE", "ENHANCEMENT_BOOST", "LEAGUE_SIMULATION",
-                   "PLAYER_EXP_CAPSULE")
+                   "PLAYER_EXP_CAPSULE", "PLAYER_GROWTH_RESET")
 SHOP_ID_BASE = {"packs": 93_000_000, "items": 94_000_000, "packages": 95_000_000, "monthly": 96_000_000}
 SHOP_HIDDEN = frozenset()
 _SHOP_BASE = None
@@ -5056,7 +5223,7 @@ def product_price(itemid, n):
 # "Gunakan poin" takes at +9 for the same chance (Silver +10% = 100 points).
 ES_EP = 1000  # an upgrade point
 EXP_EP = 10  # a point of a player's EXP (LV.1 -> LV.23 takes 25,300)
-CHANGE_EP = {"COACHNAME_CHANGE": 100_000, "TEAM_CHANGE": 300_000}
+CHANGE_EP = {"COACHNAME_CHANGE": 100_000, "TEAM_CHANGE": 300_000, "PLAYER_GROWTH_RESET": 200_000}
 
 
 def shop_worth(itemid, depth=0):
@@ -5241,6 +5408,12 @@ def use_item(st, slot, coach, it, req):
                 or eff.get("season") and p["spid"] // 1000000 != eff["season"]):
             return {"result": False, "reason": "ITEM_USE_ERROR"}
         gain_exp(p, eff["exp"], player_need, PLAYER_MAX_LEVEL)
+    elif typ == "PLAYER_GROWTH_RESET":  # Player Growth's Reset: the card's points back to me
+        p = next((p for p in st["teams"][str(slot)]["players"] if iid(p) == str(req.get("targetid"))), None)
+        if p is None or not (p.get("sp") or {}).get("used"):
+            return {"result": True}  # nothing to reset: the item stays (the page shuts the game on false)
+        csp = coach_sp(coach)
+        csp["used"] = max(0, csp["used"] - p.pop("sp")["used"])
     it["remains"] -= 1
     if not it["remains"]:
         coach["items"].remove(it)
@@ -7041,6 +7214,13 @@ def vm_squad(vid, day):
         players = [{"spid": spid, "expandme": "player", "price": ovr, "jersey": n + 1, "grade": g,
                     "levelinfo": {"level": lv, "exp": 0}, "jerseyname": gen_teams.jersey_name(c, pid)}
                    for n, (_, ovr, spid, pid, g, lv) in enumerate(chosen)]
+    # his cards' growth (Player Growth): points by his rating, 0 for a beginner up to a card's
+    # limit at Legendary, on the stats of the card's role at its slot (the bench: its own position)
+    budget = max(0, min(GROWTH_PLAYER_LIMIT, (max(vm["elo"]) - LADDER_START) * GROWTH_PLAYER_LIMIT // 780))
+    for p, (slot, _, spid, *_) in zip(players, chosen):
+        sp = vm_growth(vid, spid, POS_ROLE[slot["pos"]] if slot["pos"] < POS_SUB else card_role(spid), budget)
+        if sp:
+            p["sp"] = sp
     xi = [(slot, ovr, spid) for slot, ovr, spid, *_ in chosen if slot["pos"] < POS_SUB]
     best = sorted(xi, key=lambda x: -x[1])  # the kickers: his best outfield players (never the GK)
     squad = {"positions": [{**slot, "spid": spid} for slot, _, spid in xi], "captain": best[0][2],
@@ -9378,6 +9558,7 @@ ROUTES = [
     (re.compile(r"/static/info/authentic/team/(licensed|all)/(\d+)"), ep_authentic_team),
     (re.compile(r"/static/info/team/summary/(\d+)"), ep_team_summary),
     (re.compile(r"/player/(\w+)/move/(firstteam|secondteam)"), ep_player_move),
+    (re.compile(r"/player/(\w+)/extra/growth"), ep_player_growth),
     (re.compile(r"/player/(\w+)/enhance/(\w+)/preview"), ep_enhance_preview),
     (re.compile(r"/player/(\w+)/enhance2\.5/(\w+)/preview/(\d)/(-?\d+)/(-?\d+)"), ep_enhance25_preview),
     (re.compile(r"/player/(\w+)/enhance2\.5/(\w+)/(\d)/(-?\d+)/(-?\d+)"), ep_enhance25),
@@ -9776,6 +9957,7 @@ ENDPOINTS.update({
     "/shop/list/clear": lambda q, b: _json({"changed": SHOP_CHANGED}),
     "/coach/me/level/reward": ep_level_reward, "/static/db/REWARDS/coachlevelup": ep_level_reward_table,
     "/static/db/STAFF": lambda q, b: _json(staff_static()), "/staff/recruit": ep_staff_recruit_list,
+    "/static/db/PLAYER_EXTRA_GROWTH": lambda q, b: _json(growth_db()),
     "/staff/recontract/preview": ep_staff_recontract_preview, "/staff/recontract": ep_staff_recontract,
     # the Shop's limited stock, polled each minute while it is open (ShopController.onRemainedChange
     # takes an array; {} raised "Kesalahan UI telah terjadi"): nothing is limited here
@@ -9800,7 +9982,16 @@ def from_file(path):
     if os.path.isfile(f):
         with open(f, "rb") as fh:
             data = fh.read()
-        return ("application/json", roster_seasons(data) if path == "/static/roster" else data)
+        edit = {"/static/roster": roster_seasons, "/static/db/STATICVALUES": static_values_out}.get(path)
+        return ("application/json", edit(data) if edit else data)
+
+
+def static_values_out(raw):
+    """/static/db/STATICVALUES with max_playerlevel: the Player Growth page lists the cards at that
+    level (int(undefined) = 0 listed none) and its cost formula uses the EXPPLAYER table's top."""
+    d = json.loads(raw)
+    d["max_playerlevel"] = PLAYER_MAX_LEVEL
+    return json.dumps(d).encode()
 
 
 @functools.lru_cache(maxsize=None)

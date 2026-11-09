@@ -394,6 +394,12 @@ Item saya, Gudang bên dưới là tên màn hình trong game, được giữ ng
   Issue #41: *Rekrut* mua tối đa 10 staff một lần; tab Pak & Bag trên trang quản trị thêm bất kỳ staff nào
   (0.5-5 sao) vào tài khoản và xóa được; ảnh gói đặt ở `assets/externalAssets/shop/<icon>.png` (170×120: broall, brofw, bromf, brodf, brogk (Basic), silall (Pro), goldall (Premium), position (Technical Director), medical (Premium Medical), staffpack_2103 (free pack)),
   không có thì ô hiện ảnh staff; gói ngôn ngữ thiếu tên gói 11-13 (tiếng Thái) sẽ được bổ sung.
+- **Phát triển cầu thủ** (Tim > Manajemen pemain > Perkembangan, tính năng FO3 bị tắt ở FO3 ID): thẻ cấp 23 dùng
+  điểm chiến thuật để tăng chỉ số +1 mỗi bước, tối đa 60 điểm mỗi thẻ; giá mỗi bước theo giá trị chỉ số (4 dưới 60
+  đến 60 từ 140, bảng phát triển FO3 của fifaaddict). Chỉ số tăng có hiệu lực ở mọi màn hình, xếp hạng đội và trận
+  đấu. Điểm chiến thuật đến từ thông số các trận tự chơi (bàn thắng, kiến tạo, chuyền, tắc bóng, cứu thua... cộng kết
+  quả; không tính mô phỏng), tối đa 1.200; màn hình sau trận hiển thị. Vật phẩm "Reset poin taktik" (Shop) trả lại
+  điểm của một thẻ. Thẻ của HLV ảo cũng phát triển, HLV càng mạnh càng nhiều.
 - **Mở được hộp ngẫu nhiên** (Kotak Platinum và các hộp khác, issue #12): màn hình hộp liệt kê phần thưởng
   từ `staticdata.availables`, trước đây bị thiếu, nên mọi hộp đều lỗi khi bấm "Gunakan" (dùng).
 - **Thẻ mới vào Tim Cadangan**: thẻ từ gói, giao dịch, Market, Bag hoặc trang quản trị hiện "-" ở cột Tim
@@ -457,6 +463,10 @@ Chưa làm: chơi online với người khác (xếp hạng PvP, giao hữu, Kin
 5. Build launcher một lần (`launcher/fifalauncher.cs`, lệnh build ghi bên trong), rồi nhấp đúp
    **`play.bat`**: nó mở cửa sổ máy chủ (`python start_all.py` = `http_config.py 443 --tls` +
    `messenger.py`; đóng cửa sổ đó để dừng máy chủ) và chạy game mà không hiện hộp thoại UAC.
+   Trước đó nó chạy `tools/fo4_season.py install --if-needed`: khi client chưa có thẻ, CLB, mặt 3D và bản vá của
+   máy chủ này (PC khác, client mới, có thay đổi từ lần install trước), nó cài vào (một hai phút, game đóng);
+   lần install cuối được ghi trong `fo3id_install.json` ở thư mục game. Chuyển PC: chép cả `gamedata/` và
+   `backup/` (không có trong git).
 
 6. Hoặc làm tay: `python start_all.py`, rồi chạy client với các tham số máy chủ (giống những gì
    `launcher/fifalauncher.exe` và `launch_game.ps1` truyền vào):

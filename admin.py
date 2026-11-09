@@ -2193,6 +2193,7 @@ I18N = {
         vm_title='Manajer virtual', vm_lead='Sekitar 2.000 manajer virtual (lawan Rank dan King of the Hill, klub AI, Market) tetap sama setiap kali game dan server dijalankan. Hanya tombol Generate ulang di sini yang membuat kerumunan baru: nama, level, klub, skuad, gaya main, rating Rank, region dan klub AI berganti, langsung tanpa restart (layar game yang sudah terbuka diperbarui saat dibuka lagi). Id mereka tetap, jadi teman, klub dan riwayatmu tidak rusak, tapi orang di baliknya berubah. Kembalikan ke awal memunculkan lagi kerumunan pertama.', vm_regen='Generate ulang', vm_reset='Kembalikan ke awal', vm_gen_now='Generasi {0} ({1} manajer sekarang).', vm_confirm='Buat kerumunan manajer virtual yang baru? Nama, klub dan skuad mereka semua langsung berganti.', vm_regen_done='Kerumunan baru dipakai sekarang.', vm_reset_done='Kerumunan pertama dipakai lagi.',
         st_title='Staff', st_lead='Staff di akun: {0} dari {1}. Staff baru tampil di Tim > Manajemen Staff saat layar berganti.', st_staff='Staff', st_grade='Bintang', st_life='Kontrak', st_status='Status', st_add='Tambah staff', st_added='{0} × {1} ditambahkan.', st_removed='{0} dihapus.', st_remove='Hapus', st_confirm='Hapus staff {0} dari akun?', st_none='Belum ada staff.', st_helper='pembantu', st_appointed='Bertugas', st_studying='Pembinaan', e_unknown_staff='staff tidak dikenal', e_staff_full='staff penuh: sisa tempat {0}', e_no_staff='staff tidak ada',
         phd_redo='Buat ulang semua wajah 3D dari ikon', phd_redo_confirm='Buat ulang semua wajah 3D yang sudah ada dari ikon pemainnya? Donor dipilih ulang (warna kulit dibandingkan dengan foto donor). Wajah yang dibuat dari foto unggahan ikut diganti ikon.',
+        t_PLAYER_GROWTH_RESET='Reset poin taktik (Perkembangan pemain)',
     ),
     "en": dict(
         ep_balance="EP balance", language="Language", menu="Admin menu",
@@ -2287,6 +2288,7 @@ I18N = {
         vm_title='Virtual managers', vm_lead='About 2,000 virtual managers (Rank and King of the Hill opponents, AI clubs, the Market) stay the same every time the game and the server start. Only the Generate again button here makes a new crowd: names, levels, clubs, squads, playing styles, Rank ratings, regions and AI clubs change at once, no restart (a game screen that is already open updates when it opens again). Their ids stay, so your friends, club and history keep working, but the people behind them change. Back to the first crowd brings the first one back.', vm_regen='Generate again', vm_reset='Back to the first crowd', vm_gen_now='Generation {0} ({1} managers now).', vm_confirm='Make a new crowd of virtual managers? All their names, clubs and squads change at once.', vm_regen_done='The new crowd is in use now.', vm_reset_done='The first crowd is in use again.',
         st_title='Staff', st_lead='Staff on the account: {0} of {1}. New staff show in Tim > Manajemen Staff once the screen changes.', st_staff='Staff', st_grade='Stars', st_life='Contract', st_status='Status', st_add='Add staff', st_added='{0} × {1} added.', st_removed='{0} removed.', st_remove='Remove', st_confirm='Remove staff {0} from the account?', st_none='No staff yet.', st_helper='helper', st_appointed='Appointed', st_studying='Studying', e_unknown_staff='unknown staff', e_staff_full='staff full: room for {0}', e_no_staff='no such staff',
         phd_redo='Make every 3D face again from the pictures', phd_redo_confirm="Make every existing 3D face again from its player's picture? The donor is picked again (skin compared with the donor's own picture). A face made from an uploaded photo becomes the picture's too.",
+        t_PLAYER_GROWTH_RESET='Tactic point reset (Player Growth)',
     ),
     "zh": dict(
         lang_name="简体中文", locale="zh-CN",
@@ -2382,6 +2384,7 @@ I18N = {
         vm_title='虚拟经理', vm_lead='约 2,000 名虚拟经理（Rank 和 King of the Hill 的对手、AI 俱乐部、市场）每次启动游戏和服务器都保持不变。只有这里的“重新生成”按钮会创建一批新人：名字、等级、俱乐部、阵容、打法、Rank 积分、地区和 AI 俱乐部立即改变，无需重启（已打开的游戏界面重新打开后更新）。他们的 ID 不变，所以你的好友、俱乐部和记录不会出错，但背后的人换了。“恢复初始”会找回第一批。', vm_regen='重新生成', vm_reset='恢复初始', vm_gen_now='第 {0} 代（现有 {1} 名经理）。', vm_confirm='生成一批新的虚拟经理？他们的名字、俱乐部和阵容会立即全部改变。', vm_regen_done='新的一批已启用。', vm_reset_done='已重新启用第一批。',
         st_title='职员', st_lead='账号上的职员：{0} / {1}。新职员在画面切换后显示于 Tim > Manajemen Staff。', st_staff='职员', st_grade='星级', st_life='合同', st_status='状态', st_add='添加职员', st_added='已添加 {0} × {1}。', st_removed='已删除 {0}。', st_remove='删除', st_confirm='从账号删除职员 {0}？', st_none='还没有职员。', st_helper='助手', st_appointed='在岗', st_studying='培训中', e_unknown_staff='未知的职员', e_staff_full='职员已满：还能放 {0} 个', e_no_staff='没有这个职员',
         phd_redo='用头像重新生成全部 3D 脸', phd_redo_confirm='用球员头像重新生成所有已有的 3D 脸？会重新挑选模板头（肤色与模板球员的照片比较）。用上传照片做的脸也会换成头像生成的。',
+        t_PLAYER_GROWTH_RESET='战术点重置（球员成长）',
     ),
     "th": dict(
         lang_name="ไทย", locale="th-TH",
@@ -2477,6 +2480,7 @@ I18N = {
         vm_title='ผู้จัดการเสมือน', vm_lead='ผู้จัดการเสมือนราว 2,000 คน (คู่แข่ง Rank และ King of the Hill สโมสร AI ตลาด) คงเดิมทุกครั้งที่เปิดเกมและเซิร์ฟเวอร์ มีเพียงปุ่ม สร้างใหม่ ตรงนี้ที่สร้างกลุ่มใหม่: ชื่อ เลเวล สโมสร สกวอด สไตล์การเล่น เรตติ้ง Rank ภูมิภาค และสโมสร AI เปลี่ยนทันที ไม่ต้องรีสตาร์ต (หน้าจอเกมที่เปิดอยู่จะอัปเดตเมื่อเปิดใหม่) ไอดีคงเดิม เพื่อน สโมสร และประวัติของคุณจึงยังใช้ได้ แต่คนเบื้องหลังเปลี่ยนไป กลับเป็นชุดแรก จะได้กลุ่มแรกคืนมา', vm_regen='สร้างใหม่', vm_reset='กลับเป็นชุดแรก', vm_gen_now='รุ่นที่ {0} (ตอนนี้ {1} คน)', vm_confirm='สร้างผู้จัดการเสมือนกลุ่มใหม่? ชื่อ สโมสร และสกวอดของทุกคนจะเปลี่ยนทันที', vm_regen_done='ใช้กลุ่มใหม่แล้ว', vm_reset_done='ใช้กลุ่มแรกอีกครั้งแล้ว',
         st_title='สตาฟ', st_lead='สตาฟในบัญชี: {0} จาก {1} สตาฟใหม่จะแสดงใน Tim > Manajemen Staff เมื่อเปลี่ยนหน้าจอ', st_staff='สตาฟ', st_grade='ดาว', st_life='สัญญา', st_status='สถานะ', st_add='เพิ่มสตาฟ', st_added='เพิ่ม {0} × {1} แล้ว', st_removed='ลบ {0} แล้ว', st_remove='ลบ', st_confirm='ลบสตาฟ {0} ออกจากบัญชี?', st_none='ยังไม่มีสตาฟ', st_helper='ผู้ช่วย', st_appointed='ประจำตำแหน่ง', st_studying='กำลังฝึก', e_unknown_staff='ไม่รู้จักสตาฟนี้', e_staff_full='สตาฟเต็ม: เหลือที่ {0}', e_no_staff='ไม่มีสตาฟนี้',
         phd_redo='สร้างหน้า 3D ทั้งหมดใหม่จากรูปไอคอน', phd_redo_confirm='สร้างหน้า 3D ที่มีอยู่ทั้งหมดใหม่จากรูปไอคอนของนักเตะ? จะเลือกหัวต้นแบบใหม่ (เทียบสีผิวกับรูปของนักเตะต้นแบบ) หน้าที่สร้างจากรูปที่อัปโหลดก็จะถูกแทนด้วยรูปไอคอน',
+        t_PLAYER_GROWTH_RESET='รีเซ็ตแต้มแท็กติก (พัฒนานักเตะ)',
     ),
     "vi": dict(
         lang_name="Tiếng Việt", locale="vi-VN",
@@ -2572,6 +2576,7 @@ I18N = {
         vm_title='Quản lý ảo', vm_lead='Khoảng 2.000 quản lý ảo (đối thủ Rank và King of the Hill, CLB AI, Market) giữ nguyên mỗi lần chạy game và server. Chỉ nút Tạo lại ở đây mới tạo ra nhóm mới: tên, cấp, CLB, đội hình, lối chơi, điểm Rank, khu vực và CLB AI đổi ngay, không cần khởi động lại (màn hình game đang mở sẽ cập nhật khi mở lại). ID của họ giữ nguyên nên bạn bè, CLB và lịch sử của bạn vẫn dùng được, nhưng người đứng sau thì khác. Về nhóm đầu tiên sẽ đưa nhóm ban đầu trở lại.', vm_regen='Tạo lại', vm_reset='Về nhóm đầu tiên', vm_gen_now='Thế hệ {0} (hiện có {1} quản lý).', vm_confirm='Tạo nhóm quản lý ảo mới? Tên, CLB và đội hình của tất cả sẽ đổi ngay.', vm_regen_done='Đang dùng nhóm mới.', vm_reset_done='Đang dùng lại nhóm đầu tiên.',
         st_title='Nhân viên', st_lead='Nhân viên trong tài khoản: {0} / {1}. Nhân viên mới hiện ở Tim > Manajemen Staff khi đổi màn hình.', st_staff='Nhân viên', st_grade='Sao', st_life='Hợp đồng', st_status='Trạng thái', st_add='Thêm nhân viên', st_added='Đã thêm {0} × {1}.', st_removed='Đã xóa {0}.', st_remove='Xóa', st_confirm='Xóa nhân viên {0} khỏi tài khoản?', st_none='Chưa có nhân viên.', st_helper='trợ lý', st_appointed='Đang làm việc', st_studying='Đang đào tạo', e_unknown_staff='nhân viên không xác định', e_staff_full='đã đủ nhân viên: còn {0} chỗ', e_no_staff='không có nhân viên này',
         phd_redo='Tạo lại mọi mặt 3D từ ảnh đại diện', phd_redo_confirm='Tạo lại mọi mặt 3D đã có từ ảnh đại diện của cầu thủ? Đầu mẫu được chọn lại (so màu da với ảnh của cầu thủ mẫu). Mặt làm từ ảnh tải lên cũng bị thay bằng ảnh đại diện.',
+        t_PLAYER_GROWTH_RESET='Đặt lại điểm chiến thuật (Phát triển cầu thủ)',
     ),
     "ko": dict(
         lang_name="한국어", locale="ko-KR",
@@ -2667,6 +2672,7 @@ I18N = {
         vm_title='가상 감독', vm_lead='약 2,000명의 가상 감독(Rank·King of the Hill 상대, AI 클럽, 마켓)은 게임과 서버를 실행할 때마다 그대로입니다. 여기의 다시 생성 버튼만 새 무리를 만듭니다: 이름, 레벨, 클럽, 스쿼드, 플레이 스타일, Rank 점수, 지역, AI 클럽이 재시작 없이 바로 바뀝니다(이미 열린 게임 화면은 다시 열면 갱신). ID는 그대로라 친구, 클럽, 기록은 계속 작동하지만 그 뒤의 사람은 바뀝니다. 처음으로 되돌리기는 첫 무리를 다시 불러옵니다.', vm_regen='다시 생성', vm_reset='처음으로 되돌리기', vm_gen_now='{0}세대(현재 {1}명).', vm_confirm='가상 감독을 새로 만들까요? 모두의 이름, 클럽, 스쿼드가 바로 바뀝니다.', vm_regen_done='새 무리를 지금 사용합니다.', vm_reset_done='첫 무리를 다시 사용합니다.',
         st_title='스태프', st_lead='계정의 스태프: {0} / {1}. 새 스태프는 화면이 바뀌면 Tim > Manajemen Staff에 나옵니다.', st_staff='스태프', st_grade='별', st_life='계약', st_status='상태', st_add='스태프 추가', st_added='{0} × {1} 추가함.', st_removed='{0} 삭제함.', st_remove='삭제', st_confirm='스태프 {0}을(를) 계정에서 삭제할까요?', st_none='스태프가 없습니다.', st_helper='보조', st_appointed='배치됨', st_studying='연수 중', e_unknown_staff='알 수 없는 스태프', e_staff_full='스태프가 가득 참: {0}자리 남음', e_no_staff='없는 스태프',
         phd_redo='모든 3D 얼굴을 사진으로 다시 만들기', phd_redo_confirm='기존 3D 얼굴을 모두 선수 사진으로 다시 만들까요? 기증 머리를 다시 고릅니다(피부색은 기증 선수의 사진과 비교). 업로드한 사진으로 만든 얼굴도 선수 사진 것으로 바뀝니다.',
+        t_PLAYER_GROWTH_RESET='전술 포인트 초기화(선수 성장)',
     ),
 }
 
