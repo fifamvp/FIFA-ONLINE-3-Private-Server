@@ -2100,12 +2100,11 @@ def _db():
 
 
 def league_teams(leagueid, mine):
-    """My club + the other clubs of its league in fifadb (base cards, full squads), strongest first."""
-    with closing(_db()) as c:
-        rows = c.execute("""SELECT p.teamid FROM players p JOIN permid m ON m.spid = p.spid AND m.licensed = 1
-                            WHERE p.leagueid = ? AND p.spid < 1000000 GROUP BY p.teamid
-                            HAVING COUNT(*) >= 16 ORDER BY MAX(p.overallrating) DESC""", (leagueid,)).fetchall()
-    return [mine] + [r[0] for r in rows if r[0] != mine][:LEAGUE_MAX - 1]
+    """My club + the other clubs of its league with a full squad, strongest first: the club picker's
+    (club_index: this season's cards, 2017 ones for players without one), so a club opened by
+    tools/fo4_season.py (OPEN_CLUBS: AC Milan & co., 26 LIVE squads) plays the Liga too."""
+    teams = next((ts for _, leagues in club_index() for lid, ts in leagues if lid == leagueid), [])
+    return [mine] + [t for t in teams if t != mine][:LEAGUE_MAX - 1]
 
 
 def league_round(teams, rnd):

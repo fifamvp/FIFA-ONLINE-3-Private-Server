@@ -259,6 +259,10 @@
   界面会显示这些奖励；你参加的一周或一个赛季结束后，打开 King of the Hill 时会出现奖励界面，达成的奖励进入背包。
 - **完整联赛**（issue #40）：一个 Liga 赛季包含我所在联赛中阵容完整的所有俱乐部（Premier League 20 家俱乐部、
   38 轮；最多 24 家），而不是 10 家。按名次的 EP 和经验按球队数调整。
+- **FO3 ID 缺少的俱乐部**：AC Milan、Genoa、Udinese、Bologna、Cagliari 和 Sampdoria 回到游戏（球衣仍在游戏文件中；
+  `tools/fo4_season.py install` 按球衣读出的颜色添加俱乐部），并带完整的 26 LIVE 阵容（`fetch` 列出名单，`collect` +
+  `import` 读取能力值）。这些球员原本放在国家队的 '17 卡回到俱乐部。Liga 的意甲现在有 19 家俱乐部，选择俱乐部界面
+  也会显示。做法：fetch、collect + import、build，然后在关闭游戏时 install（或在管理后台点 Terapkan ke game）。
 - **管理后台的球员卡与俱乐部数据库**（issue #38）：Database 页按赛季逐张编辑球员卡（spid = 赛季 × 1,000,000 +
   球员 ID；可按名字、spid 或球员 ID 搜索）：33 项属性、位置、惯用脚和逆足、花式技巧、攻防积极性、特性、俱乐部（转会）
   和 3D 外观（任意 3D 行的头部，例如另一张卡的脸；通用头部可改发型和发色、胡须、肤色、眼睛和体型，发色 0 = 金发；

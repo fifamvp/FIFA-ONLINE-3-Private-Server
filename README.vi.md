@@ -328,6 +328,11 @@ Item saya, Gudang bên dưới là tên màn hình trong game, được giữ ng
   phần thưởng đạt được vào Túi.
 - **Giải đủ đội** (issue #40): một mùa Liga có mọi CLB đủ đội hình trong giải của mình (Premier League
   20 CLB, 38 vòng; tối đa 24) thay vì 10. EP và EXP theo thứ hạng điều chỉnh theo số đội.
+- **CLB mà FO3 ID không có**: AC Milan, Genoa, Udinese, Bologna, Cagliari và Sampdoria trở lại game (bộ áo vẫn
+  còn trong file game; `tools/fo4_season.py install` thêm CLB với màu đọc từ bộ áo), kèm đội hình 26 LIVE đầy đủ
+  (`fetch` lấy danh sách, `collect` + `import` đọc chỉ số). Thẻ '17 của các cầu thủ này trước nằm ở đội tuyển
+  quốc gia nay về lại CLB. Serie A trong Liga có 19 CLB, màn chọn CLB cũng hiện. Cách làm: fetch, collect +
+  import, build, rồi install khi đã đóng game (hoặc Terapkan ke game trên trang quản trị).
 - **Cơ sở dữ liệu thẻ và CLB trên trang quản trị** (issue #38): tab Database sửa từng thẻ cầu thủ theo mùa
   (spid = mùa × 1.000.000 + player id; tìm theo tên, spid hoặc player id): 33 chỉ số, vị trí, chân thuận và
   chân không thuận, kỹ năng, tỷ lệ công/thủ, đặc điểm, CLB (chuyển nhượng) và ngoại hình 3D (đầu của bất kỳ

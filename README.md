@@ -334,6 +334,12 @@ Added, passing the tests but not yet checked in the client:
   screen shows when King of the Hill opens and what was reached goes to the Bag.
 - **Full Liga** (issue #40): a Liga season has every club of my league with a full squad (Premier
   League 20 clubs, 38 rounds; at most 24) instead of 10. EP and EXP by place are scaled to its size.
+- **Clubs FO3 ID lacked**: AC Milan, Genoa, Udinese, Bologna, Cagliari and Sampdoria are back in the game
+  (their kits were still in its files; `tools/fo4_season.py install` adds them with their colours read from
+  the kits), with their full 26 LIVE squads (`fetch` lists them, `collect` + `import` read the stats). FO3's
+  own '17 cards of their players, which sat on a national team, are at the club again. Liga's Serie A now
+  has 19 clubs; the club picker lists them too. To get it: fetch, collect + import, build, then install
+  with the game closed (or Terapkan ke game on the admin page).
 - **Card and club database on the admin page** (issue #38): the Database tab edits one card of a player
   per season (spid = season × 1,000,000 + player id; search by name, spid or player id): the 33
   attributes, positions, preferred and weak foot, skill moves, work rates, traits, club (a transfer) and

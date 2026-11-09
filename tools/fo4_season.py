@@ -52,8 +52,16 @@ NEW_PID = 700000  # first player id for players FO3 does not have (FO3's are bel
 with open(os.path.join(ROOT, "responses", "static_db_PLAYERGRADE.json"), encoding="utf-8") as _f:
     PLUS1 = json.load(_f)["1"]["boost"]["PLAYER_ALLATTRIBUTES_ALL"]  # FO3's +1 all-attribute boost (5)
 REST_OF_WORLD = (999998, 9998)  # FO3's (teamid, leagueid) for players of unlicensed clubs (11,000+ cards)
-FO3_CLUB = {131682: 44, 115845: 39, 115841: 46}  # FO4's new ids of clubs FO3 has: Lombardia FC = Inter,
-# Bergamo Calcio = Atalanta, SS Lazio = Lazio (Milano FC stays out: FO3 has no AC Milan)
+FO3_CLUB = {131682: 44, 115845: 39, 115841: 46, 131681: 47}  # FO4's new ids of clubs FO3 has: Lombardia FC =
+# Inter, Bergamo Calcio = Atalanta, SS Lazio = Lazio, Milano FC = AC Milan (an OPEN_CLUBS club)
+# Clubs the FO3 ID client lacks though data_5.big still has their kits (user: "Buka semua klub yang tadi
+# nya terblokir karena lisensi" + "Dan sesuaikan pemainnya kembali ke klub itu"): {teamid: (FO3 league,
+# fifaaddict search "league/team")}. fetch lists their 26 LIVE squads; build keeps FO4 cards there and
+# moves FO3's own '17 cards that sit on their national team (nationalteamid = that team) to the club of
+# their 2017/18 career; install adds the clubs to the client (engine_clubs, locale_db). Crests: the
+# admin page's Aset tab once a club has a full squad.
+OPEN_CLUBS = {47: (31, "italy-serie-a/milano-fc"), 110556: (31, "italy-serie-a/genoa"), 55: (31, "italy-serie-a/udinese"),
+              189: (31, "italy-serie-a/bologna"), 1842: (31, "italy-serie-a/cagliari"), 1837: (32, "italy-serie-b/sampdoria")}
 
 
 # --- window.__NUXT__ (a JS function call returning an object literal) -------------------------
@@ -266,9 +274,25 @@ def save_cards(cards):
     os.replace(tmp, CARDS)
 
 
+def club_rows(fetch):
+    """{uid: search row} of the 26 LIVE cards whose club is an OPEN_CLUBS one (fifaaddict's club
+    search also lists players who were there once)."""
+    rows = {}
+    for tid, (_, slug) in OPEN_CLUBS.items():
+        league, team = slug.split("/")
+        hits = search(fetch, "live", 40, 99, f"&league={league}&team={team}")
+        mine = {u: r for u, r in hits.items() if FO3_CLUB.get(int(r.get("team_id") or 0), int(r.get("team_id") or 0)) == tid
+                and int(r["year"]) == CLASSES["live"]}
+        print(f"club {tid} ({team}): {len(mine)} cards", flush=True)
+        rows.update(mine)
+    return rows
+
+
 def cmd_fetch(a):
     fetch = fetcher(a.cache)
     cards = load_cards()
+    for uid, row in club_rows(fetch).items():
+        cards.setdefault(uid, {"fo3traits": []}).update(row=row, season=CLASSES["live"])
     for cls, season in CLASSES.items():
         for uid, row in listing(fetch, cls, a.min_ovr).items():
             if int(row["year"]) == season:
@@ -411,7 +435,7 @@ def cmd_build(a):
         c.execute(f"DELETE FROM {t} WHERE spid / 1000000 IN ({','.join('?' * len(seasons))})", seasons)
     for t in NAME_TABLES:
         c.execute(f"DELETE FROM {t} WHERE playerid BETWEEN ? AND ?", (NEW_PID, NEW_PID + 99999))
-    clubs = {r[0] for r in c.execute("SELECT DISTINCT teamid FROM players")}  # the clubs FO3 has
+    clubs = {r[0] for r in c.execute("SELECT DISTINCT teamid FROM players")} | set(OPEN_CLUBS)  # the clubs FO3 has
     # FO3's players: birth date -> [(pid, full, short)], and each pid's newest card (its face)
     born, best = collections.defaultdict(list), {}
     names = {r[0]: (r[1], r[2]) for r in c.execute("SELECT playerid, full_eng, short_eng FROM nameseng")}
@@ -478,6 +502,7 @@ def cmd_build(a):
             for t in NAME_TABLES:
                 c.execute(f"INSERT OR REPLACE INTO {t} (playerid, full, short, full_eng, short_eng, jersey) VALUES (?,?,?,?,?,?)",
                           (pid, full, short, full, short, jersey))
+    moved = open_clubs_move(c)
     edited = apply_card_edits(c, seasons)
     sys.path.insert(0, ROOT)
     from http_config import POSOVR  # exactly the client's own +0 rating + PLUS1, as on FO3's cards
@@ -490,7 +515,40 @@ def cmd_build(a):
     json.dump(heads, open(HEADS, "w"))
     per = collections.Counter(card["season"] for card in cards.values())
     print(f"{len(cards)} cards ({', '.join(f'{SEASON_NAMES[s]} {n}' for s, n in sorted(per.items()))}): "
-          f"{found} players FO3 has, {new} new, {edited} edited on the admin page -> {FIFADB}")
+          f"{found} players FO3 has, {new} new, {moved} '17 cards back at their club, {edited} edited on the admin page -> {FIFADB}")
+
+
+def club_2017(stints):
+    """The club of a career [[teamid, joined, left (-1 = still), loan]] in 2017/18: the newest one
+    joined by 2017 and left in 2018 or later (else in 2017), or None."""
+    held = [x for x in stints if x[1] <= 2017 and (x[2] in (-1, None) or x[2] >= 2018)] or \
+           [x for x in stints if x[1] <= 2017 <= (x[2] if x[2] not in (-1, None) else 9999)]
+    return max(held, key=lambda x: x[1])[0] if held else None
+
+
+def open_clubs_move(c):
+    """FO3's '17 cards (seasons 0 and 88) on a national team whose player was at an OPEN_CLUBS club
+    in 2017/18 (tools/club_history.py's careers, else FO3's own) go to that club; their national team
+    stays as nationalteamid. Returns how many."""
+    import club_history
+    careers = {int(k): v for k, v in ((club_history.load() or {}).get("players") or {}).items()}
+    fo3 = collections.defaultdict(list)
+    for pid, team, joined, left, loan in c.execute("SELECT playerid, teamid, joinedyear, endyear, loan FROM playerhistory"):
+        fo3[pid].append([team, joined, left, loan])
+    moved = 0
+    for spid, pid in c.execute("SELECT spid, playerid FROM players WHERE leagueid = 78 AND nationalteamid = teamid "
+                               "AND (spid < 1000000 OR spid / 1000000 = 88)").fetchall():
+        club = club_2017(careers.get(pid) or fo3.get(pid) or [])
+        if club in OPEN_CLUBS:
+            c.execute("UPDATE players SET teamid = ?, leagueid = ? WHERE spid = ?", (club, OPEN_CLUBS[club][0], spid))
+            moved += 1
+    return moved
+
+
+def open_clubs_back(c):
+    """open_clubs_move undone: those cards back on their national team."""
+    c.execute(f"UPDATE players SET teamid = nationalteamid, leagueid = 78 WHERE teamid IN ({','.join(map(str, OPEN_CLUBS))}) "
+              "AND (spid < 1000000 OR spid / 1000000 = 88)")
 
 
 # The admin page's Database tab (issue #38) edits cards in gamedata/fifadb.sqlite and keeps each
@@ -1519,7 +1577,87 @@ def card_looks(t, fld, by):
     return n
 
 
-def engine_db(db, meta):
+def kit_colors(game, teamid, kind):
+    """(primary, secondary, tertiary) RGB of a kit (0 home, 1 away, 2 keeper) from its biggest
+    texture in data_5.big: the most common colour, then the next ones far enough from it."""
+    import struct, numpy as np, bigdir, photo_head
+    rx3 = photo_head.unchunk(bigdir.read(os.path.join(game, "data", "data_5.big"), f"data/sceneassets/kit/kit_{teamid}_{kind}_0.rx3"))
+    n = struct.unpack("<I", rx3[12:16])[0]
+    off = max((o for h, o, _, _ in (struct.unpack("<4I", rx3[16 + 16 * i:32 + 16 * i]) for i in range(n)) if h == photo_head.TEX),
+              key=lambda o: struct.unpack("<HH", rx3[o + 8:o + 12]))
+    w, h = struct.unpack("<HH", rx3[off + 8:off + 12])
+    size = struct.unpack("<4I", rx3[off + 16:off + 32])[2]
+    px = np.asarray(photo_head.dxt1_decode(rx3[off + 32:off + 32 + size], w, h)).reshape(-1, 3).astype(int)
+    _, inverse, counts = np.unique(px // 32, axis=0, return_inverse=True, return_counts=True)
+    picked = []
+    for k in np.argsort(-counts):
+        colour = tuple(int(v) for v in px[inverse.ravel() == k].mean(0))
+        if all(sum(abs(a - b) for a, b in zip(colour, q)) > 90 for q in picked):
+            picked.append(colour)
+        if len(picked) == 3:
+            break
+    return tuple((picked * 3)[:3])
+
+
+def engine_clubs(raws, names, meta, game):
+    """The OPEN_CLUBS clubs into the engine DB's teams, teamkits, leagueteamlinks and teamstadiumlinks
+    (raws edited in place): each a copy of the first club of its league with its own id, asset id
+    (its kit files), name and kit colours. Returns the clubs added."""
+    import eadb, club_history
+    tabs = {}
+    for name in ("teams", "teamkits", "leagueteamlinks", "teamstadiumlinks"):
+        m = re.search(r'<table name="%s" shortname="(\w+)".*?</table>' % name, meta, re.S)
+        fld = {n: (sn, int(lo)) for n, sn, lo in re.findall(r'<field name="(\w+)" shortname="(\w+)"[^>]*rangelow="(-?\d+)"', m.group())}
+        i = names.index(m.group(1).encode())
+        tabs[name] = (i, eadb.Table(raws[i]), fld)
+    get = lambda name, row, f: tabs[name][1].get(row, tabs[name][2][f][0]) + tabs[name][2][f][1]
+
+    def put(name, row, **kv):
+        t, fld = tabs[name][1], tabs[name][2]
+        for f, v in kv.items():
+            row = t.set(row, fld[f][0], v if isinstance(v, str) else v - fld[f][1])
+        return row
+
+    def add(name, row, key):
+        t = tabs[name][1]
+        t.rows = sorted(t.rows + [row], key=key)
+
+    teams = {get("teams", r, "teamid"): r for r in tabs["teams"][1].rows}
+    eng = club_history.ea_teamnames(game)
+    light = lambda c: 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2] > 140
+    added = []
+    for tid, (league, _) in OPEN_CLUBS.items():
+        if tid in teams:
+            continue
+        link = next(r for r in tabs["leagueteamlinks"][1].rows if get("leagueteamlinks", r, "leagueid") == league)
+        tpl = get("leagueteamlinks", link, "teamid")
+        kits = [kit_colors(game, tid, k) for k in range(3)]
+        add("teams", put("teams", teams[tpl], teamid=tid, assetid=tid, teamname=eng.get(str(tid), str(tid)), rivalteam=tpl,
+                         **{f"teamcolor{i + 1}{ch}": c[j] for i, c in enumerate((kits[0][0], kits[0][1], kits[1][0]))
+                            for j, ch in enumerate("rgb")}), key=lambda r: get("teams", r, "teamid"))
+        keys = [get("leagueteamlinks", r, "artificialkey") for r in tabs["leagueteamlinks"][1].rows]
+        add("leagueteamlinks", put("leagueteamlinks", link, teamid=tid, artificialkey=max(keys) + 1),
+            key=lambda r: get("leagueteamlinks", r, "artificialkey"))
+        stadium = next((r for r in tabs["teamstadiumlinks"][1].rows if get("teamstadiumlinks", r, "teamid") == tpl), None)
+        if stadium:
+            add("teamstadiumlinks", put("teamstadiumlinks", stadium, teamid=tid), key=lambda r: get("teamstadiumlinks", r, "teamid"))
+        kid = max(get("teamkits", r, "teamkitid") for r in tabs["teamkits"][1].rows)
+        for kind, (prim, sec, tert) in enumerate(kits):
+            row = next(r for r in tabs["teamkits"][1].rows if get("teamkits", r, "teamtechid") == tpl
+                       and get("teamkits", r, "teamkittypetechid") == kind)
+            text = (12, 12, 12) if light(prim) else (220, 220, 220)  # numbercolor 2 = black, 1 = white
+            row = put("teamkits", row, teamtechid=tid, teamkitid=kid + kind + 1, numbercolor=2 if light(prim) else 1,
+                      shortsnumbercolor=2 if light(prim) else 1,
+                      **{f"teamcolor{part}{ch}": c[j] for part, c in (("prim", prim), ("sec", sec), ("tert", tert)) for j, ch in enumerate("rgb")},
+                      **{f"jerseynamecolor{ch}": text[j] for j, ch in enumerate("rgb")})
+            add("teamkits", row, key=lambda r: (get("teamkits", r, "teamtechid"), get("teamkits", r, "teamkittypetechid")))
+        added.append(tid)
+    for i, t, _ in tabs.values():
+        raws[i] = t.raw()
+    return added
+
+
+def engine_db(db, meta, game=r"D:\FO3ID\32795"):
     """fifa_ng_db (EA DB, tools/re/eadb.py) with a players row for every new player. The 3D
     player (club creation's player view, matches) looks a card up there by spid, then by player
     id ('17 cards have only their player id's row); a player with neither crashed the client.
@@ -1546,6 +1684,7 @@ def engine_db(db, meta):
     looks = photo_heads(t, fld, by) + card_looks(t, fld, by)
     t.rows = [by[k] for k in sorted(by)]
     raws[i] = t.raw()
+    engine_clubs(raws, eadb.db_tables(db)[1], meta, game)
     out, pos = bytearray(db[:base]), 0  # table offsets, sizes and checksums (as tools/eatrax_song.py)
     for j, raw in enumerate(raws):
         struct.pack_into("<I", out, 0x1C + 8 * j, pos)
@@ -1564,9 +1703,10 @@ def locale_additions():
                          "WHERE playerid BETWEEN ? AND ?", (NEW_PID, NEW_PID + 99999)).fetchall()
 
 
-def locale_db(plain_db, names, trim=False):
-    """A <lang>.db with the new players' names; trim drops the names of players without a card
-    (when the packed DB would not fit its place)."""
+def locale_db(plain_db, names, trim=False, clubs=()):
+    """A <lang>.db with the new players' names and the OPEN_CLUBS clubs (clubs: [(teamid, name,
+    league)]); trim drops the names of players without a card (when the packed DB would not fit its
+    place)."""
     cards = None
     if trim:
         with closing(sqlite3.connect(FIFADB)) as c:
@@ -1574,6 +1714,7 @@ def locale_db(plain_db, names, trim=False):
 
     def edit(c):
         c.executemany("INSERT OR REPLACE INTO names (playerid, full, short, full_eng, short_eng, jersey) VALUES (?,?,?,?,?,?)", names)
+        c.executemany("INSERT OR REPLACE INTO team (teamid, teamname, leagueid) VALUES (?,?,?)", clubs)
         if cards:
             c.execute("CREATE TEMP TABLE keep (playerid INTEGER PRIMARY KEY)")
             c.executemany("INSERT INTO keep VALUES (?)", [(p,) for p in cards])
@@ -1647,9 +1788,13 @@ def cmd_install(a):
     data0, label, module = _originals(a.game)
     room = {n: size for n, off, size, usize in bigdir.entries(data0)}
     names = locale_additions()
+    import club_history
+    clubs = {loc: [(t, club_history.ea_teamnames(a.game, loc).get(str(t), str(t)), lg) for t, (lg, _) in OPEN_CLUBS.items()]
+             for loc in LOCALES}
     files, want = {}, {}
     for entry, make in [(FIFADB_ENTRY, lambda shipped, trim: client_db())] + [
-            (f"data/db2/{loc}.db.db2", lambda shipped, trim: locale_db(_plain(shipped), names, trim)) for loc in LOCALES]:
+            (f"data/db2/{loc}.db.db2", lambda shipped, trim, loc=loc: locale_db(_plain(shipped), names, trim, clubs[loc]))
+            for loc in LOCALES]:
         shipped = bigdir.read(data0, entry)  # inflated, encrypted
         for trim in (False, True):
             plain_db = make(shipped, trim)
@@ -1663,7 +1808,7 @@ def cmd_install(a):
               + (" (cardless names left out)" if trim else ""), flush=True)
         files[entry], want[entry] = (packed, usize), plain_db
     # the engine DB: its own slot if it still fits, else the space fifadb left free in its slot
-    ng, n_new, n_looks = engine_db(bigdir.read(data0, NG_ENTRY), bigdir.read(data0, NG_META).decode("utf-8", "replace"))
+    ng, n_new, n_looks = engine_db(bigdir.read(data0, NG_ENTRY), bigdir.read(data0, NG_META).decode("utf-8", "replace"), a.game)
     packed = refpack(ng)
     assert len(packed) < len(ng)  # stored or literal-only DB entries hang the boot (eatrax_song.py)
     at = {}
@@ -1726,6 +1871,7 @@ def cmd_restore(a):
     if os.path.isfile(os.path.join(BACKUP, "data_7.big")):  # the photo heads' files
         _original(os.path.join(a.game, "data", "data_7.big"))
     c = sqlite3.connect(FIFADB)
+    open_clubs_back(c)
     seasons = (*CLASSES.values(), WC18)
     for t in ("players", *PERM_TABLES):
         c.execute(f"DELETE FROM {t} WHERE spid / 1000000 IN ({','.join('?' * len(seasons))})", seasons)
@@ -1814,6 +1960,28 @@ def cmd_selftest(a=None):
         if new is not None:  # an unpatched client: the patched one parses and is patched
             assert module_with_match_seasons(new) is None and len(new) > len(gfx)
         print("Module.gfx getSeason patch ok" + (" (installed)" if new is None else ""))
+    assert club_2017([[52, 2013, 2017, 0], [47, 2017, 2020, 0]]) == 47 and club_2017([[45, 2010, 2017, 0]]) == 45
+    assert club_2017([[45, 2018, -1, 0]]) is None
+    game = r"D:\FO3ID\32795"
+    if os.path.exists(os.path.join(game, "data", "data_5.big")):  # the clubs into an engine DB, in memory
+        import bigdir, eadb
+        data0 = os.path.join(BACKUP, "data_0.big")
+        data0 = data0 if os.path.isfile(data0) else os.path.join(game, "data", "data_0.big")
+        db, meta = bigdir.read(data0, NG_ENTRY), bigdir.read(data0, NG_META).decode("utf-8", "replace")
+        assert kit_colors(game, 48, 0)[0][2] > 120  # Napoli's home kit is blue
+        _, names, raws = eadb.db_tables(db)
+        assert sorted(engine_clubs(raws, names, meta, game)) == sorted(OPEN_CLUBS)
+
+        def rows(name):
+            m = re.search(r'<table name="%s" shortname="(\w+)".*?</table>' % name, meta, re.S)
+            fld = {n: (sn, int(lo)) for n, sn, lo in re.findall(r'<field name="(\w+)" shortname="(\w+)"[^>]*rangelow="(-?\d+)"', m.group())}
+            t = eadb.Table(raws[names.index(m.group(1).encode())])
+            return [{n: t.get(r, sn) + lo if t.fields[sn][0] else t.get(r, sn) for n, (sn, lo) in fld.items()} for r in t.rows]
+        milan = next(r for r in rows("teams") if r["teamid"] == 47)
+        assert milan["assetid"] == 47 and milan["teamname"] == "Milan" and max(milan["teamcolor1r"], milan["teamcolor2r"]) > 150 > milan["teamcolor2b"], milan  # red and black
+        assert len([k for k in rows("teamkits") if k["teamtechid"] == 47]) == 3
+        assert any(r["teamid"] == 47 and r["leagueid"] == 31 for r in rows("leagueteamlinks"))
+        print("open clubs ok: engine rows, Milan red and black")
     print("fo4_season selftest ok")
 
 
