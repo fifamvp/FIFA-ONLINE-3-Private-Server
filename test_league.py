@@ -349,6 +349,14 @@ def main():
             assert all(t["summary"]["ovr"][k] <= v for k, v in ovr.items())
             raised, colored = raised + (t["summary"]["ovr"] != ovr), colored + bool(t["teamcolors"])
         assert raised >= 5 and colored >= 5, (raised, colored)  # of 11
+        # team colors count a player's former clubs as the client's clubhistory has them: his career
+        # in club_history.json where it has him (Pirlo: Milan, Juventus, NYCFC...), else FO3's table
+        kept_ch, hc.CLUB_HISTORY = hc.CLUB_HISTORY, os.path.join(tmp, "club_history.json")
+        json.dump({"players": {"7763": [[47, 2001, 2011, 0], [999, 2018, -1, 0]]}}, open(hc.CLUB_HISTORY, "w"))
+        hc.tc_static.cache_clear()
+        assert hc.tc_static()[1][7763] == {47, 999} and hc.tc_static()[1].get(158023) is not None  # Messi: FO3's own
+        hc.CLUB_HISTORY = kept_ch
+        hc.tc_static.cache_clear()
         fr = body(hc.ENDPOINTS["/ladder/friends/info"]("", b""))
         assert len(fr) == hc.VM_FRIENDS and set(fr[0]["ovr"]) == {"FW", "MF", "DF"} and len(fr[0]["elo"]) == hc.LADDER_COUNT
         # squad themes (user: "tambah variasi dalam pemilihan skuad ... meta, klub tertentu, negara tertentu,
@@ -1601,6 +1609,10 @@ def main():
         roster = {c for e in seasons for c in e["value"]}
         market = hc.market_spids()
         assert {s // 1000000 for s in market} <= roster, sorted({s // 1000000 for s in market} - roster)
+        # FO3's untradeable event cards are on the Market too (user: "session special tidak ada dimarket
+        # pack dan trading sepeti cafu"): Cafu's season 26 legend, his EL and CEL cards; 26 in the search
+        assert all(hc.on_market(s) for s in (26005003, 27005003, 31005003)) and 26 in roster
+        assert [e["season"] for e in seasons if e["value"] == [32]] == ["$TRANSFERMARKET_SEASON_32"]
         # season 0 = the engine cards the AI clubs of Liga / Cup play with ('17 badge, Messi 125): not a
         # Market season (user: "pemain ini harusnya tidak muncul di market karena khusus untuk main
         # cup/liga"); "default" is the client's own DEFAULT_SEASON_ID 88 ('17 cards), listed once
@@ -2156,7 +2168,8 @@ def main():
             modern = {c.spid // 1000000 for cs in hc.vm_card_pool.__wrapped__().values() for c in cs}
             assert modern > classic and (300 in modern) == (300 in hc.ADDED_SEASONS and gen_teams._current_season() == 300)
             assert {s // 1000000 for s in hc.market_spids.__wrapped__()} >= sold
-            assert json.loads(hc.roster_seasons(raw))["seasons"] == json.loads(raw)["seasons"]  # no own season here
+            got, base = json.loads(hc.roster_seasons(raw))["seasons"], json.loads(raw)["seasons"]
+            assert got[:len(base)] == base and {v for e in got[len(base):] for v in e["value"]} <= set(hc.card_seasons())  # no own season here
         finally:
             gen_teams.WORLD_FILE, gen_teams.CURRENT_SEASON, gen_teams.WORLD = kept_world, kept_season, kept_running
         # King of the Hill's region set (issue #36): Indonesia, Singapore / Malaysia, Thailand, Vietnam

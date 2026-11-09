@@ -999,15 +999,18 @@ def price_formula(ovr):
 
 @functools.lru_cache(maxsize=None)
 def market_spids():
-    """Every tradeable card (Market, packs, trades): each one the client's own Market search can
-    show (TransferUtil: permid.transferable = 1 and a namesind row; season 0 = engine cards) plus
-    each one fifaaddict lists. fifaaddict alone left out 6,599 cards, 4,313 of them '17 (user:
-    "jangan sampai ada pemain yang tidak ada di pack, trade, dan market"); prices come from the
-    rating either way (card_price). In the classic world none of the added seasons (user: "Jika
-    classic tidak ada session tambahan di pack market trading"): only the admin page gives them."""
+    """Every tradeable card (Market, packs, trades): every card with a name (namesind; season 0 =
+    engine cards) of any season, plus each one fifaaddict lists. fifaaddict alone left out 6,599
+    cards, 4,313 of them '17 (user: "jangan sampai ada pemain yang tidak ada di pack, trade, dan
+    market"); FO3's untradeable event cards (permid.transferable = 0: Cafu's legends, season 26)
+    came in later (user: "session special tidak ada dimarket pack dan trading sepeti cafu"):
+    fo4_season's install marks them transferable in the client too, which its Market search needs
+    (TransferUtil.searchInLocalDatabase). Prices come from the rating either way (card_price). In
+    the classic world none of the added seasons (user: "Jika classic tidak ada session tambahan di
+    pack market trading"): only the admin page gives them."""
     with closing(_db()) as c:
-        own = {s for (s,) in c.execute("""SELECT p.spid FROM players p JOIN permid m ON m.spid = p.spid
-            AND m.transferable = 1 WHERE p.spid >= 1000000 AND p.playerid IN (SELECT playerid FROM namesind)""")}
+        own = {s for (s,) in c.execute("""SELECT spid FROM players
+            WHERE spid >= 1000000 AND playerid IN (SELECT playerid FROM namesind)""")}
     added = ADDED_SEASONS if gen_teams.WORLD == "classic" else ()
     return frozenset(s for s in own | set(fa_prices()) if s // 1000000 not in added)
 
@@ -1529,14 +1532,26 @@ def ep_teamcolor(query, body):
     return _json({"teamColors": tc_colors(), "teamColorSpecials": specials})
 
 
+CLUB_HISTORY = os.path.join(HERE, "gamedata", "club_history.json")  # tools/club_history.py's careers
+
+
 @functools.lru_cache(maxsize=None)
 def tc_static():
-    """({spid: (playerid, teamid, nationality)}, {playerid: {former club ids}}) from fifadb."""
+    """({spid: (playerid, teamid, nationality)}, {playerid: {former club ids}}) from fifadb. A
+    player's former clubs are his career in CLUB_HISTORY where it has him (up to the running season,
+    PR #39), else FO3's own playerhistory (up to 2017): what install puts in the client's
+    clubhistory, which TeamColorController counts on the squad screen (user: "apakah karir klub
+    sudah mempengaruhi team color?": the server still counted FO3's)."""
     with closing(_db()) as c:
         cards = {s: (p, t, n) for s, p, t, n in c.execute("SELECT spid, playerid, teamid, nationality FROM players")}
         hist = {}
         for p, t in c.execute("SELECT playerid, teamid FROM playerhistory"):
             hist.setdefault(p, set()).add(t)
+    try:
+        with open(CLUB_HISTORY, encoding="utf-8") as f:
+            hist.update({int(p): {r[0] for r in rs} for p, rs in (json.load(f).get("players") or {}).items()})
+    except (OSError, ValueError, AttributeError):
+        pass
     return cards, hist
 
 
@@ -9784,14 +9799,29 @@ def from_file(path):
         return ("application/json", roster_seasons(data) if path == "/static/roster" else data)
 
 
+@functools.lru_cache(maxsize=None)
+def card_seasons():
+    """The seasons of FO3's own cards in fifadb (not season 0, not the added ones)."""
+    with closing(_db()) as c:
+        return sorted(s for (s,) in c.execute("SELECT DISTINCT spid / 1000000 FROM players WHERE spid >= 1000000")
+                      if s not in ADDED_SEASONS)
+
+
 def roster_seasons(raw):
     """/static/roster with the seasons of the client's Market search (TransferUtil): the classic
-    world leaves the added ones out, the modern one adds the admin page's own seasons."""
+    world leaves the added ones out, the modern one adds the admin page's own seasons. FO3's own
+    seasons the list lacks (26: Kahn, Cafu, Rivaldo...; 32, 38, 41, 57) are added, by their
+    TRANSFERMARKET_SEASON_<n> name where the language pack has one, else the number."""
     d = json.loads(raw)
+    frame = {k: v for k, v in d["seasons"][0].items() if k in ("open", "close")}
+    listed = {v for s in d["seasons"] for v in s["value"]}
+    src = asset_path(LANG_PACK)
+    names = client_json(src, LANG_ENTRY) if src else {}
+    d["seasons"] += [{"season": f"$TRANSFERMARKET_SEASON_{s}" if f"TRANSFERMARKET_SEASON_{s}" in names else str(s),
+                      "value": [s], **frame} for s in card_seasons() if s not in listed]
     if gen_teams.WORLD == "classic":
         d["seasons"] = [s for s in d["seasons"] if not set(s["value"]) & ADDED_SEASONS]
     else:
-        frame = {k: v for k, v in d["seasons"][0].items() if k in ("open", "close")}
         d["seasons"] += [{"season": label, "value": list(codes), **frame}
                          for label, codes, _ in FA_SEASONS if codes[0] in CUSTOM_SEASON_CODES]
     return json.dumps(d).encode()

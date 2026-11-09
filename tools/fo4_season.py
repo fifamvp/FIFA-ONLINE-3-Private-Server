@@ -1519,6 +1519,9 @@ def client_db():
         for t in PERM_TABLES:
             if t != "permid":
                 c.execute(f"DELETE FROM {t}")
+        # every card on the Market (http_config.market_spids): the client's Market search lists
+        # only transferable ones (FO3's event cards were not: Cafu's legends)
+        c.execute("UPDATE permid SET transferable = 1 WHERE spid >= 1000000")
         club_history.apply(c)
         c.execute("UPDATE players SET historyopen = 1 WHERE playerid IN (SELECT playerid FROM playerhistory)")
     return _sqlite(open(FIFADB, "rb").read(), edit)
@@ -1955,8 +1958,10 @@ def cmd_selftest(a=None):
             got = dict(c.execute("SELECT spid, historyopen FROM players WHERE spid IN (88158023, 22158023)"))
             wrong = c.execute("SELECT COUNT(*) FROM players WHERE historyopen != (playerid IN (SELECT playerid FROM playerhistory))").fetchone()[0]
             perms = {t: c.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] > 0 for t in PERM_TABLES}
+            locked = c.execute("SELECT COUNT(*) FROM permid WHERE spid >= 1000000 AND transferable != 1").fetchone()[0]
         os.remove(tmp)
         assert got == {88158023: 1, 22158023: 1} and wrong == 0, (got, wrong)
+        assert locked == 0, locked  # every card can be found on the client's Market (Cafu's event cards)
         assert perms == {t: t == "permid" for t in PERM_TABLES}, perms
     px = [(0, 230, 100, 255)] * 8 + [(60, 64, 70, 255)] * 7 + [(0, 0, 0, 0)]
     b = _bc3(px)

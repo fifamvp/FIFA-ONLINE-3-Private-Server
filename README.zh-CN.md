@@ -324,6 +324,8 @@
 - **所有可交易的球员卡**都出现在 Market、交易和卡包中：只要 fifaaddict 收录或游戏自身标记为可交易
   （`permid.transferable`），就算在内。只用 fifaaddict 会漏掉 6,599 张卡（其中 4,313 张是 '17）；
   Market 现有 44,703 张。新的 **Semua Pemain**（所有球员）卡包可以开出其中任何一张。
+  原本不可交易的 FO3 活动卡也算在内（卡福、卡恩、里瓦尔多等第 26 赛季传奇，EL / CEL 传奇……）：install 会在
+  客户端把所有卡标为可交易（Market 搜索只列出这类卡），Market 的赛季列表也补上缺少的赛季（26、32、38、41、57）。
 - **Tim > Klub > Informasi tim**（issue #9）显示成立日期、主场球场和"建造年份 / 容量"
   （`coach.career`、`coach.stadium`、来自客户端球场表的 `GET /stadium/<id>`），以及球员面板（切换器、
   3D 球员、价格、强化等级），没有球场数据时它一直是空的。客户端数据库中的名称按 UTF-8 读取

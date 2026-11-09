@@ -412,6 +412,9 @@ Item saya, Gudang bên dưới là tên màn hình trong game, được giữ ng
   fifaaddict có nó hoặc chính game đánh dấu nó giao dịch được (`permid.transferable`). Chỉ dùng fifaaddict
   sẽ thiếu 6.599 thẻ (4.313 thẻ trong đó là '17); Market giờ có 44.703 thẻ. Gói mới **Semua Pemain** (tất
   cả cầu thủ) có thể cho bất kỳ thẻ nào trong số đó.
+  Thẻ sự kiện FO3 vốn không giao dịch được cũng tính (Cafu, Kahn, Rivaldo và các huyền thoại mùa 26 khác,
+  huyền thoại EL / CEL...): install đánh dấu mọi thẻ trong client là giao dịch được (tìm kiếm Market chỉ hiện
+  những thẻ đó), và danh sách mùa của Market có thêm các mùa còn thiếu (26, 32, 38, 41, 57).
 - **Tim > Klub > Informasi tim** (issue #9) hiện ngày thành lập, sân nhà và "năm xây / sức chứa"
   (`coach.career`, `coach.stadium`, `GET /stadium/<id>` từ bảng sân của client), và bảng cầu thủ (nút
   chuyển, cầu thủ 3D, giá, cấp thẻ), vốn trống khi không có sân. Tên trong cơ sở dữ liệu của client được

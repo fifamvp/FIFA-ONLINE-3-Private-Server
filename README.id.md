@@ -450,7 +450,10 @@ Sudah ditambahkan dan lolos tes, tapi belum dicek di client:
   kalau fifaaddict mencantumkannya atau game sendiri menandainya bisa diperdagangkan
   (`permid.transferable`). fifaaddict saja melewatkan 6.599 kartu (4.313 di antaranya '17);
   Market sekarang berisi 44.703. Pak baru **Semua Pemain** bisa memberi kartu mana saja di
-  antaranya.
+  antaranya. Kartu event FO3 yang tadinya tidak bisa diperdagangkan juga ikut (Cafu, Kahn, Rivaldo
+  dan legenda musim 26 lainnya, legenda EL / CEL...): install menandai semua kartu bisa
+  diperdagangkan di client, karena pencarian Market hanya menampilkan yang begitu, dan daftar musim
+  Market mendapat musim yang belum ada (26, 32, 38, 41, 57).
 - **Tim > Klub > Informasi tim** (issue #9) menampilkan tanggal mulai, stadion kandang, dan
   "tahun dibangun / kapasitas" (`coach.career`, `coach.stadium`, `GET /stadium/<id>` dari tabel
   stadion client), dan panel pemainnya (stepper, pemain 3D, harga, grade), yang tetap kosong tanpa
