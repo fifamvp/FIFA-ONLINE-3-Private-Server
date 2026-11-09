@@ -392,6 +392,11 @@ Sudah ditambahkan dan lolos tes, tapi belum dicek di client:
   hidung, dan mulut, donornya kepala scan yang paling mirip warna kulit dan rambutnya (warna dan bentuk, dari
   ikonnya sendiri), tanpa janggut. Tombol di tab Database melakukannya untuk semua pemain generik di klub yang
   punya ikon (pemain baru tanpa ikon FO3 dilewati).
+  Warna kulit dibandingkan foto dengan foto (ikon donor sendiri) dan dengan tekstur wajah yang akan
+  dibawanya (foto yang terang terbaca lebih terang dari tekstur: dulu pemain berkulit gelap dapat donor
+  berkulit terang); pemain Asia Timur/Tenggara dapat donor dari negara-negara itu, yang lain sebaliknya
+  (mata donor tetap dipakai); gigi saat senyum diganti bibir tertutup donor. *Buat ulang semua wajah 3D
+  dari ikon* membuat ulang wajah yang sudah ada.
 - **Dunia FO3 klasik** (issue #38): *Dunia game* di tab Database memilih Modern (klub AI, pilihan klub
   dan pak This Season memakai kartu 26 LIVE, seperti sebelumnya; musim buatan juga muncul di pencarian
   Market) atau Klasik FO3: semua klub memakai skuad 2017 asli FO3, This Season = '17, dan musim tambahan

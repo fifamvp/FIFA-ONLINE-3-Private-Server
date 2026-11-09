@@ -359,6 +359,10 @@ Item saya, Gudang bên dưới là tên màn hình trong game, được giữ ng
   miệng, người cho là đầu quét gần nhất về màu da và tóc (màu và kiểu, từ ảnh của chính người cho), không râu.
   Nút trong tab Database làm việc này cho mọi cầu thủ mặt chung trong CLB có ảnh (cầu thủ mới không có ảnh FO3
   bị bỏ qua).
+  Màu da được so ảnh với ảnh (ảnh của chính người cho) và với texture mặt sẽ mang theo (ảnh sáng đọc ra sáng hơn
+  texture: trước đây cầu thủ da sẫm nhận người cho da sáng); cầu thủ Đông Á/Đông Nam Á nhận người cho từ các
+  nước đó, còn lại từ các nước khác (mắt của người cho được giữ); răng khi cười được thay bằng môi khép của người
+  cho. *Tạo lại mọi mặt 3D từ ảnh đại diện* làm lại các mặt đã có.
 - **Thế giới FO3 cổ điển** (issue #38): *Dunia game* trong tab Database chọn Hiện đại (CLB AI, phần chọn CLB
   và gói This Season dùng thẻ 26 LIVE, như trước; mùa tự tạo cũng hiện trong tìm kiếm Market) hoặc Cổ điển FO3:
   mọi CLB dùng đội hình 2017 gốc của FO3, This Season = '17, còn các mùa thêm vào (25 / 26 LIVE, WC18, mùa tự tạo)

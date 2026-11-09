@@ -484,7 +484,7 @@
       <p class="lead" id="dbLead"></p>
       <div class="row"><button class="b primary" id="dbApply" data-i18n="db_apply"></button><span class="muted" id="dbState"></span></div>
       <p class="muted" data-i18n="phd_club_lead"></p>
-      <div class="row"><button class="b" id="phdClub" data-i18n="phd_club"></button><span class="muted" id="phdClubMsg" role="status"></span></div>
+      <div class="row"><button class="b" id="phdClub" data-i18n="phd_club"></button><button class="b" id="phdRedo" data-i18n="phd_redo"></button><span class="muted" id="phdClubMsg" role="status"></span></div>
       <h3 data-i18n="world_title"></h3>
       <p class="lead" data-i18n="world_lead"></p>
       <div class="row">
@@ -1939,14 +1939,16 @@ $("#phdIcon").addEventListener("click", () => phdDo(async () => {
   $("#phdFile").value = ""; phdDraw();
   if (!r.points) throw new Error(t("phd_icon_nopts"));
 }, t("phd_icon_done")));
-$("#phdClub").addEventListener("click", async () => {
+$$("#phdClub, #phdRedo").forEach(b => b.addEventListener("click", async () => {
+  const redo = b.id === "phdRedo";
+  if (redo && !confirm(t("phd_redo_confirm"))) return;
   $("#phdClubMsg").textContent = t("phd_club_busy");
   try {
-    const r = await api("photo_head_club", {});
+    const r = await api("photo_head_club", {redo});
     $("#phdClubMsg").textContent = t("phd_club_done", r.made.length, r.skipped.length)
       + (r.skipped.length ? " " + r.skipped.map(([, n, why]) => `${n} (${t(why)})`).join(", ") : "");
   } catch (err) { $("#phdClubMsg").textContent = t("failed") + err.message; }
-});
+}));
 $("#phdUndo").addEventListener("click", () => { phdPts.pop(); phdDraw(); });
 $("#phdReset").addEventListener("click", () => { phdPts = []; phdDraw(); });
 $("#phdDonor").addEventListener("input", e => {  // scanned heads by player name (as the Face field's search)

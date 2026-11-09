@@ -44,6 +44,7 @@ FILES = {  # file name pattern -> the archive the client ships it in
     "data/sceneassets/hairlod/hairlod_{}_0_0.rx3": "data_6.big",
 }
 FACE_FILE = next(iter(FILES))
+FLAT = 24  # the blur (texture pixels) of the photo's shading that make() swaps for the donor's
 # The points clicked on the photo, in order (the subject's right = the photo's left), and where
 # they sit on a face texture (UV pixels).
 POINTS = ("eye_r", "eye_l", "nose", "mouth_r", "mouth_l", "chin", "forehead", "temple_r", "temple_l", "jaw_r", "jaw_l")
@@ -60,6 +61,10 @@ MODEL = os.path.join(ROOT, "gamedata", "yunet", "face_detection_yunet_2023mar.on
 SHAPE = {"chin": (0, 1.7), "forehead": (0, -.85), "temple_r": (-.85, -.33), "temple_l": (.85, -.33),
          "jaw_r": (-.72, 1.22), "jaw_l": (.72, 1.22)}
 DONORS = os.path.join(DIR, "donors.json")  # the scanned heads' looks (donor_looks), made once
+# nations whose players' eyes stand apart from the rest's (a donor's eyes stay on the face): China PR,
+# Indonesia, Japan, Korea DPR, Korea Republic, Malaysia, Thailand, Vietnam (the scanned heads' East
+# and Southeast Asian nations); a donor comes from the same side as the player
+ASIAN = frozenset((155, 160, 163, 166, 167, 173, 188, 192))
 
 
 def unchunk(b):
@@ -196,11 +201,19 @@ def make(photo, points, donor_face, uv=None):
     holes = np.zeros(photo.shape[:2], np.uint8)  # (their whites would show around the donor's eyelids)
     for p in src[:2]:
         cv2.ellipse(holes, (int(p[0]), int(p[1])), (max(1, int(.3 * d)), max(1, int(.15 * d))), 0, 0, 360, 255, -1)
-    lips = np.zeros_like(holes)  # and a smile's teeth (the donor's lips are closed)
+    # and a smile's teeth, gums and tongue (the donor's lips are closed): in the mouth, much paler
+    # than the face's skin and not in shadow (a light face's teeth are no brighter than it), or much brighter
+    lips = np.zeros_like(holes)
     mouth, half = (src[3] + src[4]) / 2, float(np.linalg.norm(src[4] - src[3])) / 2
-    cv2.ellipse(lips, (int(mouth[0]), int(mouth[1])), (max(1, int(.9 * half)), max(1, int(.14 * d))), 0, 0, 360, 255, -1)
+    cv2.ellipse(lips, (int(mouth[0]), int(mouth[1] + .05 * d)), (max(1, int(half)), max(1, int(.3 * d))), 0, 0, 360, 255, -1)
     hsv = cv2.cvtColor(photo, cv2.COLOR_RGB2HSV)
-    holes |= lips & (((hsv[..., 2] > 170) & (hsv[..., 1] < 90)) * np.uint8(255))
+    fm = face_mask(photo.shape, src) > 0
+    skin = np.median(hsv[fm], 0) if fm.any() else (0, 90, 170)
+    teeth = (hsv[..., 1] < .6 * skin[1]) & (hsv[..., 2] > .8 * skin[2])
+    open_ = lips & ((teeth | (hsv[..., 2] > skin[2] + 45)) * np.uint8(255))
+    holes |= open_
+    # an open mouth (4% of it: a grin 6%, closed lips under 2%) takes the donor's closed one (below)
+    smile = np.count_nonzero(open_) > .04 * np.count_nonzero(lips)
     photo = cv2.inpaint(photo, cv2.dilate(holes, np.ones((3, 3), np.uint8)), max(1, int(.1 * d)), cv2.INPAINT_TELEA)
     warped = np.zeros_like(base)
     mask = np.zeros(base.shape[:2], np.uint8)
@@ -226,13 +239,16 @@ def make(photo, points, donor_face, uv=None):
     # the photo's details over the donor's light: its broad shading (a lamp from one side) swapped
     # for the donor's, both smoothed inside the face only
     inside = (mask > 0).astype(np.float32)[..., None]
-    smooth = lambda img: cv2.GaussianBlur(img * inside, (0, 0), 24) / np.maximum(cv2.GaussianBlur(inside, (0, 0), 24)[..., None], 1e-3)
+    smooth = lambda img: cv2.GaussianBlur(img * inside, (0, 0), FLAT) / np.maximum(cv2.GaussianBlur(inside, (0, 0), FLAT)[..., None], 1e-3)
     flat = warped.astype(np.float32) - smooth(warped.astype(np.float32)) + smooth(base.astype(np.float32))
     warped = np.uint8(np.clip(np.rint(flat), 0, 255))
     out = cv2.seamlessClone(warped, base, mask, (x + w // 2, y + h // 2), cv2.NORMAL_CLONE)
     eyes = np.zeros(mask.shape, np.float32)  # the donor's eyelids stay on its eye sockets, faded in
     for k in ("eye_r", "eye_l"):
         cv2.ellipse(eyes, tuple(int(v) for v in uv[k]), (35, 19), 0, 0, 360, 1.0, -1)
+    if smile:  # and its lips under a smile's (a patched open mouth read as a pink tongue)
+        m = (np.float32(uv["mouth_r"]) + np.float32(uv["mouth_l"])) / 2
+        cv2.ellipse(eyes, (int(m[0]), int(m[1]) + 8), (int(abs(uv["mouth_l"][0] - uv["mouth_r"][0]) * .75), 30), 0, 0, 360, 1.0, -1)
     eyes = cv2.GaussianBlur(eyes, (0, 0), 6)[..., None]
     return np.uint8(np.rint(out * (1 - eyes) + base * eyes))
 
@@ -274,9 +290,23 @@ def landmarks(photo):
     return [[round(float(np.clip(pts[n][0], 0, w)), 1), round(float(np.clip(pts[n][1], 0, h)), 1)] for n in POINTS]
 
 
+def face_mask(shape, points):
+    """1 on the skin of a face with its POINTS: inside its outline (temples, forehead, jaw, chin),
+    but the eyes and the mouth."""
+    import cv2
+    import numpy as np
+    p = {n: np.float64(v) for n, v in zip(POINTS, points)}
+    d = float(np.linalg.norm(p["eye_l"] - p["eye_r"]))
+    m = np.zeros(shape[:2], np.uint8)
+    cv2.fillConvexPoly(m, np.int32([p[k] for k in ("temple_r", "forehead", "temple_l", "jaw_l", "chin", "jaw_r")]), 1)
+    for c, ax in ((p["eye_r"], (.45, .3)), (p["eye_l"], (.45, .3)), ((p["mouth_r"] + p["mouth_l"]) / 2, (.6, .3))):
+        cv2.ellipse(m, (int(c[0]), int(c[1])), (max(1, int(ax[0] * d)), max(1, int(ax[1] * d))), 0, 0, 360, 0, -1)
+    return m
+
+
 def look(img, points):
-    """[skin L, a, b, beard, hair] of a face (RGB array) with its POINTS: the skin's colour (Lab of
-    the cheeks and forehead), how much darker the chin and jaw are, and the hair: [L, a, b] above
+    """[skin L, a, b, beard, hair] of a face (RGB array) with its POINTS: the skin's colour (median
+    Lab of face_mask), how much darker the chin and jaw are, and the hair: [L, a, b] above
     the hairline, how high its outline stands over the eyes and how much of the sides beside the
     jaw it covers (long hair), from a picture's cut-out outline (None without hair to see). A
     photo and a face texture (at UV) measure the same places."""
@@ -296,8 +326,12 @@ def look(img, points):
             cv2.circle(m, (int(np.clip(x, 0, w - 1)), int(np.clip(y, 0, h - 1))), r, 1, -1)
         m = (m > 0) & fg
         return lab[m].mean(0) if m.any() else None
-    skin = at((p["eye_r"] + p["jaw_r"]) / 2, (p["eye_l"] + p["jaw_l"]) / 2, (p["forehead"] + eyes) / 2)
     mouth = (p["mouth_r"] + p["mouth_l"]) / 2
+    # the skin: the median of the face (a lamp's shine on a forehead or a cheek made a brown face
+    # read light at three spots)
+    face = (face_mask((h, w), points) > 0) & fg
+    skin = np.median(lab[face], 0) if face.sum() >= 20 else at((p["eye_r"] + p["jaw_r"]) / 2, (p["eye_l"] + p["jaw_l"]) / 2,
+                                                                 (p["forehead"] + eyes) / 2)
     chin = at((mouth + p["chin"]) / 2, (p["mouth_r"] + p["jaw_r"]) / 2, (p["mouth_l"] + p["jaw_l"]) / 2)
     hair = at(*(eyes + (p["forehead"] - eyes) * f for f in (1.5, 1.8, 2.1)))  # above the hairline
     if skin is None:
@@ -318,16 +352,17 @@ def look(img, points):
 
 
 def donor_looks(game, rows, pictures=lambda pid: None):
-    """{headassetid: [engine row, *look]} of the scanned heads whose files are all in the client;
-    rows = {headassetid: an engine row wearing it}. The skin and beard are its face texture's (what
-    shows around the photo); the hair its player's picture's (pictures(player id) = its file, or
-    None), as the hair's colour is in its hair files (as masks) and on photos measured the same way
-    as the player's (None without one). Kept in DONORS (made once: ~2,000 textures and pictures)."""
+    """{headassetid: [engine row, *look, picture skin]} of the scanned heads whose files are all in
+    the client; rows = {headassetid: an engine row wearing it}. The skin and beard are its face
+    texture's (what shows around the photo); the hair and the picture skin ([L, a, b]) its player's
+    picture's (pictures(player id) = its file, or None), measured the same way as the player's photo
+    (None without one): the hair's colour is in its hair files as masks only, and a lit picture reads
+    lighter than a face texture. Kept in DONORS (made once: ~2,000 textures and pictures)."""
     import numpy as np
     try:
         with open(DONORS) as f:
             kept = json.load(f)
-        if kept.get("version") == 4:
+        if kept.get("version") == 6:
             return {int(k): v for k, v in kept["heads"].items()}
     except (OSError, ValueError, AttributeError):
         pass
@@ -348,26 +383,41 @@ def donor_looks(game, rows, pictures=lambda pid: None):
                 pts = landmarks(pic)
             except Exception:  # not a picture
                 pass
-        out[head][-1] = look(pic, pts)[4] if pts else None
+        seen = look(pic, pts) if pts else None
+        out[head][-1:] = [seen[4], seen[:3]] if seen else [None, None]
     os.makedirs(DIR, exist_ok=True)
     with open(DONORS, "w") as f:
-        json.dump({"version": 4, "heads": {str(k): v for k, v in out.items()}}, f)
+        json.dump({"version": 6, "heads": {str(k): v for k, v in out.items()}}, f)
     return out
 
 
-def suggest(photo_look, donors):
+def suggest(photo_look, donors, nation=None):
     """The donor head (headassetid) whose look is closest to a photo's: skin colour first, then
     hair, and a clean-shaven one (a photo's own beard comes with it; a donor's would show around it,
-    and a small picture's lighting hides how much beard it has)."""
+    and a small picture's lighting hides how much beard it has). The skin is half the donor's
+    picture's against the photo (both lit pictures) and half its face texture's (what the face
+    gets) against the texture skin a picture like the photo's comes with (fit over the donors with
+    both): a dark-skinned player got a light texture when photo and texture were compared, and a
+    brightly lit brown face reads as light as a tanned white one on its picture alone. With the
+    player's nation, a donor (its nation at [7]) on the other side of ASIAN comes last: its eyes stay."""
+    import numpy as np
     want = photo_look[4]
+    pic = lambda v: v[6] if len(v) > 6 else None
+    other = lambda v: nation is not None and len(v) > 7 and v[7] is not None and (nation in ASIAN) != (v[7] in ASIAN)
+    both = [(pic(v), v[1:4]) for v in donors.values() if pic(v)]
+    tex = photo_look[:3]
+    if len(both) >= 8:
+        fit = np.linalg.lstsq(np.c_[[p for p, _ in both], np.ones(len(both))], np.float64([t for _, t in both]), rcond=None)[0]
+        tex = list(np.r_[photo_look[:3], 1] @ fit)
+    dist = lambda x, y: ((x[0] - y[0]) ** 2 + 2 * (x[1] - y[1]) ** 2 + 2 * (x[2] - y[2]) ** 2) ** .5
 
     def far(v):
-        L, a, b, beard, hair = v[1:]
-        return ((L - photo_look[0]) ** 2 + 2 * (a - photo_look[1]) ** 2 + 2 * (b - photo_look[2]) ** 2) ** .5 \
+        beard, hair = v[4:6]
+        return (dist(pic(v), photo_look) if pic(v) else dist(v[1:4], tex)) / 2 + dist(v[1:4], tex) / 2 \
             + (0 if want is None else 40 if hair is None  # the hair: lightness and colour (red, blond)
                else 0.6 * abs(hair[0] - want[0]) + 1.5 * (abs(hair[1] - want[1]) + abs(hair[2] - want[2]))
                + 15 * abs(hair[3] - want[3]) + 30 * abs(hair[4] - want[4])) \
-            + 0.6 * max(0, beard - 12)
+            + 1.5 * max(0, beard - 8) + 1000 * other(v)  # 8: the donors' median (a stubbled one showed on a clean face)
     return min(donors, key=lambda k: far(donors[k]))
 
 

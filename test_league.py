@@ -3076,6 +3076,10 @@ def main():
                 assert len(look) == 5 and look[0] > 150 and abs(look[3]) < 3  # light skin, no beard
                 donors = {1: [messi, look[0] + 20, *look[1:]], 2: [40158023, *look[:3], 60, look[4]], 3: [158023, *look]}
                 assert ph.suggest(look, donors) == 3 and ph.suggest(look, {k: donors[k] for k in (1, 2)}) == 1  # no beard before a closer skin
+                # skin against a donor's own picture (a lit picture reads lighter than a texture), and a
+                # donor from the same side of ASIAN as the player (its eyes stay)
+                pics = {1: [messi, look[0] - 40, *look[1:], look[:3], 14], 3: [158023, *look, [look[0] + 60, *look[1:3]], 167]}
+                assert ph.suggest(look, pics) == 1 and ph.suggest(look, pics, 167) == 3 and ph.suggest(look, pics, 34) == 1
                 for m in mods:
                     m.DONORS = os.path.join(d, "donors.json")
                 dl = ph.donor_looks(hc.GAME, {get(messi, "headassetid", shipped): messi})
@@ -3101,6 +3105,8 @@ def main():
                             assert [m[0] for m in r["made"]] == [generic[0] % 1000000] and r["made"][0][2] == "Lionel Messi"
                             assert {s[2] for s in r["skipped"]} <= {"phd_skip_icon", "phd_skip_face"}
                             assert A("photo_head_club")["made"] == []  # once
+                            again = A("photo_head_club", redo=True)["made"]  # made again on request
+                            assert [m[0] for m in again] == [generic[0] % 1000000] and len(ph.load()) == 1
                             A("photo_head_delete", pid=generic[0] % 1000000)
                     finally:
                         admin.photo_donors = real_donors

@@ -370,6 +370,11 @@ Added, passing the tests but not yet checked in the client:
   the eyes, nose and mouth, the donor is the scanned head closest in skin colour and hair (colour and shape,
   from its own picture), clean-shaven. The Database tab's button does it for every generic player of the club
   who has a picture (new players without an FO3 picture are left out).
+  The skin is compared picture to picture (the donor's own) and with the face texture it would bring
+  (a lit picture reads lighter than a texture: dark-skinned players got light donors before); East and
+  Southeast Asian players get donors of those nations and the rest the others (the donor's eyes stay);
+  a smile's teeth give way to the donor's closed lips. *Make every 3D face again* remakes the existing
+  ones from their pictures.
 - **Classic FO3 world** (issue #38): the Database tab's *Dunia game* picks Modern (the AI clubs, the
   club picker and This Season packs use 26 LIVE cards, as before; own seasons also show in the Market
   search) or Classic FO3: every club plays FO3's own 2017 squad, This Season is '17, and the added seasons
