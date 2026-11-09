@@ -337,6 +337,9 @@ Gudang 등은 게임에 표시되는 화면 이름이라, 게임에서 찾기 �
   능력치는 fifaaddict의 fo3staff 목록을 따르고, 등급·가격·계약은 서버 자체 값이며(Garena 데이터는 사라짐), EP 가격은
   경제 탭의 선수 가격을 따름. 클라이언트에는 스태프 7명의 사진만 있으며, `python -I tools/fa_faces.py --staffs`가 나머지를 fifaaddict에서 추가함.
   가상 감독도 경기에서 당신처럼 팀 컬러 보너스를 받고, 레벨에 맞는 스태프를 가짐(12레벨마다 역할 칸 하나 추가).
+  이슈 #41: *Rekrut*에서 스태프를 한 번에 10명까지 영입; 관리자 페이지 Pak & Bag 탭에서 아무 스태프(0.5-5성)를 계정에
+  추가/삭제; 팩 그림은 `assets/externalAssets/shop/<icon>.png`(170×120: broall, brofw, bromf, brodf, brogk (Basic), silall (Pro), goldall (Premium), position (Technical Director), medical (Premium Medical), staffpack_2103 (free pack)), 없으면 스태프 사진;
+  팩 11-13 이름이 없는 언어 팩(태국어)에는 이름이 채워짐.
 - **랜덤 박스 열림**(Kotak Platinum 등, issue #12): 박스 화면은 `staticdata.availables`에서 보상 목록을
   가져오는데, 이게 없어서 모든 박스가 "Gunakan"(사용)에서 실패했음.
 - **새 카드는 Tim Cadangan으로**: 팩, 트레이드, Market, Bag, 관리자 페이지에서 얻은 카드는 Skuad의 Tim

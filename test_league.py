@@ -1328,6 +1328,7 @@ def main():
         assert list(xt) == [str(g) for g in range(1, 11)] and xt["10"]["gradeupto"] == 0
         assert all(xt[str(g + 1)]["totalexp"] == xt[str(g)]["totalexp"] + xt[str(g)]["gradeupto"] for g in range(1, 10))
         assert sorted(v["location"] for v in sdb["study"].values()) == [f"LOCATION_NAME_0{i}" for i in range(1, 7)]
+        assert sdb["config"]["max_staff_open_count"] == 10  # issue #41: Rekrut's count list goes to 10
         client_stats = set(("strength stamina acceleration sprintspeed jumping agility balance slidingtackle dribbling ballcontrol "
                             "marking standingtackle crossing shortpassing finishing longpassing shotpower headingaccuracy longshots "
                             "volleys curve freekickaccuracy penalties interceptions positioning vision reactions aggression gkkicking "
@@ -1356,7 +1357,14 @@ def main():
         assert all(r["ep"] > 0 and r["staffpack_name"].startswith("STAFFPACK_NAME_") for r in rows if r["recruittype"] == "normal")
         assert rows[-1]["eventlist"] == {"login": {"count": 1, "targetcount": 1, "enable": True},
                                          "pcmatch": {"count": 0, "targetcount": 3, "enable": False}}
+        own, hc.OWN_ASSETS = hc.OWN_ASSETS, tmp  # no pack picture: a staff's; one of its own (issue #41) beats it
         assert hc.asset_path(f"externalAssets/shop/{rows[0]['icon']}.png") == hc.asset_path("externalAssets/staffs/2103.png")
+        art = os.path.join(tmp, "externalAssets", "shop", "broall.png")
+        os.makedirs(os.path.dirname(art), exist_ok=True)
+        open(art, "wb").write(b"png")
+        assert rows[0]["icon"] == "broall" and hc.asset_path("externalAssets/shop/broall.png") == art
+        hc.OWN_ASSETS = own
+        assert hc.asset_path("externalAssets/shop/nosuchpack.png") is None
         ep0 = ep()
         got = call("/staff/recruit/3", {"feetype": "ep"})  # Basic FW: appended last, EP taken
         assert got["result"] and ep() == ep0 - hc.staff_ep(50_000) and [s["position"] for s in staffs()] == ["FW"]
@@ -2569,6 +2577,12 @@ def main():
             fixes, hc.LANG_FIXES = hc.LANG_FIXES, {**hc.LANG_FIXES, b'"x": "y"': b'"x": "z"'}
             assert hc.language_pack(src) == out and os.stat(out).st_mtime_ns != built  # new fixes: built again
             hc.LANG_FIXES = fixes
+            # another language's pack (issue #41: Thai lacked Rekrut packs 11-13): its own keys stay,
+            # LANG_ADD's and then the Indonesian pack's fill the gaps
+            tha = json.loads(hc.lang_missing('﻿{"STAFFPACK_NAME_11": "x"}'.encode()).decode("utf-8-sig"))
+            assert tha["STAFFPACK_NAME_11"] == "x" and tha["STAFFPACK_NAME_12"] == hc.LANG_ADD["STAFFPACK_NAME_12"]
+            assert tha["COMMON_TIME_DAY"] == orig["COMMON_TIME_DAY"] and len(tha) == len(orig)
+            assert hc.lang_missing(hc.client_big(src, hc.LANG_ENTRY)) == hc.client_big(src, hc.LANG_ENTRY)  # nothing missing
             junk = os.path.join(tmp, "junk.big")
             with open(junk, "wb") as f:
                 f.write(b"<html>404</html>")  # a damaged pack: served as it is, never no reply
@@ -2595,6 +2609,16 @@ def main():
         assert body(hc.route(f"/bag/{gift}/unpack")("", b"{}"))["result"]
         assert ep() == ep1 + 777 and items()[0]["remains"] == 13 and len(team()["players"]) == n0 + 1
         assert refused("bag_send", title="kosong") and refused("bag_send", pack=2)
+        # staff on the account (issue #41): added at a grade, refused past STAFF_MAX, removed out of its frame
+        n = len(A("staff")["staffs"])
+        A("staff_add", stfid=9027, grade=8, count=2)
+        got = A("staff")["staffs"][-2:]
+        assert len(A("staff")["staffs"]) == n + 2 and [(s["stfid"], s["grade"], s["position"]) for s in got] == [(9027, 8, "PREMIUM")] * 2
+        assert refused("staff_add", stfid=1, grade=2) and refused("staff_add", stfid=9027, count=hc.STAFF_MAX - n - 1)
+        assert any(c["stfid"] == 4901 and c["helper"] for c in A("staff")["catalogue"])
+        assert body(hc.route(f"/staff/appoint/{got[0]['id']}")("", b'{"slot": 4}'))["result"]
+        A("staff_remove", id=got[0]["id"]); A("staff_remove", id=got[1]["id"])
+        assert len(A("staff")["staffs"]) == n and got[0]["id"] not in hc.staff_slots(team()) and refused("staff_remove", id="nope")
         tbl = [{"ep": 1234}, {"pack": pid, "count": 2}]
         assert A("daily_set", table=tbl)["table"] == tbl == hc.daily_table()
         assert refused("daily_set", table=[{"ep": 0}]) and refused("daily_set", table=[{"pack": 2}]) and refused("daily_set", table=[])

@@ -387,6 +387,9 @@ Item saya, Gudang bên dưới là tên màn hình trong game, được giữ ng
   Client chỉ có ảnh của 7 staff; `python -I tools/fa_faces.py --staffs` thêm ảnh còn lại từ fifaaddict.
   Quản lý ảo thi đấu với team color của họ như bạn, và có staff theo cấp (thêm một ô vai trò mỗi 12
   cấp).
+  Issue #41: *Rekrut* mua tối đa 10 staff một lần; tab Pak & Bag trên trang quản trị thêm bất kỳ staff nào
+  (0.5-5 sao) vào tài khoản và xóa được; ảnh gói đặt ở `assets/externalAssets/shop/<icon>.png` (170×120: broall, brofw, bromf, brodf, brogk (Basic), silall (Pro), goldall (Premium), position (Technical Director), medical (Premium Medical), staffpack_2103 (free pack)),
+  không có thì ô hiện ảnh staff; gói ngôn ngữ thiếu tên gói 11-13 (tiếng Thái) sẽ được bổ sung.
 - **Mở được hộp ngẫu nhiên** (Kotak Platinum và các hộp khác, issue #12): màn hình hộp liệt kê phần thưởng
   từ `staticdata.availables`, trước đây bị thiếu, nên mọi hộp đều lỗi khi bấm "Gunakan" (dùng).
 - **Thẻ mới vào Tim Cadangan**: thẻ từ gói, giao dịch, Market, Bag hoặc trang quản trị hiện "-" ở cột Tim

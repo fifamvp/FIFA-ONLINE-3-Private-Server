@@ -39,7 +39,7 @@ PAGE = os.path.join(HERE, "admin", "index.html")
 POS_NAMES = "GK SW RWB RB RCB CB LCB LB LWB RDM CDM LDM RM RCM CM LCM LM RAM CAM LAM RF CF LF RW RS ST LS LW".split()
 API = {}
 READ_ONLY = {"summary", "players", "search", "packs", "daily", "playtime", "ladder_rewards", "match_rewards", "vm_chat", "missions", "prematch", "economy", "log", "shop",
-             "notice", "assets", "card_meta", "card", "card_edits", "crest", "seasons", "mod_export", "teamcolors", "koth", "koth_rewards", "world", "vm_gen", "face", "heads", "photo_head"}  # the rest must be POST + header
+             "notice", "assets", "card_meta", "card", "card_edits", "crest", "seasons", "mod_export", "teamcolors", "koth", "koth_rewards", "world", "vm_gen", "face", "heads", "photo_head", "staff"}  # the rest must be POST + header
 hc = None  # the http_config module, set by start() (or by tests)
 
 
@@ -269,6 +269,55 @@ def bag_send(p):
     e = hc.bag_add(st, str(p.get("title") or "Hadiah admin")[:60], items, players_, msg="Hadiah dari admin server.")
     hc._save(st)
     return {"id": e["_id"]}
+
+
+# Staff on the account (issue #41: "Can we add staff to account using admin panel?"): Tim >
+# Manajemen Staff shows them from the next /coach/me (any screen change).
+@functools.lru_cache(maxsize=None)
+def staff_names():
+    """{stfid: the client's name (STAFF_NAME_<stfid>)}."""
+    src = hc.asset_path(hc.LANG_PACK)
+    s = hc.client_json(src, hc.LANG_ENTRY) if src else {}
+    return {i: s.get(f"STAFF_NAME_{i}") or f"Staff {i}" for i in hc.STAFF_CATALOGUE}
+
+
+@api("staff")
+def staff(p):
+    _, staffs = hc.my_staff(hc._state())
+    names = staff_names()
+    return {"max": hc.STAFF_MAX,
+            "catalogue": [{"stfid": i, "name": names[i], "position": c[0], "helper": not c[1]} for i, c in hc.STAFF_CATALOGUE.items()],
+            "staffs": [{"id": s["_id"], "stfid": s["stfid"], "name": names.get(s["stfid"], s["stfid"]),
+                        "position": hc.STAFF_CATALOGUE[s["stfid"]][0], "grade": s["grade"], "life": s["life"],
+                        "status": s.get("status")} for s in staffs]}
+
+
+@api("staff_add")
+def staff_add(p):
+    st = hc._state(); _, staffs = hc.my_staff(st)
+    stfid = as_int(p.get("stfid"), 1, 10 ** 6, ("st_staff",))
+    if stfid not in hc.STAFF_CATALOGUE:
+        raise AdminError("e_unknown_staff")
+    grade = as_int(p.get("grade") or 1, 1, hc.STAFF_MAX_GRADE, ("grade",))
+    count = as_int(p.get("count") or 1, 1, hc.STAFF_MAX, ("count",))
+    if len(staffs) + count > hc.STAFF_MAX:
+        raise AdminError("e_staff_full", hc.STAFF_MAX - len(staffs))
+    staffs.extend(hc.staff_make(stfid, grade) for _ in range(count))
+    hc._save(st)
+    return {"count": len(staffs)}
+
+
+@api("staff_remove")
+def staff_remove(p):
+    """Out of the account; out of its role frame first when appointed."""
+    st = hc._state(); team_, staffs = hc.my_staff(st)
+    s = hc.staff_find(staffs, str(p.get("id") or ""))
+    if s is None:
+        raise AdminError("e_no_staff")
+    team_["staffslots"] = [None if x == s["_id"] else x for x in hc.staff_slots(team_)]
+    staffs.remove(s)
+    hc._save(st)
+    return {"count": len(staffs)}
 
 
 @api("daily")
@@ -2125,6 +2174,7 @@ I18N = {
         phd_icon='Ambil dari ikon', phd_icon_done='Foto, 11 titik dan donor diisi dari ikon pemain. Periksa titiknya (klik dekat sebuah titik untuk menggesernya), lalu Buat wajah 3D.', phd_icon_nopts='wajah tidak ditemukan di ikon: klik titiknya sendiri', e_ph_icon='tidak ada ikon pemain {0} di cache maupun di fifaaddict.com', phd_club='Buat wajah 3D dari ikon untuk pemain generik di klub', phd_club_lead='Wajah 3D otomatis: setiap pemain klub yang masih berwajah generik dan punya ikon di cache (foto FO3; tab Aset mengunduh yang belum ada) mendapat wajah 3D dari ikonnya. Titik wajah dicari detektor YuNet, donor dipilih menurut warna kulit dan rambut. Pertama kali sekitar satu menit (semua kepala scan dibaca sekali). Hasil tiap pemain bisa diperiksa dan diganti di dialog kartu; lalu Terapkan ke game.', phd_club_busy='Membuat wajah 3D…', phd_club_done='{0} wajah 3D dibuat, {1} dilewati.', phd_skip_icon='tanpa ikon', phd_skip_face='wajah tidak ditemukan',
         world_title='Dunia game', world_lead='Modern: klub AI, pilihan klub dan pak This Season memakai kartu 26 LIVE (jika terpasang). Klasik FO3: semua klub memakai skuad 2017 asli FO3, manajer virtual hanya memakai musim asli FO3, dan musim tambahan (25 LIVE, 26 LIVE, WC18, musim buatan) tidak ada di pak, Market maupun Tukar: hanya bisa diberikan lewat halaman admin (Tambah pemain, Bag). Klub dan koleksi pemainmu tidak berubah. Berlaku setelah server dimulai ulang (play.bat).', world_label='Mode', world_modern='Modern (26 LIVE)', world_classic='Klasik FO3 (2017)', world_saved='Dunia game disimpan.', world_restart='Server masih berjalan dengan mode sebelumnya: jalankan play.bat agar pilihan ini berlaku.', e_world='mode dunia tidak dikenal',
         vm_title='Manajer virtual', vm_lead='Sekitar 2.000 manajer virtual (lawan Rank dan King of the Hill, klub AI, Market) tetap sama setiap kali game dan server dijalankan. Hanya tombol Generate ulang di sini yang membuat kerumunan baru: nama, level, klub, skuad, gaya main, rating Rank, region dan klub AI berganti, langsung tanpa restart (layar game yang sudah terbuka diperbarui saat dibuka lagi). Id mereka tetap, jadi teman, klub dan riwayatmu tidak rusak, tapi orang di baliknya berubah. Kembalikan ke awal memunculkan lagi kerumunan pertama.', vm_regen='Generate ulang', vm_reset='Kembalikan ke awal', vm_gen_now='Generasi {0} ({1} manajer sekarang).', vm_confirm='Buat kerumunan manajer virtual yang baru? Nama, klub dan skuad mereka semua langsung berganti.', vm_regen_done='Kerumunan baru dipakai sekarang.', vm_reset_done='Kerumunan pertama dipakai lagi.',
+        st_title='Staff', st_lead='Staff di akun: {0} dari {1}. Staff baru tampil di Tim > Manajemen Staff saat layar berganti.', st_staff='Staff', st_grade='Bintang', st_life='Kontrak', st_status='Status', st_add='Tambah staff', st_added='{0} × {1} ditambahkan.', st_removed='{0} dihapus.', st_remove='Hapus', st_confirm='Hapus staff {0} dari akun?', st_none='Belum ada staff.', st_helper='pembantu', st_appointed='Bertugas', st_studying='Pembinaan', e_unknown_staff='staff tidak dikenal', e_staff_full='staff penuh: sisa tempat {0}', e_no_staff='staff tidak ada',
     ),
     "en": dict(
         ep_balance="EP balance", language="Language", menu="Admin menu",
@@ -2217,6 +2267,7 @@ I18N = {
         phd_icon='Take from the picture', phd_icon_done="Photo, 11 points and donor filled in from the player's picture. Check the points (click near a point to move it), then Make 3D face.", phd_icon_nopts='no face found in the picture: click the points yourself', e_ph_icon='no picture of player {0} in the cache or on fifaaddict.com', phd_club="Make 3D faces from pictures for the club's generic players", phd_club_lead="Automatic 3D faces: every club player who still has a generic face and a picture in the cache (FO3's; the Aset tab downloads missing ones) gets a 3D face from his picture. The YuNet detector finds the face's points, the donor is picked by skin and hair colour. The first time takes about a minute (every scanned head is read once). Each player's result can be checked and changed in the card dialog; then Apply to the game.", phd_club_busy='Making 3D faces…', phd_club_done='{0} 3D faces made, {1} left out.', phd_skip_icon='no picture', phd_skip_face='no face found',
         world_title='Game world', world_lead="Modern: the AI clubs, the club picker and This Season packs use 26 LIVE cards (when installed). Classic FO3: every club plays FO3's own 2017 squad, the virtual managers use FO3's own seasons only, and the added seasons (25 LIVE, 26 LIVE, WC18, own seasons) are in no pack, Market or trade: only the admin page gives them (Add players, Bag). Your club and collection stay as they are. Takes effect after the server restarts (play.bat).", world_label='Mode', world_modern='Modern (26 LIVE)', world_classic='Classic FO3 (2017)', world_saved='Game world saved.', world_restart='The server still runs the previous mode: run play.bat to apply this choice.', e_world='unknown world mode',
         vm_title='Virtual managers', vm_lead='About 2,000 virtual managers (Rank and King of the Hill opponents, AI clubs, the Market) stay the same every time the game and the server start. Only the Generate again button here makes a new crowd: names, levels, clubs, squads, playing styles, Rank ratings, regions and AI clubs change at once, no restart (a game screen that is already open updates when it opens again). Their ids stay, so your friends, club and history keep working, but the people behind them change. Back to the first crowd brings the first one back.', vm_regen='Generate again', vm_reset='Back to the first crowd', vm_gen_now='Generation {0} ({1} managers now).', vm_confirm='Make a new crowd of virtual managers? All their names, clubs and squads change at once.', vm_regen_done='The new crowd is in use now.', vm_reset_done='The first crowd is in use again.',
+        st_title='Staff', st_lead='Staff on the account: {0} of {1}. New staff show in Tim > Manajemen Staff once the screen changes.', st_staff='Staff', st_grade='Stars', st_life='Contract', st_status='Status', st_add='Add staff', st_added='{0} × {1} added.', st_removed='{0} removed.', st_remove='Remove', st_confirm='Remove staff {0} from the account?', st_none='No staff yet.', st_helper='helper', st_appointed='Appointed', st_studying='Studying', e_unknown_staff='unknown staff', e_staff_full='staff full: room for {0}', e_no_staff='no such staff',
     ),
     "zh": dict(
         lang_name="简体中文", locale="zh-CN",
@@ -2310,6 +2361,7 @@ I18N = {
         phd_icon='从头像获取', phd_icon_done='已从球员头像填入照片、11 个点和供体。请检查这些点（点击某个点附近即可移动它），然后点“制作 3D 脸”。', phd_icon_nopts='头像中未找到脸：请自己点击这些点', e_ph_icon='缓存和 fifaaddict.com 都没有球员 {0} 的头像', phd_club='为俱乐部中通用脸的球员用头像制作 3D 脸', phd_club_lead='自动 3D 脸：俱乐部中仍是通用脸、且缓存中有头像（FO3 的；“图片”页可下载缺失的）的每名球员，都会用其头像得到 3D 脸。YuNet 检测器找出脸部的点，按肤色和发色选择供体。第一次约需一分钟（所有扫描头读取一次）。每名球员的结果可在球员卡窗口中检查和更改；然后应用到游戏。', phd_club_busy='正在制作 3D 脸…', phd_club_done='已制作 {0} 张 3D 脸，跳过 {1} 名。', phd_skip_icon='没有头像', phd_skip_face='未找到脸',
         world_title='游戏世界', world_lead='现代：AI 俱乐部、俱乐部选择和 This Season 卡包使用 26 LIVE 卡（已安装时）。经典 FO3：所有俱乐部使用 FO3 原版 2017 阵容，虚拟经理只使用 FO3 原有赛季，新增赛季（25 LIVE、26 LIVE、WC18、自建赛季）不会出现在卡包、市场或交易中：只能通过管理后台发放（添加球员、Bag）。你的俱乐部和收藏不变。服务器重启后生效（play.bat）。', world_label='模式', world_modern='现代（26 LIVE）', world_classic='经典 FO3（2017）', world_saved='游戏世界已保存。', world_restart='服务器仍在运行之前的模式：运行 play.bat 使此选择生效。', e_world='未知的世界模式',
         vm_title='虚拟经理', vm_lead='约 2,000 名虚拟经理（Rank 和 King of the Hill 的对手、AI 俱乐部、市场）每次启动游戏和服务器都保持不变。只有这里的“重新生成”按钮会创建一批新人：名字、等级、俱乐部、阵容、打法、Rank 积分、地区和 AI 俱乐部立即改变，无需重启（已打开的游戏界面重新打开后更新）。他们的 ID 不变，所以你的好友、俱乐部和记录不会出错，但背后的人换了。“恢复初始”会找回第一批。', vm_regen='重新生成', vm_reset='恢复初始', vm_gen_now='第 {0} 代（现有 {1} 名经理）。', vm_confirm='生成一批新的虚拟经理？他们的名字、俱乐部和阵容会立即全部改变。', vm_regen_done='新的一批已启用。', vm_reset_done='已重新启用第一批。',
+        st_title='职员', st_lead='账号上的职员：{0} / {1}。新职员在画面切换后显示于 Tim > Manajemen Staff。', st_staff='职员', st_grade='星级', st_life='合同', st_status='状态', st_add='添加职员', st_added='已添加 {0} × {1}。', st_removed='已删除 {0}。', st_remove='删除', st_confirm='从账号删除职员 {0}？', st_none='还没有职员。', st_helper='助手', st_appointed='在岗', st_studying='培训中', e_unknown_staff='未知的职员', e_staff_full='职员已满：还能放 {0} 个', e_no_staff='没有这个职员',
     ),
     "th": dict(
         lang_name="ไทย", locale="th-TH",
@@ -2403,6 +2455,7 @@ I18N = {
         phd_icon='ดึงจากรูปนักเตะ', phd_icon_done='ใส่รูป 11 จุด และผู้ให้จากรูปของนักเตะแล้ว ตรวจจุด (คลิกใกล้จุดเพื่อย้าย) แล้วกดสร้างใบหน้า 3D', phd_icon_nopts='ไม่พบใบหน้าในรูป: คลิกจุดเอง', e_ph_icon='ไม่มีรูปของนักเตะ {0} ทั้งในแคชและบน fifaaddict.com', phd_club='สร้างใบหน้า 3D จากรูปให้นักเตะใบหน้าทั่วไปในสโมสร', phd_club_lead='ใบหน้า 3D อัตโนมัติ: นักเตะในสโมสรทุกคนที่ยังใช้ใบหน้าทั่วไปและมีรูปในแคช (รูป FO3 แท็บรูปภาพดาวน์โหลดรูปที่ขาด) จะได้ใบหน้า 3D จากรูปของเขา ตัวตรวจจับ YuNet หาจุดบนใบหน้า และเลือกผู้ให้ตามสีผิวและสีผม ครั้งแรกใช้เวลาราวหนึ่งนาที (อ่านศีรษะสแกนทั้งหมดหนึ่งครั้ง) ตรวจและเปลี่ยนผลของแต่ละคนได้ในหน้าต่างการ์ด แล้วกดใช้กับเกม', phd_club_busy='กำลังสร้างใบหน้า 3D…', phd_club_done='สร้างใบหน้า 3D แล้ว {0} คน ข้าม {1} คน', phd_skip_icon='ไม่มีรูป', phd_skip_face='ไม่พบใบหน้า',
         world_title='โลกของเกม', world_lead='โมเดิร์น: สโมสร AI การเลือกสโมสร และแพ็ก This Season ใช้การ์ด 26 LIVE (เมื่อติดตั้งแล้ว) คลาสสิก FO3: ทุกสโมสรใช้สกวอด 2017 ดั้งเดิมของ FO3 ผู้จัดการเสมือนใช้เฉพาะซีซันดั้งเดิมของ FO3 และซีซันที่เพิ่มมา (25 LIVE, 26 LIVE, WC18, ซีซันที่สร้างเอง) จะไม่มีในแพ็ก ตลาด หรือการเทรด: ให้ได้ผ่านหน้าแอดมินเท่านั้น (เพิ่มนักเตะ, Bag) สโมสรและคอลเลกชันของคุณไม่เปลี่ยน มีผลหลังรีสตาร์ตเซิร์ฟเวอร์ (play.bat)', world_label='โหมด', world_modern='โมเดิร์น (26 LIVE)', world_classic='คลาสสิก FO3 (2017)', world_saved='บันทึกโลกของเกมแล้ว', world_restart='เซิร์ฟเวอร์ยังใช้โหมดเดิมอยู่: เปิด play.bat เพื่อใช้ตัวเลือกนี้', e_world='ไม่รู้จักโหมดโลก',
         vm_title='ผู้จัดการเสมือน', vm_lead='ผู้จัดการเสมือนราว 2,000 คน (คู่แข่ง Rank และ King of the Hill สโมสร AI ตลาด) คงเดิมทุกครั้งที่เปิดเกมและเซิร์ฟเวอร์ มีเพียงปุ่ม สร้างใหม่ ตรงนี้ที่สร้างกลุ่มใหม่: ชื่อ เลเวล สโมสร สกวอด สไตล์การเล่น เรตติ้ง Rank ภูมิภาค และสโมสร AI เปลี่ยนทันที ไม่ต้องรีสตาร์ต (หน้าจอเกมที่เปิดอยู่จะอัปเดตเมื่อเปิดใหม่) ไอดีคงเดิม เพื่อน สโมสร และประวัติของคุณจึงยังใช้ได้ แต่คนเบื้องหลังเปลี่ยนไป กลับเป็นชุดแรก จะได้กลุ่มแรกคืนมา', vm_regen='สร้างใหม่', vm_reset='กลับเป็นชุดแรก', vm_gen_now='รุ่นที่ {0} (ตอนนี้ {1} คน)', vm_confirm='สร้างผู้จัดการเสมือนกลุ่มใหม่? ชื่อ สโมสร และสกวอดของทุกคนจะเปลี่ยนทันที', vm_regen_done='ใช้กลุ่มใหม่แล้ว', vm_reset_done='ใช้กลุ่มแรกอีกครั้งแล้ว',
+        st_title='สตาฟ', st_lead='สตาฟในบัญชี: {0} จาก {1} สตาฟใหม่จะแสดงใน Tim > Manajemen Staff เมื่อเปลี่ยนหน้าจอ', st_staff='สตาฟ', st_grade='ดาว', st_life='สัญญา', st_status='สถานะ', st_add='เพิ่มสตาฟ', st_added='เพิ่ม {0} × {1} แล้ว', st_removed='ลบ {0} แล้ว', st_remove='ลบ', st_confirm='ลบสตาฟ {0} ออกจากบัญชี?', st_none='ยังไม่มีสตาฟ', st_helper='ผู้ช่วย', st_appointed='ประจำตำแหน่ง', st_studying='กำลังฝึก', e_unknown_staff='ไม่รู้จักสตาฟนี้', e_staff_full='สตาฟเต็ม: เหลือที่ {0}', e_no_staff='ไม่มีสตาฟนี้',
     ),
     "vi": dict(
         lang_name="Tiếng Việt", locale="vi-VN",
@@ -2496,6 +2549,7 @@ I18N = {
         phd_icon='Lấy từ ảnh cầu thủ', phd_icon_done='Đã điền ảnh, 11 điểm và người cho từ ảnh của cầu thủ. Hãy kiểm tra các điểm (bấm gần một điểm để dời nó), rồi Tạo mặt 3D.', phd_icon_nopts='không tìm thấy khuôn mặt trong ảnh: hãy tự bấm các điểm', e_ph_icon='không có ảnh cầu thủ {0} trong bộ nhớ đệm lẫn trên fifaaddict.com', phd_club='Tạo mặt 3D từ ảnh cho các cầu thủ mặt chung trong CLB', phd_club_lead='Mặt 3D tự động: mọi cầu thủ trong CLB vẫn dùng mặt chung và có ảnh trong bộ nhớ đệm (ảnh FO3; tab Hình ảnh tải các ảnh còn thiếu) sẽ có mặt 3D từ ảnh của mình. Bộ dò YuNet tìm các điểm trên mặt, người cho được chọn theo màu da và tóc. Lần đầu mất khoảng một phút (đọc mọi đầu quét một lần). Kết quả của từng cầu thủ có thể kiểm tra và đổi trong hộp thoại thẻ; rồi Áp dụng vào game.', phd_club_busy='Đang tạo mặt 3D…', phd_club_done='Đã tạo {0} mặt 3D, bỏ qua {1}.', phd_skip_icon='không có ảnh', phd_skip_face='không tìm thấy mặt',
         world_title='Thế giới game', world_lead='Hiện đại: các CLB AI, phần chọn CLB và gói This Season dùng thẻ 26 LIVE (khi đã cài). Cổ điển FO3: mọi CLB dùng đội hình 2017 gốc của FO3, các quản lý ảo chỉ dùng mùa gốc của FO3, còn các mùa thêm vào (25 LIVE, 26 LIVE, WC18, mùa tự tạo) không có trong gói, Market hay giao dịch: chỉ trang quản trị mới trao được (Thêm cầu thủ, Bag). CLB và bộ sưu tập của bạn giữ nguyên. Có hiệu lực sau khi khởi động lại server (play.bat).', world_label='Chế độ', world_modern='Hiện đại (26 LIVE)', world_classic='Cổ điển FO3 (2017)', world_saved='Đã lưu thế giới game.', world_restart='Server vẫn chạy chế độ cũ: chạy play.bat để áp dụng lựa chọn này.', e_world='chế độ thế giới không xác định',
         vm_title='Quản lý ảo', vm_lead='Khoảng 2.000 quản lý ảo (đối thủ Rank và King of the Hill, CLB AI, Market) giữ nguyên mỗi lần chạy game và server. Chỉ nút Tạo lại ở đây mới tạo ra nhóm mới: tên, cấp, CLB, đội hình, lối chơi, điểm Rank, khu vực và CLB AI đổi ngay, không cần khởi động lại (màn hình game đang mở sẽ cập nhật khi mở lại). ID của họ giữ nguyên nên bạn bè, CLB và lịch sử của bạn vẫn dùng được, nhưng người đứng sau thì khác. Về nhóm đầu tiên sẽ đưa nhóm ban đầu trở lại.', vm_regen='Tạo lại', vm_reset='Về nhóm đầu tiên', vm_gen_now='Thế hệ {0} (hiện có {1} quản lý).', vm_confirm='Tạo nhóm quản lý ảo mới? Tên, CLB và đội hình của tất cả sẽ đổi ngay.', vm_regen_done='Đang dùng nhóm mới.', vm_reset_done='Đang dùng lại nhóm đầu tiên.',
+        st_title='Nhân viên', st_lead='Nhân viên trong tài khoản: {0} / {1}. Nhân viên mới hiện ở Tim > Manajemen Staff khi đổi màn hình.', st_staff='Nhân viên', st_grade='Sao', st_life='Hợp đồng', st_status='Trạng thái', st_add='Thêm nhân viên', st_added='Đã thêm {0} × {1}.', st_removed='Đã xóa {0}.', st_remove='Xóa', st_confirm='Xóa nhân viên {0} khỏi tài khoản?', st_none='Chưa có nhân viên.', st_helper='trợ lý', st_appointed='Đang làm việc', st_studying='Đang đào tạo', e_unknown_staff='nhân viên không xác định', e_staff_full='đã đủ nhân viên: còn {0} chỗ', e_no_staff='không có nhân viên này',
     ),
     "ko": dict(
         lang_name="한국어", locale="ko-KR",
@@ -2589,6 +2643,7 @@ I18N = {
         phd_icon='선수 사진에서 가져오기', phd_icon_done='선수 사진에서 사진, 11개 점, 기증자를 채웠습니다. 점을 확인하고(점 근처를 클릭하면 옮겨짐) 3D 얼굴 만들기를 누르세요.', phd_icon_nopts='사진에서 얼굴을 찾지 못했습니다: 점을 직접 클릭하세요', e_ph_icon='캐시와 fifaaddict.com 어디에도 선수 {0}의 사진이 없습니다', phd_club='클럽의 일반 얼굴 선수에게 사진으로 3D 얼굴 만들기', phd_club_lead='자동 3D 얼굴: 아직 일반 얼굴이고 캐시에 사진(FO3 사진; 이미지 탭이 없는 사진을 받음)이 있는 클럽 선수마다 그 사진으로 3D 얼굴을 만듭니다. YuNet 검출기가 얼굴의 점을 찾고, 피부색과 머리색으로 기증자를 고릅니다. 처음에는 약 1분 걸립니다(모든 스캔 머리를 한 번 읽음). 선수별 결과는 카드 창에서 확인하고 바꿀 수 있으며, 그다음 게임에 적용하세요.', phd_club_busy='3D 얼굴을 만드는 중…', phd_club_done='3D 얼굴 {0}개를 만들고 {1}명을 건너뛰었습니다.', phd_skip_icon='사진 없음', phd_skip_face='얼굴 못 찾음',
         world_title='게임 세계', world_lead='모던: AI 클럽, 클럽 선택, This Season 팩이 26 LIVE 카드를 씁니다(설치된 경우). 클래식 FO3: 모든 클럽이 FO3 원래의 2017 스쿼드를 쓰고, 가상 감독은 FO3 원래 시즌만 쓰며, 추가된 시즌(25 LIVE, 26 LIVE, WC18, 직접 만든 시즌)은 팩, 마켓, 트레이드에 나오지 않고 관리자 페이지(선수 추가, Bag)로만 줄 수 있습니다. 내 클럽과 컬렉션은 그대로입니다. 서버를 다시 시작하면 적용됩니다(play.bat).', world_label='모드', world_modern='모던(26 LIVE)', world_classic='클래식 FO3(2017)', world_saved='게임 세계를 저장했습니다.', world_restart='서버가 아직 이전 모드로 실행 중입니다: play.bat을 실행해 적용하세요.', e_world='알 수 없는 세계 모드',
         vm_title='가상 감독', vm_lead='약 2,000명의 가상 감독(Rank·King of the Hill 상대, AI 클럽, 마켓)은 게임과 서버를 실행할 때마다 그대로입니다. 여기의 다시 생성 버튼만 새 무리를 만듭니다: 이름, 레벨, 클럽, 스쿼드, 플레이 스타일, Rank 점수, 지역, AI 클럽이 재시작 없이 바로 바뀝니다(이미 열린 게임 화면은 다시 열면 갱신). ID는 그대로라 친구, 클럽, 기록은 계속 작동하지만 그 뒤의 사람은 바뀝니다. 처음으로 되돌리기는 첫 무리를 다시 불러옵니다.', vm_regen='다시 생성', vm_reset='처음으로 되돌리기', vm_gen_now='{0}세대(현재 {1}명).', vm_confirm='가상 감독을 새로 만들까요? 모두의 이름, 클럽, 스쿼드가 바로 바뀝니다.', vm_regen_done='새 무리를 지금 사용합니다.', vm_reset_done='첫 무리를 다시 사용합니다.',
+        st_title='스태프', st_lead='계정의 스태프: {0} / {1}. 새 스태프는 화면이 바뀌면 Tim > Manajemen Staff에 나옵니다.', st_staff='스태프', st_grade='별', st_life='계약', st_status='상태', st_add='스태프 추가', st_added='{0} × {1} 추가함.', st_removed='{0} 삭제함.', st_remove='삭제', st_confirm='스태프 {0}을(를) 계정에서 삭제할까요?', st_none='스태프가 없습니다.', st_helper='보조', st_appointed='배치됨', st_studying='연수 중', e_unknown_staff='알 수 없는 스태프', e_staff_full='스태프가 가득 참: {0}자리 남음', e_no_staff='없는 스태프',
     ),
 }
 

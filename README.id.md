@@ -422,6 +422,10 @@ Sudah ditambahkan dan lolos tes, tapi belum dicek di client:
   di tab Ekonomi. Klien hanya punya foto 7 staff; `python -I tools/fa_faces.py --staffs` menambahkan sisanya dari fifaaddict.
   Virtual manager bertanding dengan team color-nya, seperti kamu, dan punya staff sesuai level (satu
   frame peran lagi tiap 12 level).
+  Issue #41: *Rekrut* bisa membeli sampai 10 staff sekaligus; tab Pak & Bag di halaman admin menambah
+  staff apa saja (0.5-5 bintang) ke akun dan menghapusnya; gambar pak taruh di
+  `assets/externalAssets/shop/<icon>.png` (170×120: broall, brofw, bromf, brodf, brogk (Basic), silall (Pro), goldall (Premium), position (Technical Director), medical (Premium Medical), staffpack_2103 (free pack)), tanpa itu tile memakai foto staff; pack
+  bahasa yang tidak punya nama pak 11-13 (yang Thai) mendapatkannya.
 - **Kotak acak bisa dibuka** (Kotak Platinum dan lainnya, issue #12): layar kotak menampilkan
   hadiahnya dari `staticdata.availables`, yang belum ada, jadi tiap kotak gagal saat "Gunakan".
 - **Kartu baru masuk Tim Cadangan**: kartu dari pak, trade, Market, Bag, atau halaman admin tampil

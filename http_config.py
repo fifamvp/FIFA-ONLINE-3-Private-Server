@@ -112,7 +112,8 @@ def asset_path(rel):
     """FACES' picture, OWN_ASSETS/rel or ASSETS/rel, whichever exists, else None. A club crest the cache lacks
     in one size is its other size (issue #29: the cache has 190 small crests but 49 large ones,
     and the cup screens ask for the large one: Napoli, Bayern, Man United showed none). A Rekrut
-    pack tile (shop/staffpack_<stfid>) is that staff's picture: the client has no staff pack art.
+    pack tile (shop/<icon>, STAFF_PACKS) is its own picture when OWN_ASSETS has one (issue #41),
+    else a staff's: the client has no staff pack art.
     Issue #36: the game setting screen's "Default ball" (ball 0) has no picture ("NOT FOUND"): it
     shows the plain EA SPORTS ball's (ball 6); a small flag (countries/smallFlags, none cached) is
     the nation's big one."""
@@ -121,11 +122,12 @@ def asset_path(rel):
     m = re.fullmatch(r"externalAssets/players/(p\d+\.png)", rel)
     if m and os.path.isfile(os.path.join(FACES, m[1])):
         return os.path.join(FACES, m[1])
-    rel = re.sub(r"^externalAssets/shop/staffpack_(\d+)\.png$", r"externalAssets/staffs/\1.png", rel)
+    m = re.fullmatch(r"externalAssets/shop/(\w+)\.png", rel)
+    staff = m and STAFF_PACK_PICTURES.get(m[1])
     rel = re.sub(r"^externalAssets/balls/ball_0\.png$", "externalAssets/balls/ball_6.png", rel)
     rel = re.sub(r"^externalAssets/countries/smallFlags/(\d+\.png)$", r"externalAssets/countries/\1", rel)
     other = re.sub(r"crests/(large|small)/", lambda m: f"crests/{'small' if m[1] == 'large' else 'large'}/", rel)
-    for r in dict.fromkeys((rel, other)):
+    for r in dict.fromkeys(x for x in (rel, other, staff and f"externalAssets/staffs/{staff}.png") if x):
         for root in (OWN_ASSETS, ASSETS):
             f = os.path.normpath(os.path.join(root, r))
             if f.startswith(os.path.normpath(root) + os.sep) and os.path.isfile(f):
@@ -738,13 +740,36 @@ def client_stadium_names():
 # 3 (overcast by day, dusk by night). The server serves a copy with LANG_FIXES (built once, again
 # when the original or LANG_FIXES change: LANG_FIXED + ".key"; only those two keys use them).
 # Liga/Cup's screen still shows weather 3 as "Salju": its code reuses the snow label.
-LANG_PACK, LANG_ENTRY = "externalAssets/language_ind.big", "data/ui/external/LANGUAGESTRING_IND.json"
+# Another language's pack (FO3_LANGUAGE; Localization.loadEx: language_<locale>.big, entry
+# LANGUAGESTRING_<LOCALE>.json) gets the keys it lacks: LANG_ADD's, else the Indonesian pack's
+# (issue #41: the Thai one has no names for Rekrut packs 11-13 and showed STAFFPACK_NAME_11).
+LANG_PACK = f"externalAssets/language_{LANGUAGE}.big"
+LANG_ENTRY = f"data/ui/external/LANGUAGESTRING_{LANGUAGE.upper()}.json"
+LANG_IND = ("externalAssets/language_ind.big", "data/ui/external/LANGUAGESTRING_IND.json")
+LANG_ADD = {"STAFFPACK_NAME_11": "Technical Director Pack<BR>(3.0~5.0 star)",
+            "STAFFPACK_NAME_12": "Premium Staff Pack<BR>(3.0~5.0 star)",
+            "STAFFPACK_NAME_13": "Premium Medical Pack<BR>(1.0~3.0 star)",
+            "STAFFPACK_DESC_11": 'You can get 1 technical director.<br><br><FONT color="#d8a300">Grade: 3.0~5.0 star</font>',
+            "STAFFPACK_DESC_12": 'You can get 1 premium staff.<br><br><FONT color="#d8a300">Staff: fitness coach, '
+                                 'technical director, head coach<br>Grade: 3.0~5.0 star</font>',
+            "STAFFPACK_DESC_13": 'You can get 1 fitness coach.<br><br><FONT color="#d8a300">Grade: 1.0~3.0 star</font>'}
 LANG_FIXES = {b'"COMMON_TIME_DAY": "Waktu"': b'"COMMON_TIME_DAY": "Siang"',
               b'"COMMON_WEATHER_DUSK": "Malam"': b'"COMMON_WEATHER_DUSK": "Mendung"',
               # Live Boost's one group (LIVEBOOST_GROUP) is the Team of the Week
               b'"LIVEBOOST_CUSTOM_2900": "Europe Weekly Best"': b'"LIVEBOOST_CUSTOM_2900": "Team of the Week"'}
-LANG_FIXED = os.path.join(HERE, "gamedata", "language_ind.big")
+LANG_FIXED = os.path.join(HERE, "gamedata", f"language_{LANGUAGE}.big")
 LANG_LOCK = threading.Lock()
+
+
+def lang_missing(raw):
+    """raw (a LANGUAGESTRING json) with the keys it lacks put first: LANG_ADD's, else the Indonesian pack's."""
+    have = json.loads(raw.decode("utf-8-sig"))
+    ind = asset_path(LANG_IND[0])
+    add = {k: v for k, v in {**(client_json(ind, LANG_IND[1]) if ind else {}), **LANG_ADD}.items() if k not in have}
+    if not add:
+        return raw
+    i = raw.index(b"{") + 1
+    return raw[:i] + b"".join(json.dumps({k: v}, ensure_ascii=False)[1:-1].encode() + b"," for k, v in add.items()) + raw[i:]
 
 
 def language_pack(src):
@@ -752,14 +777,17 @@ def language_pack(src):
     when it needs no fix (or the copy cannot be made: the client gets its own pack, never no reply)."""
     try:
         s = os.stat(src)
-        key = repr((os.path.abspath(src), s.st_size, s.st_mtime_ns, sorted(LANG_FIXES.items()))).encode()
+        ind = asset_path(LANG_IND[0])
+        si = os.stat(ind) if ind else None
+        key = repr((os.path.abspath(src), s.st_size, s.st_mtime_ns, si and (si.st_size, si.st_mtime_ns),
+                    sorted(LANG_FIXES.items()), sorted(LANG_ADD.items()))).encode()
         with LANG_LOCK:
             if os.path.isfile(LANG_FIXED) and os.path.isfile(LANG_FIXED + ".key"):
                 with open(LANG_FIXED + ".key", "rb") as f:
                     if f.read() == key:
                         return LANG_FIXED
             raw = client_big(src, LANG_ENTRY)
-            fixed = raw or b""
+            fixed = lang_missing(raw) if raw else b""
             for old, new in LANG_FIXES.items():
                 fixed = fixed.replace(old, new)
             if not raw or fixed == raw:
@@ -5685,19 +5713,24 @@ STAFF_ENHANCE_EP = 2_000  # x the material's grade (enhancefee)
 STAFF_JACKPOT = (0.1, 0.5)  # chance of Latihan's bonus EXP, and its size (x the materials' EXP)
 STAFF_CONTRACT_EP = 100  # x grade, per match a recontract adds
 _ALL5, _ALL7 = ("FW", "MF", "DF", "GK", "MEDICAL"), ("FW", "MF", "DF", "GK", "MEDICAL", "FRONT", "PREMIUM")
-# Rekrut: recruitid: (STAFFPACK_NAME_n, STAFFPACK_DESC_n, EP, positions, grades, helper chance, icon:
-# a staff picture of the cache, the client has no pack art). The client's names and descriptions
-# do not pair by number (DESC_2 is the FW pack's text, DESC_5 the ALL one's); 8 and 10 are test data.
+# Rekrut: recruitid: (STAFFPACK_NAME_n, STAFFPACK_DESC_n, EP, positions, grades, helper chance,
+# staff whose picture the tile shows without one of its own, icon: the tile's picture
+# externalAssets/shop/<icon>.png, issue #41's pack art: drop it in OWN_ASSETS). The client's names and
+# descriptions do not pair by number (DESC_2 is the FW pack's text, DESC_5 the ALL one's); 8 and 10
+# are test data.
 STAFF_PACKS = {
-    2: (2, 5, 50_000, _ALL5, (2, 5), 0.2, 2103), 3: (3, 2, 50_000, ("FW",), (2, 5), 0.2, 1105),
-    4: (4, 3, 50_000, ("MF",), (2, 5), 0.2, 2103), 5: (5, 4, 50_000, ("DF",), (2, 5), 0.2, 3108),
-    6: (6, 6, 50_000, ("GK",), (2, 5), 0.2, 4103), 7: (7, 7, 150_000, _ALL5, (3, 6), 0.2, 3108),
-    13: (13, 13, 300_000, ("MEDICAL",), (2, 6), 0, 9507), 9: (9, 9, 600_000, _ALL7, (2, 10), 0.2, 9027),
-    11: (11, 11, 1_500_000, ("FRONT",), (6, 10), 0, 9501),
-    12: (12, 12, 3_000_000, ("MEDICAL", "FRONT", "PREMIUM"), (6, 10), 0, 9027)}
+    2: (2, 5, 50_000, _ALL5, (2, 5), 0.2, 2103, "broall"), 3: (3, 2, 50_000, ("FW",), (2, 5), 0.2, 1105, "brofw"),
+    4: (4, 3, 50_000, ("MF",), (2, 5), 0.2, 2103, "bromf"), 5: (5, 4, 50_000, ("DF",), (2, 5), 0.2, 3108, "brodf"),
+    6: (6, 6, 50_000, ("GK",), (2, 5), 0.2, 4103, "brogk"), 7: (7, 7, 150_000, _ALL5, (3, 6), 0.2, 3108, "silall"),
+    13: (13, 13, 300_000, ("MEDICAL",), (2, 6), 0, 9507, "medical"),
+    9: (9, 9, 600_000, _ALL7, (2, 10), 0.2, 9027, "goldall"),
+    11: (11, 11, 1_500_000, ("FRONT",), (6, 10), 0, 9501, "position"),
+    12: (12, 12, 3_000_000, ("MEDICAL", "FRONT", "PREMIUM"), (6, 10), 0, 9027, "goldall")}
 # the free row: ALL staff pack (0.5~2.0 star) once a day for logging in, once for 3 matches played
 STAFF_FREE_ID, STAFF_FREE_MATCHES = 1, 3
-STAFF_FREE_PACK = (1, 1, 0, _ALL5, (1, 4), 0.2, 1105)
+STAFF_FREE_PACK = (1, 1, 0, _ALL5, (1, 4), 0.2, 1105, "staffpack_2103")
+STAFF_PACK_PICTURES = {p[7]: p[6] for p in (STAFF_FREE_PACK, *STAFF_PACKS.values())}  # icon: stfid (asset_path)
+STAFF_OPEN_MAX = 10  # staff one Rekrut buys at most (the count list; issue #41: 10 at once)
 # Pembinaan (STAFF_STUDY_LOCAINFO01..06): lid: (boost it changes, None = Europe's random +1..3 on one,
 # positions, lowest grade, EP, matches). Each repeat at a place doubles its fee, up to the max.
 STAFF_STUDY = {"1": (0, ("FW", "DF"), 1, 20_000, 5), "2": (0, ("MF",), 1, 20_000, 5),
@@ -5814,7 +5847,7 @@ def staff_static():
     throws); Latihan predicts from exptable / materialexp / enhancefee / gradeexpect (staff_gain and
     ep_staff_enhance agree); a study place's location must be a frame of the Pembinaan map."""
     grades = range(1, STAFF_MAX_GRADE + 1)
-    return {"config": {"max_staff_open_count": 3, "max_staff_life": STAFF_LIFE, "default_staff_count": STAFF_MAX,
+    return {"config": {"max_staff_open_count": STAFF_OPEN_MAX, "max_staff_life": STAFF_LIFE, "default_staff_count": STAFF_MAX,
                        "max_staff_studyfee": staff_ep(STAFF_STUDY_FEE_MAX), "multiply_study_fee": STAFF_STUDY_FEE_X},
             "slots": {"1": [{"slot": i + 1, "position": p, "enabled": True, "lv": 0} for i, p in enumerate(STAFF_SLOTS)]},
             "stafflist": {str(i): {"material": not c[1], "enablemax": False, "expectid": c[2]} for i, c in STAFF_CATALOGUE.items()},
@@ -5863,7 +5896,7 @@ def ep_staff_recruit_list(query, body):
     if team is None:
         return _json([])
     f = staff_free_state(team)
-    row = lambda rid, p, kind: {"recruitid": rid, "recruittype": kind, "icon": f"staffpack_{p[6]}",
+    row = lambda rid, p, kind: {"recruitid": rid, "recruittype": kind, "icon": p[7],
                                 "staffpack_name": f"STAFFPACK_NAME_{p[0]}", "staffpack_desc": f"STAFFPACK_DESC_{p[1]}"}
     n = min(f["matches"], STAFF_FREE_MATCHES)
     return _json([dict(row(rid, p, "normal"), ep=staff_ep(p[2]), item=0) for rid, p in STAFF_PACKS.items()] + [

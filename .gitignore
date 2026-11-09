@@ -12,3 +12,11 @@ launcher/*.exe
 __pycache__/
 *.pyc
 .impeccable/
+
+# Staff pack pictures (issue #41): game art, not redistributable; see README
+assets/externalAssets/shop/bro*.png
+assets/externalAssets/shop/silall.png
+assets/externalAssets/shop/goldall.png
+assets/externalAssets/shop/position.png
+assets/externalAssets/shop/medical.png
+assets/externalAssets/shop/staffpack_*.png

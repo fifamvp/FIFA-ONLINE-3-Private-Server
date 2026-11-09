@@ -303,6 +303,9 @@
   列表；等级、价格和合同由服务器自定（Garena 的数据已遗失），EP 价格随经济页的球员价格变化。客户端只有 7 名教练的
   照片，`python -I tools/fa_faces.py --staffs` 会从 fifaaddict 补上其余照片。
   虚拟经理比赛时和你一样有球队颜色加成，并按等级拥有教练（每 12 级多一个职位框）。
+  Issue #41：*Rekrut* 一次最多招募 10 名教练；管理后台的 Pak & Bag 页可给账号添加任意教练（0.5-5 星）并删除；
+  教练包图片放在 `assets/externalAssets/shop/<icon>.png`（170×120：broall, brofw, bromf, brodf, brogk (Basic), silall (Pro), goldall (Premium), position (Technical Director), medical (Premium Medical), staffpack_2103 (free pack)），没有则显示教练照片；
+  缺少第 11-13 包名称的语言包（泰语）会补上。
 - **随机箱可以打开**（Kotak Platinum 等，issue #12）：箱子界面从 `staticdata.availables` 列出奖品，
   之前缺少这个字段，所以每个箱子在 "Gunakan"（使用）时都会失败。
 - **新球员卡进入 Tim Cadangan**：从卡包、交易、Market、Bag 或管理后台得到的卡，在 Skuad 的 Tim 一栏显示

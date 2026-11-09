@@ -243,6 +243,18 @@
         <label class="f"><span data-i18n="grade"></span><select id="bagGrade"></select></label>
         <button class="b primary" data-i18n="bag_send"></button>
       </form>
+      <h3 data-i18n="st_title"></h3>
+      <p class="lead" id="staffLead"></p>
+      <form class="row" id="staffForm">
+        <label class="f"><span data-i18n="st_staff"></span><select class="wide" id="staffSel"></select></label>
+        <label class="f"><span data-i18n="st_grade"></span><select id="staffGrade"></select></label>
+        <label class="f"><span data-i18n="count"></span><input type="number" id="staffCount" min="1" max="30" value="1"></label>
+        <button class="b primary" data-i18n="st_add"></button>
+      </form>
+      <div class="table-wrap"><table>
+        <thead><tr><th data-i18n="th_name"></th><th data-i18n="th_pos"></th><th data-i18n="st_grade"></th><th class="num" data-i18n="st_life"></th><th data-i18n="st_status"></th><th></th></tr></thead>
+        <tbody id="staffRows"></tbody>
+      </table></div>
     </section>
 
     <section id="shop" hidden>
@@ -776,7 +788,7 @@ const loaders = {
     </tr>`).join("") || `<tr><td colspan="8" class="muted">${esc(t("no_player"))}</td></tr>`;
   },
   async tambah() { if (found) renderSearch(); },
-  async item() { await packsReady; },
+  async item() { await packsReady; await loadStaff(); },
   async shop() { await loadShop(); },
   async harian() {
     await packsReady;
@@ -1333,6 +1345,29 @@ $("#packForm").addEventListener("submit", e => {
   e.preventDefault();
   const name = $("#packSel").selectedOptions[0].text, count = Number($("#packCount").value);
   act(() => api("give_pack", {itemid: Number($("#packSel").value), count}), t("given_packs", count, name));
+});
+const stars = g => `${(g / 2).toFixed(1)}★`;
+async function loadStaff() {
+  const d = await api("staff"), sel = $("#staffSel").value;
+  $("#staffLead").textContent = t("st_lead", d.staffs.length, d.max);
+  $("#staffSel").innerHTML = d.catalogue.map(c => `<option value="${c.stfid}">${esc(c.name)} · ${esc(c.position)}${c.helper ? ` (${esc(t("st_helper"))})` : ""}</option>`).join("");
+  if (sel) $("#staffSel").value = sel;
+  if (!$("#staffGrade").options.length)
+    $("#staffGrade").innerHTML = Array.from({length: 10}, (_, i) => `<option value="${i + 1}"${i == 5 ? " selected" : ""}>${stars(i + 1)}</option>`).join("");
+  $("#staffRows").innerHTML = d.staffs.map(s => `<tr><td>${esc(s.name)} <span class="muted">${s.stfid}</span></td><td>${esc(s.position)}</td>
+    <td>${stars(s.grade)}</td><td class="num">${s.life}</td><td>${s.status ? esc(t("st_" + s.status)) : ""}</td>
+    <td><button class="b small danger" data-staff-drop="${esc(s.id)}" data-name="${esc(s.name)}">${esc(t("st_remove"))}</button></td></tr>`).join("")
+    || `<tr><td colspan="6" class="muted">${esc(t("st_none"))}</td></tr>`;
+}
+$("#staffForm").addEventListener("submit", e => {
+  e.preventDefault();
+  const name = $("#staffSel").selectedOptions[0].text, count = Number($("#staffCount").value) || 1;
+  act(async () => { await api("staff_add", {stfid: Number($("#staffSel").value), grade: Number($("#staffGrade").value), count}); await loadStaff(); },
+      t("st_added", count, name));
+});
+$("#staffRows").addEventListener("click", e => {
+  const id = e.target.dataset.staffDrop; if (!id || !confirm(t("st_confirm", e.target.dataset.name))) return;
+  act(async () => { await api("staff_remove", {id}); await loadStaff(); }, t("st_removed", e.target.dataset.name));
 });
 $("#bagForm").addEventListener("submit", e => {
   e.preventDefault();

@@ -399,6 +399,10 @@ Added, passing the tests but not yet checked in the client:
   Ekonomi tab's player prices. The client has pictures of 7 staff only; `python -I tools/fa_faces.py --staffs` adds the others from fifaaddict.
   Virtual managers play with their team colors, as you do, and with staff by level (one role frame
   more every 12 levels).
+  Issue #41: *Rekrut* buys up to 10 staff at once; the admin page's Pak & Bag tab adds any staff (0.5-5
+  stars) to the account and removes them; pack pictures go in `assets/externalAssets/shop/<icon>.png`
+  (170×120: broall, brofw, bromf, brodf, brogk (Basic), silall (Pro), goldall (Premium), position (Technical Director), medical (Premium Medical), staffpack_2103 (free pack)), else the tile shows a staff picture; a language pack without the names of packs
+  11-13 (the Thai one) gets them.
 - **Random boxes open** (Kotak Platinum and the rest, issue #12): the box screen lists its prizes
   from `staticdata.availables`, which was missing, so every box failed at "Gunakan".
 - **New cards join Tim Cadangan**: a card from a pack, a trade, the Market, the Bag or the admin
