@@ -2085,7 +2085,13 @@ def ep_tactic(i, query, body):
 #   or POST /league2/match/sim (no play), POST /league2/sleep (bye round)
 # laststatus "league:<round>" tells the client which day it is (LeagueCupProxy.setToday).
 # --------------------------------------------------------------------------- #
-LEAGUE_SIZE = 10  # the creation screen shows 10 opponent crests
+LEAGUE_SIZE = 10  # the reference size a season's EP is set for (the creation screen shows 10 crests)
+# Issue #40 follow-up ("how to get full team in league table (not 10 team) and full match
+# schedule"; user: "Sesuaikan dengan jumlah klub di liga tersebut"): a season has every club of my
+# league with a full squad (Premier League 20 -> 38 rounds; at most LEAGUE_MAX). The client builds
+# any size (createSchedule, monthly calendars, scrolling tables; the creation screen shows 10 of
+# the crests). A season's EP and EXP by place are scaled to the size, the winner's as with 10.
+LEAGUE_MAX = 24
 
 
 def _db():
@@ -2094,12 +2100,12 @@ def _db():
 
 
 def league_teams(leagueid, mine):
-    """My club + the strongest clubs of its league in fifadb (base cards, full squads)."""
+    """My club + the other clubs of its league in fifadb (base cards, full squads), strongest first."""
     with closing(_db()) as c:
         rows = c.execute("""SELECT p.teamid FROM players p JOIN permid m ON m.spid = p.spid AND m.licensed = 1
                             WHERE p.leagueid = ? AND p.spid < 1000000 GROUP BY p.teamid
                             HAVING COUNT(*) >= 16 ORDER BY MAX(p.overallrating) DESC""", (leagueid,)).fetchall()
-    return [mine] + [r[0] for r in rows if r[0] != mine][:LEAGUE_SIZE - 1]
+    return [mine] + [r[0] for r in rows if r[0] != mine][:LEAGUE_MAX - 1]
 
 
 def league_round(teams, rnd):
@@ -2214,7 +2220,9 @@ MISSION_TARGET = {"2": 3, "3": 3, "4": 2}  # keep in sync with LEAGUE2SPONSOR lv
 def ep_l2_sponsor(difficulty, query, body):
     """POST /league2/sponsor/<difficulty>: offers. OnReceivedSponsorList reads level, maxround
     and sponsors[] {_id, sponsorid, missions[{mid}]} (names/logos/goals from LEAGUE2SPONSOR)."""
-    return _json({"result": True, "level": 1, "maxround": 2 * (LEAGUE_SIZE - 1) - 1,
+    st = _state(); teamid = my_teamid(st)
+    n = len(league_teams(roster_summary(teamid).get("league", {}).get("id", 0), teamid))
+    return _json({"result": True, "level": 1, "maxround": 2 * (n - 1) - 1,
                   "sponsors": [{"_id": sid, "sponsorid": sid, "missions": [{"mid": mid}]} for sid, mid in SPONSORS.items()]})
 
 
@@ -2605,7 +2613,7 @@ def season_leaders(st, me, rank, goals):
                   for p in starters if p["pos"] in r] for line, r in lines.items()}
     best = lambda line: max((p["spid"] for p in starters if p["pos"] in lines[line]),
                             key=lambda s: rating.get(s, 0), default=0)
-    played, ep = 2 * (LEAGUE_SIZE - 1), LEADER_EP
+    played, ep = 2 * (len(((st.get("league2") or {}).get("league") or {}).get("teams") or [0] * LEAGUE_SIZE) - 1), LEADER_EP
     out.update(ratings=[entry(best("FW"), 7.5, ep["ratings"])], goals=[entry(best("FW"), max(1, goals // 2), ep["goals"])],
                assists=[entry(best("MF"), max(1, goals // 3), ep["assists"])], tackles=[entry(best("DF"), played * 3, ep["tackles"])],
                passes=[entry(best("MF"), 0.85, ep["passes"])],  # pass success rate; the UI shows value*100 %
@@ -2658,8 +2666,9 @@ def ep_l2_end(query, body):
     leaders = season_leaders(st, me, rank, stats["goals"])
     leader_ep = sum(e["reward"]["count"] for k in ("ratings", "goals", "assists", "tackles", "passes", "saves")
                     for e in leaders[k])
-    base_ep = (LEAGUE_SIZE - rank + 1) * PLACE_EP
-    season_exp = (LEAGUE_SIZE - rank + 1) * 100
+    share = (len(league["teams"]) - rank + 1) * LEAGUE_SIZE / len(league["teams"])  # 1st: as in a 10-club league
+    base_ep = round(share * PLACE_EP)
+    season_exp = round(share * 100)
     cprev, ccur = coach_gain_exp(st, season_exp)
     out = {"result": True, "promotion": {"current": cur, "next": nxt},
            # setRewardRankExp: coach.prev/current/reward.total; setRewardRankEP: money.prev +
@@ -6452,8 +6461,8 @@ def ep_badge_use(itemid, query, body):
 #   /ladder/my/info      {start, next, ladder_<mode> records, ladder_total}: this season (ladder_my_info)
 #   /ladder/season/info  {sid, prevsid}; /coach/me statistics.ladder {seasons}
 # The divisions (/ladder/division/info: {name, rating}, highest first; 1050 = Amateur B, +50 a step
-# to Legendary A at 1700) and rewards (/ladder/reward/info: divs [{name DIVISION_<div>, items
-# [main, sub]}], wins [{from, items}]) are responses/ files.
+# to Legendary A at 1700) is a responses/ file; the rewards (/ladder/reward/info: divs [{name
+# DIVISION_<div>, items [main, sub]}], wins [{from, items}]) are ladder_rewards() (see there).
 # --------------------------------------------------------------------------- #
 VM_COUNT, VM_SEED, VM_FRIENDS = 100, 30, 20
 LADDER_COUNT = 6  # covers every ladder index (Enums.LADDER_MATCH_COUNT and 3vs3 roleplay)
@@ -7320,6 +7329,74 @@ def ladder_division(elo):
     return next((d["name"] for d in ladder_divisions() if elo >= d["rating"]), ladder_divisions()[-1]["name"])
 
 
+# Rank rewards (user: "hadiah ranking bisa dirubah di admin panel"): /ladder/reward/info {divs [{name
+# DIVISION_<div>, items [main, sub]}], wins [{from, items}]}, the Rank screen's centre panel (its
+# best division's main and sub item, the next weekly wins step). The admin page's Match tab writes
+# gamedata/ladder_rewards.json over responses/ladder_rewards.json. They used to be shown only; now
+# - the weekly wins steps reached this ISO week are paid (into the Bag) by the client's own flow:
+#   ladder_total.midrewardable -> POST /ladder/reward -> {result, rewards {wins [[item tiles]]}}
+#   (LadderWeeklyRewardPopup shows wins[0]);
+# - a finished season pays at the new season's start (into the Bag): the main item of the division
+#   of the ladder rated best at its end, the sub item of every other ladder played. Its season
+#   record stays rewarded (LadderSeasonRewardPopupScreen wants records this server does not keep).
+LADDER_REWARDS_FILE = os.path.join(HERE, "gamedata", "ladder_rewards.json")
+
+
+def ladder_rewards():
+    for f in (LADDER_REWARDS_FILE, os.path.join(RESPONSES, "ladder_rewards.json")):
+        try:
+            with open(f, encoding="utf-8") as fh:
+                return json.load(fh)
+        except (OSError, ValueError):
+            continue
+    return {"divs": [], "wins": []}
+
+
+def ladder_week(st):
+    """This ISO week's {week, wins, paid [from]} of my Rank matches."""
+    week, wk = time.strftime("%G%V", time.gmtime()), my_coach(st).setdefault("ladderweek", {})
+    if wk.get("week") != week:
+        wk.clear()
+        wk.update(week=week, wins=0)
+    wk.setdefault("paid", [])
+    return wk
+
+
+def ladder_week_due(st):
+    """The weekly wins steps reached and not paid yet: [{from, items}]."""
+    wk = ladder_week(st)
+    return [w for w in ladder_rewards()["wins"] if w["from"] <= wk["wins"] and w["from"] not in wk["paid"]]
+
+
+def ep_ladder_reward(query, body):
+    """POST /ladder/reward (LadderMatchFrontScreen.checkMidReward): the weekly wins steps reached."""
+    st = _state()
+    due = ladder_week_due(st)
+    if not due:
+        return _json({"result": False})
+    items = [it for w in due for it in w["items"]]
+    for w in due:
+        bag_add(st, f"Hadiah Rank mingguan: {w['from']} kemenangan", w["items"],
+                msg=f"{w['from']} kemenangan Rank minggu ini.")
+        ladder_week(st)["paid"].append(w["from"])
+    _save(st)
+    return _json({"result": True, "rewards": {"wins": [[{**it, "staticdata": item_def(it["itemid"])} for it in items]]}})
+
+
+def ladder_season_pay(st, prev):
+    """The finished season prev's rewards into the Bag (see ladder_rewards)."""
+    played = [i for i in range(LADDER_COUNT) if (prev.get("games") or [0] * LADDER_COUNT)[i]]
+    if not played:
+        return None
+    divs = {d["name"]: d["items"] for d in ladder_rewards()["divs"]}
+    best = max(played, key=lambda i: prev["elo"][i])
+    items = [it for i in played for it in divs.get(f"DIVISION_{ladder_division(prev['elo'][i])}", [])[0 if i == best else 1:][:1]]
+    if not items:
+        return None
+    return bag_add(st, f"Hadiah musim Rank {prev.get('sid', '')}", items,
+                   msg=f"Divisi terbaik: {ladder_division(prev['elo'][best]).replace('_', ' ').title()}.")
+
+
 def my_ladder(st):
     """This season's record: {sid, elo [i], high [i], wins, losses, draws, games,
     elos [i] [[elo, yyyymmdd]] (the rating at the end of each day played)}."""
@@ -7331,6 +7408,7 @@ def my_ladder(st):
     if lad.get("sid") != sid:  # a new season starts from scratch
         if any(lad.get("games") or ()):  # the finished one stays: the record screen's last season, best ratings
             coach["ladderprev"] = copy.deepcopy(lad)
+            ladder_season_pay(st, lad)
             coach["ladderbest"] = [max(b, h) for b, h in zip(coach.get("ladderbest") or lad["high"], lad["high"])]
         lad.clear()
         lad.update(sid=sid, elo=[LADDER_START] * LADDER_COUNT, high=[LADDER_START] * LADDER_COUNT,
@@ -7409,7 +7487,8 @@ def ladder_my_info(st):
         best = max(played, key=lambda i: lad["high"][i])
         week = my_coach(st).get("ladderweek") or {}
         wins = week.get("wins", 0) if week.get("week") == time.strftime("%G%V", time.gmtime()) else 0
-        out["ladder_total"] = {"highelo": lad["high"][best], "hightype": LADDER_TYPES[best],
+        out["ladder_total"] = {"midrewardable": bool(ladder_week_due(st)),  # checkMidReward: POST /ladder/reward
+                               "highelo": lad["high"][best], "hightype": LADDER_TYPES[best],
                                "playedgames": sum(lad["games"]), "totalwins": wins}
     return out
 
@@ -7800,10 +7879,7 @@ def ladder_record(st, i, vm, mine, theirs, sh=0, sa=0):
     pos = next(k for k, e in enumerate(ladder_board(st, i), 1) if e[2] == me["_id"])
     top[i] = min(top[i] or pos, pos)
     # this ISO week's wins (ladder_my_info ladder_total), on the coach: a season can start mid-week
-    week, wk = time.strftime("%G%V", time.gmtime()), my_coach(st).setdefault("ladderweek", {})
-    if wk.get("week") != week:
-        wk.update(week=week, wins=0)
-    wk["wins"] += score == 1
+    ladder_week(st)["wins"] += score == 1
 
 
 # --------------------------------------------------------------------------- #
@@ -8878,7 +8954,7 @@ def ep_rank_club(query, body):
 # onChangeCoachMeResource: the black FREEROAM). Mulai: POST /room {type esports2}, matchmaking,
 # then the Rank path (ladder_match, the one-user session) against a manager of my region near my
 # rating; the result moves my KOTH rating (Elo) and fills the reward screen's "Poin Divisi" box
-# (match.reward preveloinfo / eloinfo). No weekly or season reward items.
+# (match.reward preveloinfo / eloinfo). Weekly and season rewards: see koth_rewards.
 # --------------------------------------------------------------------------- #
 KOTH_GROUP, KOTH_LADDER = "1", 5
 KOTH_REGIONS = (("1", "Sumatera", (("101", "Medan"), ("102", "Padang"), ("103", "Palembang"), ("104", "Pekanbaru"))),
@@ -8915,8 +8991,46 @@ KOTH_SETS = {
            ("35", "Tây Nam Bộ", (("3501", "Cần Thơ"), ("3502", "Long Xuyên"), ("3503", "Rạch Giá")))),
 }
 KOTH_FILE = os.path.join(HERE, "gamedata", "koth.json")
-KOTH_GOALS = {"weekly_winning_reward_condition": 10, "weekly_match_reward_condition": 20,
-              "weekly_grade_reward_condition": 20, "season_grade_reward_condition": 50}  # the head tab's gauges
+# King of the Hill rewards (user: "buat editor hadiah king off hill"): the admin page writes
+# KOTH_REWARDS_FILE over responses/koth_rewards.json {week {type winning|match, win, match, items,
+# grade, divs [{name, items}]}, season {grade, divs [{name, items}], ranking [{from, to, items}]}}
+# (divs worst first, as the client indexes them: divisions - 1 - the elo's division). The season
+# shows them (reward.week win / match / grade, reward.season grade / ranking; reward.config = the
+# head tab's gauges: this week's wins or matches, this week's wins, the season's wins). A season
+# has 4 weeks (schedule.midreward = the days after its start a week ends: days 1-7 .. 22-28):
+# once one ended, statistics.midrewarded[that week] false sends the client to the reward screen
+# (RegionalLeagueController.routing "reward"), which POSTs /esports2/region/reward. The previous
+# season does it with statistics.seasonid = it and rewarded false. The reply {reward {config,
+# week {type, target, grade, win, match}, season {target, grade, ranking}}} lists what was earned
+# ({rewarded, items}; not earned = shown greyed with its goal); earned items go to the Bag.
+KOTH_REWARDS_FILE = os.path.join(HERE, "gamedata", "koth_rewards.json")
+KOTH_MIDREWARD = [7, 14, 21, 28]
+KOTH_SCALES = ("normal", "medium", "large", "exlarge")
+
+
+def koth_rewards():
+    for f in (KOTH_REWARDS_FILE, os.path.join(RESPONSES, "koth_rewards.json")):
+        try:
+            with open(f, encoding="utf-8") as fh:
+                return json.load(fh)
+        except (OSError, ValueError):
+            continue
+    return {}
+
+
+def koth_goals(cfg):
+    return {"weekly_winning_reward_condition": cfg["week"]["win"], "weekly_match_reward_condition": cfg["week"]["match"],
+            "weekly_grade_reward_condition": cfg["week"]["grade"], "season_grade_reward_condition": cfg["season"]["grade"]}
+
+
+def koth_week(t=None):
+    """This King of the Hill week: 0 for days 1-7 of the WIB month .. 4 for days 29-31 (no reward)."""
+    return (time.gmtime((time.time() if t is None else t) + WIB).tm_mday - 1) // 7
+
+
+def koth_div_items(divs, elo):
+    name = "DIVISION_" + ladder_division(elo)
+    return next((d["items"] for d in divs if d["name"] == name), [])
 
 
 # The admin page's own set (user: "buatkan untuk custom area king of hill di admin page"; issue
@@ -8979,16 +9093,18 @@ def vm_region(vid, key=None):
 def koth_season(sid):
     y, m = divmod(sid, 100)
     ny, nm = (y + m // 12, m % 12 + 1)
-    divs = len(ladder_divisions())
+    divs, cfg = len(ladder_divisions()), koth_rewards()
+    ranks = [{"rank_from": r["from"], "rank_to": r["to"], "items": r["items"]} for r in cfg["season"]["ranking"]]
     return {"_id": str(sid), "title": f"King of the Hill {m:02d}/{y}",
-            "schedule": {"startdt": f"{y}{m:02d}01", "enddt": f"{ny}{nm:02d}01", "week": [True] * 7, "midreward": [],
+            "schedule": {"startdt": f"{y}{m:02d}01", "enddt": f"{ny}{nm:02d}01", "week": [True] * 7, "midreward": KOTH_MIDREWARD,
                          "weekdays": {"starttime": "0000", "endtime": "2400"}, "weekend": {"starttime": "0000", "endtime": "2400"}},
             "regiongroup": {"id": KOTH_GROUP}, "scale": {"medium": 30, "large": 60, "exlarge": 100},
             "condition": {"autoreg": False, "regonlyigr": False, "playonlyigr": False},
-            "reward": {"popup": False, "config": KOTH_GOALS,
-                       "week": {"type": "winning", "win": [], "match": [], "grade": [[] for _ in range(divs)]},
-                       "season": {"grade": {"1": [[] for _ in range(divs)]},
-                                  "ranking": {"1": {"normal": [], "medium": [], "large": [], "exlarge": []}}}}}
+            "reward": {"popup": False, "config": koth_goals(cfg),
+                       "week": {"type": cfg["week"]["type"], "win": cfg["week"]["items"], "match": cfg["week"]["items"],
+                                "grade": [d["items"] for d in cfg["week"]["divs"]][:divs]},
+                       "season": {"grade": {"1": [d["items"] for d in cfg["season"]["divs"]][:divs]},
+                                  "ranking": {"1": {k: ranks for k in KOTH_SCALES}}}}}
 
 
 def koth_sid():
@@ -9007,15 +9123,66 @@ def ep_koth_presently(query, body):
 
 def my_koth(st, coach=None):
     """My KOTH record of this season {sid, regionid, introid, elo, wins, draws, losses, streak,
-    week, weekwins, weekgames}: a new month starts at the start rating in the same region."""
+    weeks [{wins, games, elo}] (koth_week), paid [week], prev}: a new month starts at the start
+    rating in the same region; the one I played stays as prev {sid, regionid, elo, wins, rank,
+    rewarded} until its rewards were shown."""
     sid = koth_sid()
     r = (coach or my_coach(st)).setdefault("es2", {})
     if r.get("sid") != sid:
-        r.update(sid=sid, elo=LADDER_START, wins=0, draws=0, losses=0, streak=0, introid="")
-    week = time.strftime("%G%V", time.gmtime())
-    if r.get("week") != week:
-        r.update(week=week, weekwins=0, weekgames=0)
+        if r.get("sid") and r.get("regionid") and r.get("wins", 0) + r.get("draws", 0) + r.get("losses", 0):
+            key = koth_set()
+            above = sum(m["elo"][KOTH_LADDER] > r["elo"] for m in virtual_managers() if vm_region(m["_id"], key) == r["regionid"])
+            r["prev"] = {"sid": r["sid"], "regionid": r["regionid"], "elo": r["elo"], "wins": r["wins"],
+                         "rank": above + 1, "rewarded": False}
+        r.update(sid=sid, elo=LADDER_START, wins=0, draws=0, losses=0, streak=0, introid="",
+                 weeks=[{"wins": 0, "games": 0, "elo": LADDER_START} for _ in range(5)], paid=[])
+    for k in ("week", "weekwins", "weekgames"):  # the ISO-week counters of before
+        r.pop(k, None)
+    r.setdefault("weeks", [{"wins": 0, "games": 0, "elo": r["elo"]} for _ in range(5)])
+    r.setdefault("paid", [])
     return r
+
+
+def koth_week_due(r, t=None):
+    """The ended week of this season whose rewards were not shown yet (it had matches), or None."""
+    i = min(koth_week(t), len(KOTH_MIDREWARD)) - 1
+    return i if i >= 0 and r["weeks"][i]["games"] and i not in r["paid"] else None
+
+
+def ep_koth_reward(query, body):
+    """POST /esports2/region/reward: the previous season's rewards, else the ended week's (see
+    koth_rewards); earned items go to the Bag."""
+    st = _state()
+    r, cfg = my_koth(st), koth_rewards()
+    none = {"rewarded": False, "items": []}
+    out = {"config": koth_goals(cfg), "week": {"type": cfg["week"]["type"], "target": False, "grade": none, "win": none, "match": none},
+           "season": {"target": False, "grade": none, "ranking": none}}
+    got = []
+    prev, week = r.get("prev") or {}, koth_week_due(r)
+    if prev and not prev["rewarded"]:
+        grade = koth_div_items(cfg["season"]["divs"], prev["elo"])
+        rank = next((x["items"] for x in cfg["season"]["ranking"] if x["from"] <= prev["rank"] <= x["to"]), [])
+        g_ok, r_ok = bool(grade) and prev["wins"] >= cfg["season"]["grade"], bool(rank)
+        out["season"] = {"target": True, "grade": {"rewarded": g_ok, "items": grade}, "ranking": {"rewarded": r_ok, "items": rank}}
+        got = grade * g_ok + rank * r_ok
+        prev["rewarded"] = True
+        title, msg = f"Hadiah musim King of the Hill {prev['sid']}", f"Peringkat {prev['rank']} di region, divisi {ladder_division(prev['elo']).replace('_', ' ').title()}."
+    elif week is not None:
+        w = r["weeks"][week]
+        grade = koth_div_items(cfg["week"]["divs"], w["elo"])
+        goal = w["wins"] >= cfg["week"]["win"] if cfg["week"]["type"] == "winning" else w["games"] >= cfg["week"]["match"]
+        g_ok = bool(grade) and w["wins"] >= cfg["week"]["grade"]
+        won = {"rewarded": goal and bool(cfg["week"]["items"]), "items": cfg["week"]["items"]}
+        out["week"] = {"type": cfg["week"]["type"], "target": True, "grade": {"rewarded": g_ok, "items": grade}, "win": won, "match": won}
+        got = cfg["week"]["items"] * won["rewarded"] + grade * g_ok
+        r["paid"] = sorted({*r["paid"], *range(week + 1)})
+        title, msg = f"Hadiah mingguan King of the Hill (minggu {week + 1})", f"{w['wins']} menang dari {w['games']} laga."
+    else:
+        return _json({"result": False})
+    if got:
+        bag_add(st, title, got, msg=msg)
+    _save(st)
+    return _json({"result": True, "reward": out, "resources": coach_me_resources(st, _default_slot(st))})
 
 
 def koth_board(st, region):
@@ -9036,10 +9203,17 @@ def koth_statistics(st, coach):
     # seasonid only once a region is picked: the main screen shows its "pick a region" panel while
     # the season is not mine (isCurrentSeasonRegistered), and Mulai Laga needs regionid too
     leaves = koth_leaves(koth_set())
+    prev, week = r.get("prev") or {}, r["weeks"][koth_week()] if koth_week() < len(r["weeks"]) else {}
+    if prev and not prev["rewarded"] and prev["regionid"] in leaves:  # the reward screen of that season first
+        name, _, parent = leaves[prev["regionid"]]
+        return {"seasonid": str(prev["sid"]), "introid": str(prev["sid"]), "elo": prev["elo"], "wins": prev["wins"],
+                "losses": 0, "forfeits": 0, "midwins": 0, "midmatches": 0, "rank": prev["rank"], "rewarded": False,
+                "midrewarded": [], "regionid": prev["regionid"], "regionname": {"name": name, "parent": parent}}
     out = {"seasonid": str(r["sid"]) if r.get("regionid") in leaves else "", "introid": r.get("introid", ""),
            "elo": r["elo"], "wins": r["wins"],
-           "losses": r["losses"], "forfeits": 0, "midwins": r["weekwins"], "midmatches": r["weekgames"],
-           "rank": 0, "rewarded": True, "midrewarded": []}
+           "losses": r["losses"], "forfeits": 0, "midwins": week.get("wins", 0), "midmatches": week.get("games", 0),
+           "rank": 0, "rewarded": True,
+           "midrewarded": [not (w["games"] and i not in r["paid"]) for i, w in enumerate(r["weeks"][:len(KOTH_MIDREWARD)])]}
     if r.get("regionid") in leaves:
         name, _, parent = leaves[r["regionid"]]
         out.update(regionid=r["regionid"], regionname={"name": name, "parent": parent})
@@ -9099,8 +9273,8 @@ def koth_record(st, vm, mine, theirs, sh, sa):
     r["elo"] = max(LADDER_START, round(old + LADDER_K * (score - expect)))
     r[{1: "wins", 0: "losses", 0.5: "draws"}[score]] += 1
     r["streak"] = (max(r["streak"], 0) + 1 if score == 1 else min(r["streak"], 0) - 1 if score == 0 else 0)
-    r["weekgames"] += 1
-    r["weekwins"] += score == 1
+    w = r["weeks"][min(koth_week(), len(r["weeks"]) - 1)]
+    w.update(games=w["games"] + 1, wins=w["wins"] + (score == 1), elo=r["elo"])
     multiplay_add(st, "Regional_League", vm, mine, theirs, sh, sa)
     return old, r["elo"], r["streak"]
 
@@ -9248,6 +9422,7 @@ ENDPOINTS = {
 }
 ENDPOINTS["/contact/list"] = ep_contact_list
 ENDPOINTS["/stadium/list"] = ep_stadium_list  # before the /stadium/<id> route
+ENDPOINTS.update({"/ladder/reward": ep_ladder_reward, "/ladder/reward/info": lambda q, b: _json(ladder_rewards())})
 ENDPOINTS.update({"/ladder/leaderboard": ep_ladder_leaderboard, "/ladder/friends/info": ep_ladder_friends,
                   "/ladder/my/info": ep_ladder_my_info, "/ladder/season/info": ep_ladder_season_info,
                   "/room": ep_room, "/matchmaking": ep_matchmaking})
@@ -9487,7 +9662,7 @@ ENDPOINTS.update({  # King of the Hill (issue #36)
         {"uri": "/static/db/ESPORTS2_BALANCING_DEFAULT", "body": {"divisions": ladder_divisions()}}]}),
     "/static/db/ESPORTS2_BALANCING_DEFAULT": lambda q, b: _json({"divisions": ladder_divisions()}),
     "/esports2/region/seasons/presently": ep_koth_presently, "/esports2/region/igrregion": lambda q, b: _json({"result": True}),
-    "/esports2/region/register": ep_koth_register, "/esports2/region/intro": ep_koth_intro})
+    "/esports2/region/register": ep_koth_register, "/esports2/region/intro": ep_koth_intro, "/esports2/region/reward": ep_koth_reward})
 ENDPOINTS.update({"/club/fee/creation": lambda q, b: _json({"fee": CLUB_FEE}), "/club/create": ep_club_create,
                   "/club/me": ep_club_me, "/club/find": ep_club_find, "/club/me/members": ep_club_members,
                   "/club/me/member/leave": ep_club_leave, "/club/me/join/requests": ep_club_requests,

@@ -295,7 +295,7 @@ Sudah ditambahkan dan lolos tes, tapi belum dicek di client:
 - **King of the Hill** (issue #36): liga regional Esports punya musim baru tiap bulan. Pilih satu dari 19
   wilayah Indonesia; papan peringkatnya berisi manajer virtual dari wilayah itu, dan Mulai
   mempertemukanmu dengan salah satu dari mereka yang rating-nya dekat dengan rating King of the Hill-mu.
-  Layar hadiah menampilkan poin yang didapat atau hilang. Item hadiah mingguan dan musiman belum ada.
+  Layar hadiah menampilkan poin yang didapat atau hilang.
   Tab Pengaturan match di halaman admin mengganti region ke kota-kota Indonesia, Singapura / Malaysia,
   Thailand atau Vietnam (nama berbahasa Vietnam), atau wilayah kustom yang ditulis di sana, satu baris
   "Region: kota, kota" per region (misalnya Sa Pa ditambahkan ke Miền Bắc).
@@ -345,6 +345,17 @@ Sudah ditambahkan dan lolos tes, tapi belum dicek di client:
   suka membahas klubnya, pemain bintangnya atau negaranya kalau ada di berita, lalu yang lain menanggapi.
   Berita global selalu aktif; Indonesia, Malaysia, Vietnam, Thailand dan Korea dicentang manual di tab
   Chat AI di halaman admin, yang juga menampilkan topik saat ini.
+- **Hadiah Rank di halaman admin**: tab Match mengubah hadiah musim tiap divisi (utama dan tambahan) dan
+  langkah jumlah menang mingguan, yang juga tampil di layar Rank. Sekarang hadiahnya benar-benar masuk
+  Bag: langkah mingguan dengan popup bawaan game di layar Rank, hadiah musim saat musim baru mulai
+  (hadiah utama dari mode dengan rating terbaik, hadiah tambahan dari tiap mode lain yang dimainkan).
+- **Hadiah King of the Hill di halaman admin**: tab Pengaturan match mengubah hadiah mingguan (target
+  menang atau main dalam seminggu, minggu = tanggal 1-7, 8-14, 15-21, 22-28, plus hadiah divisi bila
+  menangnya cukup) dan hadiah musim (divisi di akhir bulan bila menangnya cukup, plus peringkat di
+  region). Layar King of the Hill menampilkannya; setelah minggu atau musim yang dimainkan selesai, layar
+  hadiahnya muncul saat King of the Hill dibuka dan hadiah yang tercapai masuk Bag.
+- **Liga penuh** (issue #40): satu musim Liga berisi semua klub liga kita yang skuadnya lengkap
+  (Premier League 20 klub, 38 pekan; maksimal 24), bukan 10 lagi. EP dan EXP per posisi menyesuaikan.
 - **Database kartu dan klub di halaman admin** (issue #38): tab Database mengubah satu kartu pemain per
   musim (spid = musim × 1.000.000 + player id; cari dengan nama, spid atau player id): 33 atribut,
   posisi, kaki utama dan kaki lemah, skill move, work rate, karakteristik, klub (transfer) dan tampilan

@@ -420,7 +420,7 @@ def main():
         divs = json.load(open(os.path.join(hc.RESPONSES, "ladder_division_info.json")))
         assert [d["rating"] for d in divs] == sorted((d["rating"] for d in divs), reverse=True)  # highest first
         assert all(d["mingames"] > 0 for d in divs)  # the centre panel's "Match yg diperlukan x/<mingames>"
-        rewards = json.load(open(os.path.join(hc.RESPONSES, "ladder_reward_info.json")))
+        rewards = hc.ladder_rewards()
         assert {f"DIVISION_{d['name']}" for d in divs} == {d["name"] for d in rewards["divs"]} and rewards["wins"]
         # initializeBestRecord reads a division's items[0] and [1] and walks wins until from > totalwins
         assert all(len(d["items"]) >= 2 for d in rewards["divs"])
@@ -453,7 +453,8 @@ def main():
         st = hc._state(); lad = hc.my_ladder(st)
         assert lad["wins"][3] == lad["games"][3] == 1 and lad["elo"][3] > hc.LADDER_START and "ladder_pending" not in st
         tot = body(hc.ENDPOINTS["/ladder/my/info"]("", b""))["ladder_total"]
-        assert tot == {"highelo": lad["high"][3], "hightype": "Ladder_MGR_PvP_1v1", "playedgames": 1, "totalwins": 1}
+        assert tot == {"highelo": lad["high"][3], "hightype": "Ladder_MGR_PvP_1v1", "playedgames": 1, "totalwins": 1,
+                       "midrewardable": False}  # the first weekly step is at 5 wins
         # "Poin peringkat" / record screen: setSeasonalRecord finds the season by season.sid === String(sid)
         sid = body(hc.ENDPOINTS["/ladder/season/info"]("", b""))["sid"]
         season = hc.coach_me(st, 0)["statistics"]["ladder"]["seasons"][-1]  # this season last
@@ -626,7 +627,9 @@ def main():
         assert offer["result"] and len(offer["sponsors"]) == 3
         created = body(hc.ep_l2_calendar("", json.dumps({"difficulty": 12, "sponsor": "1"}).encode()))
         league = created["resources"][0]["body"]["league"]
-        assert league["teams"][0] == me and len(league["teams"]) == hc.LEAGUE_SIZE
+        n = len(league["teams"])  # every club of my league with a full squad (issue #40: "not 10 team")
+        assert league["teams"][0] == me and n == len(set(league["teams"])) > hc.LEAGUE_SIZE and offer["maxround"] == 2 * (n - 1) - 1
+        assert league["maxround"] == 2 * (n - 1) - 1
 
         # Simulasi needs a League Simulation coupon (item 2001, type LEAGUE_SIMULATION: the calendar
         # tab's Simulasi button counts them; user: "item untuk League Simulation, jadi tanpa main
@@ -741,13 +744,13 @@ def main():
                 shown = {p["id"]: p["levelinfo"] for p in hc.coach_me(hc._state(), 0)["team"]["players"]}
                 assert all(shown[x["id"]] == x["current"] for x in rw["players"])
                 assert all((x["current"]["level"], x["current"]["exp"]) > (x["prev"]["level"], x["prev"]["exp"]) for x in rw["players"])
-            assert r["leagueparam"]["round"] == rnd and len(r["leagueparam"]["leaguematches"]) == hc.LEAGUE_SIZE // 2
+            assert r["leagueparam"]["round"] == rnd and len(r["leagueparam"]["leaguematches"]) == n // 2
 
         lg = body(hc.ep_l2_me("", b""))
         assert lg["laststatus"] == f"league:{league['maxround']}"
         s = lg["league"]["statistics"]
-        assert sorted(v["rank"] for v in s.values()) == list(range(1, hc.LEAGUE_SIZE + 1))
-        assert all(v["wins"] + v["draws"] + v["losses"] == 2 * (hc.LEAGUE_SIZE - 1) for v in s.values())
+        assert sorted(v["rank"] for v in s.values()) == list(range(1, n + 1))
+        assert all(v["wins"] + v["draws"] + v["losses"] == 2 * (n - 1) for v in s.values())
         assert sum(v["goals"] for v in s.values()) == sum(v["goalsconceded"] for v in s.values())
 
         # Rekor liga (issue #19): Rekorku = my players' records of the played rounds; Rekor gabungan
@@ -788,7 +791,7 @@ def main():
         # title and the level reached (it shows noramlbest - 10), once a season
         rec = hc.coach_me(hc._state(), 0)["statistics"]["league"]
         mine = [x for x in after["league"]["matchrecords"] if me in (x["home"], x["away"])]
-        assert rec["wins"] + rec["draws"] + rec["losses"] == len(mine) == 2 * (hc.LEAGUE_SIZE - 1)
+        assert rec["wins"] + rec["draws"] + rec["losses"] == len(mine) == 2 * (n - 1)
         assert rec["goals"] == sum(x["goals"]["home" if x["home"] == me else "away"] for x in mine)
         assert rec["normalwins"] == (s[str(me)]["rank"] == 1) and rec["noramlbest"] == max(12, end["promotion"]["next"]) + 1
         body(hc.ep_l2_end("", b"{}"))  # the closing day again: not counted twice
@@ -1886,7 +1889,7 @@ def main():
             pres = body(hc.ENDPOINTS["/esports2/region/seasons/presently"]("", b""))
             cur = pres["seasons"][0]
             assert cur["schedule"]["startdt"] <= time.strftime("%Y%m%d") < cur["schedule"]["enddt"] == pres["seasons"][1]["schedule"]["startdt"]
-            assert cur["_id"] == str(hc.koth_sid()) and cur["schedule"]["midreward"] == [] and len(cur["schedule"]["week"]) == 7
+            assert cur["_id"] == str(hc.koth_sid()) and cur["schedule"]["midreward"] == hc.KOTH_MIDREWARD and len(cur["schedule"]["week"]) == 7
             assert len(cur["reward"]["week"]["grade"]) == len(cur["reward"]["season"]["grade"]["1"]) == len(hc.ladder_divisions())
             tree = pres["regiongrouptrees"][cur["regiongroup"]["id"]]
             assert set(tree) == {m for _, m, _ in hc.KOTH_REGIONS}  # keyed by name: the pickers list the keys
@@ -1894,7 +1897,7 @@ def main():
             assert leaf["parent"] in tree and leaf["name"] in tree[leaf["parent"]]["children"]
             koth = lambda: hc.coach_me(hc._state(), hc._default_slot(hc._state()))["statistics"]["esports2"]
             assert "regionid" not in koth() and koth()["seasonid"] == "" and koth()["rewarded"] is True
-            assert koth()["midrewarded"] == [] and koth()["introid"] == ""
+            assert koth()["midrewarded"] == [True] * len(hc.KOTH_MIDREWARD) and koth()["introid"] == ""
             assert body(hc.route(f"/esports2/region/register/{cur['_id']}")("", b""))["registeredplayer"][leaf["id"]] > 0
             assert not body(hc.ENDPOINTS["/esports2/region/register"]("", json.dumps({"regiongroupid": "nope"}).encode()))["result"]
             assert body(hc.ENDPOINTS["/esports2/region/register"]("", json.dumps({"regiongroupid": leaf["id"]}).encode()))["result"]
@@ -1990,6 +1993,96 @@ def main():
         assert A("ep", set=5000)["ep"] == 5000 and A("ep", add=-9000)["ep"] == 0 and A("ep", add=1500)["ep"] == ep() == 1500
         # the Rank opponents' chat: on/off and language (gamedata/vm_chat.json)
         assert A("vm_chat")["enabled"] and A("vm_chat")["lang"] == "id" and refused("vm_chat_set", enabled=True, lang="xx")
+        # Rank rewards: the admin page edits them (/ladder/reward/info shows them); the weekly wins steps
+        # are paid by POST /ladder/reward (once each a week), a finished season at the next one's start
+        hc.LADDER_REWARDS_FILE = os.path.join(tmp, "ladder_rewards.json")
+        lr = A("ladder_rewards")
+        assert lr["divs"] and lr["wins"] and body(hc.ENDPOINTS["/ladder/reward/info"]("", b""))["wins"] == lr["wins"]
+        assert refused("ladder_rewards_set", divs=lr["divs"], wins=[{"from": 10, "items": [{"itemid": 1, "count": 5}]},
+                                                                     {"from": 5, "items": [{"itemid": 1, "count": 5}]}])  # not rising
+        assert refused("ladder_rewards_set", divs=lr["divs"][1:], wins=lr["wins"])  # a division missing
+        assert refused("ladder_rewards_set", divs=lr["divs"], wins=[{"from": 3, "items": [{"itemid": 28007, "count": 500}]}])
+        divs = [{**d, "items": [{"itemid": 1, "count": 1000 * (i + 1)}, {"itemid": 28007, "count": 1}]} for i, d in enumerate(lr["divs"])]
+        new = A("ladder_rewards_set", divs=divs, wins=[{"from": 2, "items": [{"itemid": 1, "count": 700}]},
+                                                      {"from": 4, "items": [{"itemid": 28007, "count": 2}]}])
+        assert hc.ladder_rewards() == {k: new[k] for k in ("divs", "wins")} and new["wins"][1]["items"] == [{"itemid": 28007, "count": 2}]
+        st = hc._state(); c = hc.my_coach(st)
+        kept_lad = copy.deepcopy({k: c.get(k) for k in ("ladder", "ladderweek", "ladderprev", "ladderbest", "bag")})
+        c["bag"] = []; hc.ladder_week(st)["wins"] = 3; hc._save(st)
+        claim_lr = lambda: body(hc.ENDPOINTS["/ladder/reward"]("", b"{}"))
+        r = claim_lr()
+        assert r["result"] and [(i["itemid"], i["count"]) for i in r["rewards"]["wins"][0]] == [(1, 700)] and not claim_lr()["result"]
+        st = hc._state(); hc.ladder_week(st)["wins"] = 4; hc._save(st)
+        assert claim_lr()["rewards"]["wins"][0][0]["itemid"] == 28007 and len(hc.my_coach(hc._state())["bag"]) == 2
+        st = hc._state(); lad = hc.my_ladder(st)  # a season over: main for the best ladder, sub for the other played
+        lad.update(sid=200001, elo=[1700, 1060] + [1000] * (hc.LADDER_COUNT - 2), games=[3, 2] + [0] * (hc.LADDER_COUNT - 2))
+        hc.my_ladder(st)
+        paid, names = hc.my_coach(st)["bag"][-1], [d["name"] for d in divs]
+        assert paid["items"] == [divs[names.index("DIVISION_" + hc.ladder_division(1700))]["items"][0], {"itemid": 28007, "count": 1}]
+        assert "200001" in paid["title"]
+        st = hc._state(); c = hc.my_coach(st)
+        for k, v in kept_lad.items():
+            c.pop(k, None) if v is None else c.__setitem__(k, v)
+        hc._save(st)
+        A("ladder_rewards_set", reset=True)
+        assert not os.path.isfile(hc.LADDER_REWARDS_FILE) and hc.ladder_rewards()["wins"] == lr["wins"]
+        # King of the Hill rewards: the admin page edits them (the season shows them); an ended week with
+        # matches, then a played season, send the client to the reward screen (POST /esports2/region/reward)
+        hc.KOTH_REWARDS_FILE = os.path.join(tmp, "koth_rewards.json")
+        kr = A("koth_rewards")
+        cur = body(hc.ENDPOINTS["/esports2/region/seasons/presently"]("", b""))["seasons"][0]
+        assert cur["schedule"]["midreward"] == hc.KOTH_MIDREWARD and cur["reward"]["week"]["win"] == kr["week"]["items"]
+        assert cur["reward"]["season"]["ranking"]["1"]["large"][0] == {"rank_from": 1, "rank_to": 1, "items": kr["season"]["ranking"][0]["items"]}
+        assert cur["reward"]["week"]["grade"] == [d["items"] for d in kr["week"]["divs"]] and len(kr["week"]["divs"]) == len(hc.ladder_divisions())
+        assert cur["reward"]["config"]["weekly_grade_reward_condition"] == kr["week"]["grade"]
+        week, season = copy.deepcopy(kr["week"]), copy.deepcopy(kr["season"])
+        assert refused("koth_rewards_set", week={**week, "type": "draws"}, season=season)
+        assert refused("koth_rewards_set", week={**week, "divs": week["divs"][1:]}, season=season)  # a division missing
+        assert refused("koth_rewards_set", week=week, season={**season, "ranking": [  # ranks overlap
+            {"from": 1, "to": 5, "items": [{"itemid": 1, "count": 9}]}, {"from": 5, "to": 9, "items": [{"itemid": 1, "count": 9}]}]})
+        week.update(type="match", match=2, grade=1, items=[{"itemid": 28007, "count": 1}])
+        season.update(grade=1, ranking=[{"from": 1, "to": 3, "items": [{"itemid": 1, "count": 777}]}])
+        assert A("koth_rewards_set", week=week, season=season)["season"]["ranking"][0]["to"] == 3
+        assert hc.koth_rewards() == {"week": week, "season": season}
+        es2 = lambda: hc.coach_me(hc._state(), hc._default_slot(hc._state()))["statistics"]["esports2"]
+        claim = lambda: body(hc.ENDPOINTS["/esports2/region/reward"]("", b"{}"))
+        st = hc._state(); c = hc.my_coach(st)
+        kept_koth, kept_week = copy.deepcopy({k: c.get(k) for k in ("es2", "bag")}), hc.koth_week
+        c["bag"] = []
+        r = hc.my_koth(st)
+        r.update(regionid=next(iter(hc.koth_leaves(hc.koth_set()))), paid=[])
+        r["weeks"][0].update(games=2, wins=1, elo=1000)
+        hc._save(st)
+        hc.koth_week = lambda t=None: 1  # in week 2: week 1 is over
+        try:
+            assert es2()["midrewarded"][0] is False
+            got = claim()
+            w = got["reward"]["week"]
+            assert got["result"] and w["target"] and w["match"]["rewarded"] and w["grade"]["rewarded"] and not got["reward"]["season"]["target"]
+            assert w["match"]["items"] == [{"itemid": 28007, "count": 1}] and w["grade"]["items"] == hc.koth_div_items(week["divs"], 1000)
+            bag = hc.my_coach(hc._state())["bag"]
+            assert len(bag) == 1 and bag[0]["items"] == [{"itemid": 28007, "count": 1}] + w["grade"]["items"]
+            assert es2()["midrewarded"][0] is True and not claim()["result"]
+            # a season over: its rewards come first (rank 2 of my region, enough wins), then the new one
+            st = hc._state(); r = hc.my_koth(st)
+            r.update(sid=200001, elo=1700, wins=3)
+            hc.my_koth(st)
+            assert r["prev"]["sid"] == 200001 and r["prev"]["rank"] >= 1 and r["wins"] == 0 and r["sid"] == hc.koth_sid()
+            r["prev"]["rank"] = 2; hc._save(st)
+            assert es2()["seasonid"] == "200001" and es2()["rewarded"] is False
+            got = claim()["reward"]["season"]
+            assert got["target"] and got["ranking"] == {"rewarded": True, "items": [{"itemid": 1, "count": 777}]}
+            assert got["grade"] == {"rewarded": True, "items": hc.koth_div_items(season["divs"], 1700)}
+            assert es2()["seasonid"] == str(hc.koth_sid()) and es2()["rewarded"] is True and not claim()["result"]
+            assert len(hc.my_coach(hc._state())["bag"]) == 2
+        finally:
+            hc.koth_week = kept_week
+            st = hc._state(); c = hc.my_coach(st)
+            for k, v in kept_koth.items():
+                c.pop(k, None) if v is None else c.__setitem__(k, v)
+            hc._save(st)
+        A("koth_rewards_set", reset=True)
+        assert not os.path.isfile(hc.KOTH_REWARDS_FILE) and hc.koth_rewards()["week"] == kr["week"]
         # ... and the global chat's football topics: the global ones always, plus the countries ticked by
         # hand; they come by themselves once a WIB day (again when the ticks change)
         kept_timer, refreshes = hc.threading.Timer, []  # a changed tick fetches at once, in the background

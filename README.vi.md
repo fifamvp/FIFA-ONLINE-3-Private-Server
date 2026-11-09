@@ -270,8 +270,7 @@ Item saya, Gudang bên dưới là tên màn hình trong game, được giữ ng
   vào rating xếp hạng, và đối thủ chat như ở Rank.
 - **King of the Hill** (issue #36): giải khu vực Esports có một mùa giải mỗi tháng. Chọn một trong 19 vùng của
   Indonesia; bảng xếp hạng của vùng đó gồm các HLV ảo trong vùng, và Mulai cho bạn đá với một người trong số họ
-  có rating gần với rating King of the Hill của bạn. Màn hình phần thưởng hiện số điểm được hoặc mất. Chưa có vật
-  phẩm thưởng tuần hay thưởng mùa.
+  có rating gần với rating King of the Hill của bạn. Màn hình phần thưởng hiện số điểm được hoặc mất.
   Tab Cài đặt trận đấu trên trang quản trị đổi khu vực sang các thành phố của Indonesia, Singapore /
   Malaysia, Thái Lan hoặc Việt Nam (tên tiếng Việt), hoặc khu vực tùy chỉnh viết ở đó, mỗi dòng
   "Vùng: thành phố, thành phố" (ví dụ thêm Sa Pa vào Miền Bắc).
@@ -318,6 +317,17 @@ Item saya, Gudang bên dưới là tên màn hình trong game, được giữ ng
   cầu thủ ngôi sao hoặc đất nước của mình khi có trong tin, rồi người khác trả lời. Tin toàn cầu luôn
   bật; Indonesia, Malaysia, Việt Nam, Thái Lan và Hàn Quốc chọn tay ở tab Chat AI của trang quản trị, nơi
   cũng hiện các chủ đề hiện tại.
+- **Phần thưởng Rank trên trang quản trị**: tab Match sửa thưởng mùa của từng hạng (chính và phụ) và các mốc
+  số trận thắng trong tuần, cũng hiện ở màn hình Rank. Giờ phần thưởng thật sự vào Túi: mốc tuần kèm popup của
+  game ở màn hình Rank, thưởng mùa khi mùa mới bắt đầu (thưởng chính của chế độ có điểm cao nhất, thưởng phụ của
+  mỗi chế độ khác đã chơi).
+- **Phần thưởng King of the Hill trên trang quản trị**: tab Cài đặt trận đấu sửa thưởng tuần (mục tiêu số
+  trận thắng hoặc số trận trong tuần ngày 1-7, 8-14, 15-21 hoặc 22-28, cộng thưởng hạng khi thắng đủ) và
+  thưởng mùa (hạng cuối tháng khi thắng đủ, cộng thứ hạng trong khu vực). Màn hình King of the Hill hiện
+  chúng; khi một tuần hoặc mùa đã chơi kết thúc, màn hình phần thưởng hiện ra lúc mở King of the Hill và
+  phần thưởng đạt được vào Túi.
+- **Giải đủ đội** (issue #40): một mùa Liga có mọi CLB đủ đội hình trong giải của mình (Premier League
+  20 CLB, 38 vòng; tối đa 24) thay vì 10. EP và EXP theo thứ hạng điều chỉnh theo số đội.
 - **Cơ sở dữ liệu thẻ và CLB trên trang quản trị** (issue #38): tab Database sửa từng thẻ cầu thủ theo mùa
   (spid = mùa × 1.000.000 + player id; tìm theo tên, spid hoặc player id): 33 chỉ số, vị trí, chân thuận và
   chân không thuận, kỹ năng, tỷ lệ công/thủ, đặc điểm, CLB (chuyển nhượng) và ngoại hình 3D (đầu của bất kỳ

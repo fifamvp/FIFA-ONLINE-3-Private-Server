@@ -275,8 +275,7 @@ Added, passing the tests but not yet checked in the client:
   in Info Manager, not in the Rank rating, and the opponent chats as in Rank.
 - **King of the Hill** (issue #36): the Esports regional league runs a season every month. Pick one
   of 19 Indonesian regions; its leaderboard holds that region's virtual managers, and Mulai plays
-  one of them near your King of the Hill rating. The reward screen shows the points won or lost. No
-  weekly or season reward items yet.
+  one of them near your King of the Hill rating. The reward screen shows the points won or lost.
   The admin page's Match settings tab switches the regions to the cities of Indonesia, Singapore /
   Malaysia, Thailand or Vietnam (Vietnamese names), or a custom area written there, one "Region: city,
   city" line per region (e.g. Sa Pa added to Miền Bắc).
@@ -324,6 +323,17 @@ Added, passing the tests but not yet checked in the client:
   one likes to bring up his club, his star player or his country when the news has them, and others
   answer. The global news is always on; Indonesia, Malaysia, Vietnam, Thailand and Korea are ticked by
   hand on the admin page's AI chat tab, which also lists the topics now.
+- **Rank rewards on the admin page**: the Match tab edits each division's season reward (main and sub)
+  and the weekly wins steps, which the Rank screen shows. They are now paid into the Bag: a weekly step
+  with the game's own popup on the Rank screen, a season's rewards when the next season starts (the main
+  one of the mode rated best, the sub one of every other mode played).
+- **King of the Hill rewards on the admin page**: the Match settings tab edits the weekly rewards (a goal
+  of wins or matches in a week of days 1-7, 8-14, 15-21 or 22-28, plus a division reward with enough
+  wins) and the season rewards (the division at the month's end with enough wins, plus the rank in the
+  region). The King of the Hill screen shows them; once a week or season you played is over, its reward
+  screen shows when King of the Hill opens and what was reached goes to the Bag.
+- **Full Liga** (issue #40): a Liga season has every club of my league with a full squad (Premier
+  League 20 clubs, 38 rounds; at most 24) instead of 10. EP and EXP by place are scaled to its size.
 - **Card and club database on the admin page** (issue #38): the Database tab edits one card of a player
   per season (spid = season × 1,000,000 + player id; search by name, spid or player id): the 33
   attributes, positions, preferred and weak foot, skill moves, work rates, traits, club (a transfer) and
