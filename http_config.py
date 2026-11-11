@@ -5657,7 +5657,8 @@ def events_body(st):
 
 def ep_events(query, body):
     st = _state()
-    out = events_body(st)
+    # out = events_body(st)
+    out = {} # TODO: 暂时禁用累计时长活动
     _save(st)
     return _json(out)
 
