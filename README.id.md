@@ -467,6 +467,14 @@ Sudah ditambahkan dan lolos tes, tapi belum dicek di client:
   klub dan halaman klub, bukan lagi lambang bawaan: perisai, bulatan atau panji berwarna klub, digambar
   server dari id klub (PNG 20, 50 dan 100 px, seperti di game aslinya). Lambang klubmu mengikuti warna yang
   dipilih di Klub > Manajemen.
+- **Arena** (tombol event di lobi; mode "Boxing Day" milik client yang di FO3 ID tidak pernah punya jadwal):
+  bayar biaya masuk (100.000 EP, tiga kali sehari), pilih satu dari lima klub hasil undian dengan kekuatan
+  berbeda (bintang lima sampai setengah bintang), lalu main sampai tujuh pertandingan memakai skuad asli
+  klub itu melawan klub yang makin kuat dan makin sulit, atas nama manajer virtual. Dua kekalahan mengakhiri
+  rangkaian. Tiap kemenangan memberi EP (30.000 sampai 300.000; lebih besar dengan klub yang lebih lemah,
+  ditambah bonus "Break rank" bila mengalahkan klub berbintang lebih tinggi). Ruang tunggu menampilkan daftar
+  pertandingan beserta nilainya, dan layar hadiah membayar semuanya saat rangkaian selesai; menyerah berarti
+  hadiah hangus. Jumlah EP mengikuti harga pemain di tab Ekonomi.
 - **Kotak acak bisa dibuka** (Kotak Platinum dan lainnya, issue #12): layar kotak menampilkan
   hadiahnya dari `staticdata.availables`, yang belum ada, jadi tiap kotak gagal saat "Gunakan".
 - **Kartu baru masuk Tim Cadangan**: kartu dari pak, trade, Market, Bag, atau halaman admin tampil

@@ -442,6 +442,13 @@ Added, passing the tests but not yet checked in the client:
   lists and on the club page instead of the default crest: a shield, roundel or pennant in the club's
   colour, drawn by the server from the club's id (20, 50 and 100 px PNGs, like the original game's). Your
   club's emblem follows the colour picked in Klub > Manajemen.
+- **Arena** (the lobby's event button; the client's "Boxing Day" mode, which FO3 ID shipped without a
+  schedule): pay the entrance fee (100,000 EP, three runs a day), pick one of five drawn clubs of different
+  strength (five stars down to half a star) and play up to seven matches with that club's own squad against
+  clubs that get stronger and harder, under virtual managers' names. Two losses end the run. Each win pays EP
+  (30,000 up to 300,000; more with a weaker club, plus a "Break rank" bonus for beating a higher-rated
+  club). The waiting room lists the matches and what each is worth, and the reward screen pays it all when
+  the run ends; giving up forfeits it. EP amounts follow the Ekonomi tab's player prices.
 - **Random boxes open** (Kotak Platinum and the rest, issue #12): the box screen lists its prizes
   from `staticdata.availables`, which was missing, so every box failed at "Gunakan".
 - **New cards join Tim Cadangan**: a card from a pack, a trade, the Market, the Bag or the admin

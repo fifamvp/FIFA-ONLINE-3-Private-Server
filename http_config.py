@@ -487,6 +487,7 @@ def ep_account(query, body):
     # featuresAt("/friendlymatch"); none = an empty screen): against AI, see room_kind
     acc["features"]["friendlymatch"] = {"quickmatch": {}, "randommatch": {}, "custommatch": {}}
     acc["features"].setdefault("esports", {})["regionalleague"] = {}  # King of the Hill (issue #36)
+    acc["features"]["boxingday"] = {}  # the lobby's Arena button (MenuScreen.initBoxingday)
     if live_boost():  # Tim > Live Boost (the Team of the Week)
         acc["features"].setdefault("livecenter", {})["boost"] = {}
     # guides = the Beginner's Guide chapters done (BeginnersGuideManager.isChapterCompleted). Until
@@ -573,7 +574,7 @@ def ep_match_squad(mid, side, query, body):
     resource, which the screen reads (side.<mine>.team.squad). result false shows reason."""
     st = _state(); slot = _default_slot(st); match = st.get("match") or {}
     s = (match.get("side") or {}).get(side) if match.get("id") == mid else None
-    exhibition = match.get("type") == "Exhibition_PvP"  # the club of that side, not mine
+    exhibition = match.get("type") in ("Exhibition_PvP", "Boxing_PvP")  # the club of that side, not mine
     team = (s or {}).get("team") if exhibition else st["teams"].get(str(slot))
     if not s or not s["players"] or team is None or not apply_squad(team, json.loads(body or b"{}")):
         return _json({"result": False, "reason": "PLAYERLIST_CHANGEPLAYER_FAIL_POPUP_INFO_UNUSABLEPLAYER"})
@@ -2153,7 +2154,7 @@ def coach_statistics(st, coach, slot):
             "friendly": {"custom": frows("custom"), "quick": {**frows("quick"), "winningstreak": {"max": [fr.get("best", 0)]}},
                          "vscom": frows("vscom")},
             "simulation": {k: {"wins": 0, "draws": 0, "losses": 0} for k in ("custom", "quick", "vscom")},
-            "winstreak": [], "club": {}, "esports2": koth_statistics(st, coach),
+            "winstreak": [], "club": {}, "esports2": koth_statistics(st, coach), "boxingday": arena_statistics(coach),
             "cup": {**{k: cup.get(k, 0) for k in ("wins", "draws", "losses", "abandonments")},
                     "cupwins": cup.get("cupwins", [0] * CUP_LEVELS), **({"highrecords": cup["best"]} if cup.get("best") else {})}}
 
@@ -2562,6 +2563,7 @@ def ep_l2_achievement(query, body):
 CLUB_MIN_PLAYERS = 16  # licensed 2017 cards a club needs to be listed
 REST_OF_WORLD = 999998  # FO3's team for players of unlicensed clubs (26 LIVE has 91 such cards): not a club
 _CLUBS, _CLUBS_KIT = [], []
+_CLUB_POWER = {}  # teamid: the average rating of its best eleven (all_clubs; the Arena's stars)
 
 
 @functools.lru_cache(maxsize=1)
@@ -2626,6 +2628,7 @@ def all_clubs():
             sq[-pid] = max(sq.get(-pid, 0), ovr)
         power = {k: sum(sorted(v.values())[-11:]) / 11 for k, v in squads.items()
                  if len(v) >= CLUB_MIN_PLAYERS and k[1] != REST_OF_WORLD}
+        _CLUB_POWER.update({tid: p for (_, tid), p in power.items()})
         leagues = {}
         for (lid, tid), p in power.items():
             leagues.setdefault(lid, []).append((p, tid))
@@ -3244,7 +3247,7 @@ def ep_match_end(mid, query, body):
     if match is not None and match.get("stage") != "closed":  # credit once
         fill_players(match, req)
         match["result"] = {k: v for k, v in req.items() if k != "_method"}
-        exhibition = (st.get("ladder_pending") or {}).get("id") == mid and st["ladder_pending"].get("kind") == "exhibition"
+        exhibition = (st.get("ladder_pending") or {}).get("id") == mid and st["ladder_pending"].get("kind") in ("exhibition", "boxing")
         match["reward"] = match_reward(st, req, own=not exhibition)
         add_ep(st, match["reward"]["money"]["reward"]["total"])
         staff_after_match(st)
@@ -7841,7 +7844,7 @@ def ladder_index(room_type):
 def room_kind(room_type):
     t = str(room_type)
     return ("ladder" if "ladder" in t else "koth" if t == "esports2" else "exhibition" if t == "pvp_exhibition"
-            else "vscom" if t.startswith("pve") else "friendly")
+            else "boxing" if t.endswith("_boxingday") else "vscom" if t.startswith("pve") else "friendly")
 
 
 def room_ai_team(room):
@@ -8203,7 +8206,7 @@ def ep_room_back(query, body):
     if room:
         room.update(stage="room", matchmaking=None, search=None)
         room["side"]["left"]["ready"] = False
-        if room_kind(room["type"]) in ("ladder", "koth") or room["type"] == "pvp_random":
+        if room_kind(room["type"]) in ("ladder", "koth", "boxing") or room["type"] == "pvp_random":
             room["side"]["right"]["players"] = []
         _save(st)
         res.append({"uri": f"/room/{room['roomid']}", "body": room})
@@ -8245,6 +8248,9 @@ def ladder_match(st, room):
     rating; a friendly against the one invited or a near one; vs COM against the room's AI club
     (room_kind)."""
     i, kind = ladder_index(room["type"]), room_kind(room["type"])
+    run = arena_data(st).get("run") if kind == "boxing" else None
+    if kind == "boxing" and not (run and run["state"] == "playing" and run["teamid"]):
+        kind = "friendly"  # no run to play: an ordinary match
     me = coach_me(st, _default_slot(st)); teamid = me["teamid"]
     user = {"id": me["id"], "name": me["name"], "levelinfo": me["levelinfo"]}
     mine = match_side(st["teams"][str(_default_slot(st))], teamid, user, _tactics(st)[1])
@@ -8262,6 +8268,20 @@ def ladder_match(st, room):
         theirs["players"] = [{"id": vm["_id"], "name": vm["name"], "levelinfo": {"level": vm["level"], "exp": 0}}]
         mine["team"]["teamcolors"] = []
         match = new_match("League_2_league", mine, theirs)
+    elif kind == "boxing":  # Arena: the run's club against its next opponent, each at its own squad
+        lt = run["teamid"]
+        away, grade, vm = arena_opponent(run, len(run["matches"]) + 1)
+        mine = match_side(roster_team(lt), lt, user, [default_tactic(0)])
+        theirs = match_side(roster_team(away), away, tactics=[style_tactic(vm_style(vm))])
+        theirs["players"] = [{"id": vm["_id"], "name": vm["name"], "levelinfo": {"level": vm["level"], "exp": 0}}]
+        mine["team"]["teamcolors"] = []
+        match = new_match("League_2_league", mine, theirs)
+        # the squad and setting screens of this mode (setBoxingdayInfo) show each side's first user's
+        # winstreak and, with gradebonus.<my side> > 0, the "Break rank" line: the bonus at stake
+        streak = next((k for k, m in enumerate(reversed(run["matches"])) if m["res"] <= 0), len(run["matches"]))
+        mine["players"][0]["winstreak"], theirs["players"][0]["winstreak"] = streak, 0
+        stake = arena_ep(ARENA_WIN_EP[len(run["matches"])] * arena_factor(run["grade"]))
+        match["gradebonus"] = {"left": nice_price(stake * ARENA_BREAK * max(0, grade - run["grade"])), "right": 0}
     else:
         guest = room["side"]["right"]["players"] if kind == "friendly" else []
         vm = (vm_by_id(guest[0]["id"]) if guest else None) or (koth_opponent(st) if kind == "koth" else ladder_opponent(st, i))
@@ -8276,6 +8296,7 @@ def ladder_match(st, room):
         match["gamesettings"]["drawMode"] = 1
     # Liga levels 10..24 by his rating; vs COM the picker's 0..4 (Amateur..Legendary, the game's own)
     match["gamesettings"]["difficulty"] = (max(0, min(4, int(room["AI"]["index"].get("difficulty") or 0))) if kind == "vscom"
+                                           else ARENA_LEVELS[len(run["matches"])] if kind == "boxing"
                                            else 10 + min(14, (vm["elo"][i] - LADDER_START) // 55))
     match["leagueparam"] = {"matchtype": "ladder" if kind == "ladder" else "friendly", "round": 0, "home": teamid,
                             "away": away, "leagueid": 0}
@@ -8287,7 +8308,8 @@ def ladder_match(st, room):
     # "name" as strings (jsoncpp asCString crashes on a missing one), "privateip" as a list and,
     # for ladder types, summary.ladderelo as the 5 ratings (the manager one is ladderelo[len - 2]).
     match["type"] = {"ladder": "Ladder_MGR_PvP_1v1" if i == 3 else "Ladder_PvP_1v1", "friendly": "Friendly_PvP_1v1",
-                     "vscom": "Friendly_PvE_1v1", "koth": "Regional_League", "exhibition": "Exhibition_PvP"}[kind]
+                     "vscom": "Friendly_PvE_1v1", "koth": "Regional_League", "exhibition": "Exhibition_PvP",
+                     "boxing": "Boxing_PvP"}[kind]
     match["id"] = str(int(time.time()) % 1000000000)  # relaySessionInfo.matchid = parseInt(resourceId)
     match["relayServer"] = {"address": "127.0.0.1:28010", "forceRelay": True}  # read, never contacted
     for p in match["side"]["left"]["players"]:
@@ -8311,7 +8333,8 @@ def ladder_match(st, room):
     st["match"] = match
     st["ladder_pending"] = {"id": match["id"], "index": i, "opponent": vm["_id"] if vm else None, "kind": kind,
                             "teamid": away, "record": {"vscom": "vscom", "koth": "koth", "exhibition": "exhibition"}.get(
-                                kind, "quick" if room["type"] == "pvp_random" else "custom")}
+                                kind, "quick" if room["type"] == "pvp_random" else "custom"),
+                            **({"grade": grade} if kind == "boxing" else {})}
     VM_CHAT_AFTER.clear()  # a result whose Rank screen never came back is not said on a later one
     room["side"]["right"]["players"] = [room_vm(vm)] if vm else []
     room.update(stage="matched", search=None, matchmaking={"resources": [{"uri": f"/match/{match['id']}", "body": match}]})
@@ -8328,6 +8351,8 @@ def ladder_result(st, mid, req):
     if p.get("kind") == "exhibition":  # he played the club he picked
         vm = {**vm, "teamid": p["teamid"]}
         exhibition_played(st, 1)
+    if p.get("kind") == "boxing":  # the Arena's club under his name
+        vm = {**vm, "teamid": p["teamid"]}
     h, a = req.get("home") or {}, req.get("away") or {}
     mine, theirs = int(h.get("score") or 0), int(a.get("score") or 0)
     sh, sa = int(h.get("shootout") or 0), int(a.get("shootout") or 0)
@@ -8339,6 +8364,8 @@ def ladder_result(st, mid, req):
         old, new, streak = koth_record(st, vm, mine, theirs, sh, sa)
         if (st.get("match") or {}).get("id") == mid and "reward" in st["match"]:  # the reward screen's "Poin Divisi"
             st["match"]["reward"].update(preveloinfo={"elo": old}, eloinfo={"elo": new, "streak": streak, "goaldiff": mine - theirs})
+    elif p["kind"] == "boxing":
+        arena_record(st, p, mine, theirs, sh, sa)
     else:
         friendly_record(st, p, vm, mine, theirs, sh, sa)
     st.pop("ladder_pending")
@@ -10721,6 +10748,305 @@ ENDPOINTS.update({"/static/db/RENTALPLAYER": ep_rental_static, "/rentalplayer/sq
 ROUTES += [(re.compile(r"/rentalplayer/squad/proposal/(\d+)"), ep_rental_proposal),
            (re.compile(r"/rentalplayer/search/(\w+)/(\d+)"), ep_rental_search),
            (re.compile(r"/rentalplayer/(\w+)"), ep_rental_transfer)]
+
+
+# --------------------------------------------------------------------------- #
+# Arena (user: "lanjutkan fitur berikutnya"): the client's Boxing Day mode, type "arena"
+# (BoxingdayController / BoxingdayProxy in data/ui/libs/Module.big and the Boxingday*Screen files).
+# FO3 ID shipped the screens; GET /boxingday/info got {} and features.boxingday was not sent, so the
+# lobby never showed the button. Of its three types (boxingday: a ranked tournament; premier:
+# win-streak classes; arena: a run with a drawn club) the arena needs no other player.
+#   features.boxingday {} (GET /account): MenuScreen.initBoxingday's switch.
+#   GET /boxingday/info {rewardedep, rewardlimit, schedules {<boxingid, 1 or more>: {type, state,
+#     classlevel, fee, feeitem, pvp, pve, teamselect, schedule {startdate, enddate "YYYYMMDDhhmm",
+#     starttime, endtime "hhmm" (both "0000": on at any hour), week [7, Sunday first]}}}}:
+#     BoxingdayProxy's cached resource. Its listeners take ON_CHANGE only, which a GET's reply never
+#     fires (as with /coach/me, see coach_cards_push), so every GET is answered and then pushed
+#     (boxing_feed). state "playing" = my run is on (the lobby button resumes it), "closed" | "out" =
+#     it ended and the reward waits (status Reward: the client sends PUT /boxingday/reward).
+#   GET /boxingday/summary {summaries {<id>: {dailyreenter, joincount, maxrewards {money}, type}}}:
+#     the class screen (it opens because the schedule has a fee); entrances left = dailyreenter -
+#     joincount.
+#   POST /boxingday/room {boxingid, type "pvp_boxingday", feetype} -> {result, resources [/room/<id>],
+#     boxingid, starting, suggestiveteams [{teamid, grade}], teamid}: the fee is taken here (no other
+#     request carries it). teamid 0 opens BoxingdayArenaTeamSelectionScreen on suggestiveteams (a
+#     carousel of five; grade = stars), anything else the waiting room.
+#   PUT /boxingday/room/<roomid>/team {teamid, boxingid} -> {result}: my club for the run (the client
+#     sends it only with teamselect "club" or "national").
+#   GET /boxingday/<id>/info/pvp {record {win, lose, draw, matches [row]}, accumulate, teamgrade}: the
+#     waiting room (BoxingdayMainScreenPremium). row = {rewards {wincount, matchcount, win {money,
+#     items}, gradebonus {money, items}}} and, once played, {_id, oppteamid, oppteamgrade, goals,
+#     goalsconceded, shootout, shootoutconceded, breakgrade}; a row without oppteamid is to play.
+#   GET /boxingday/<id>/alarm {type "pvp", name, win}: its ticker, asked every 10 s.
+#   POST /room/<id>/matchmaking ("Game mulai"): the Rank path (ladder_match, kind "boxing"), my side
+#     the run's club at its own squad as in Exhibition, match type "Boxing_PvP".
+#   PUT /boxingday/<id>/close ("Menyerah", after PUT /room/<id>/leave): the run ends without reward.
+#   PUT /boxingday/reward {boxingid} -> {result, oldstate ("closed": "the matches are over", else
+#     "eliminated"), teamid, pvp {rewards {win, streak, breakbonus, gradebonus: lists}}, matches [rows,
+#     first match first], accumulate}: BoxingdayRewardPremiumScreen; the EP is paid here.
+# The original's numbers are lost; these are the server's own. One schedule, on at any hour. A run
+# costs ARENA_FEE EP, ARENA_DAILY runs a WIB day. It draws ARENA_TEAMS clubs, one of each band of
+# stars (by the best eleven, gen_teams.team_grade); the club picked plays up to ARENA_MATCHES
+# matches against clubs that get stronger (arena_opponent) and harder (ARENA_LEVELS), and is out
+# after ARENA_OUT losses. A won match is worth ARENA_WIN_EP times the club's factor (a weaker club
+# pays more, as the screen's own line says), plus ARENA_BREAK of it per star the beaten club stood
+# above mine ("Break rank"). EP amounts follow the Ekonomi tab's player prices. Giving up forfeits
+# it all, as the client's dialog says. The run is kept with the manager (coach["arena"]).
+# --------------------------------------------------------------------------- #
+ARENA_ID = 1  # the schedule's boxingid
+ARENA_FEE = 100_000  # EP a run costs
+ARENA_DAILY = 3  # runs a WIB day
+ARENA_BANDS = ((4.0, 5.0), (3.0, 3.5), (2.0, 2.5), (1.0, 1.5), (0.5, 0.5))  # stars of the clubs drawn, one of each
+ARENA_OUT = 2  # the losses that end a run
+ARENA_WIN_EP = (30_000, 50_000, 70_000, 100_000, 150_000, 200_000, 300_000)  # winning match n; its length = a run's matches
+ARENA_LEVELS = (12, 14, 16, 18, 20, 22, 24)  # gamesettings.difficulty of match n (Liga's 10..24)
+ARENA_MATCHES = len(ARENA_WIN_EP)
+ARENA_BREAK = 0.25  # of a win's EP per star the beaten club stood above mine
+
+
+def arena_ep(n):
+    return nice_price(n * ECONOMY["players"])
+
+
+def arena_factor(grade):
+    """A club's share of ARENA_WIN_EP: five stars 0.6 .. half a star 1.5."""
+    return round(1.6 - 0.2 * grade, 2)
+
+
+@functools.lru_cache(maxsize=1)
+def arena_clubs():
+    """{teamid: stars} of the clubs a run may draw or meet: the clubs with a kit, no national team."""
+    out = {}
+    for _, leagues in club_index():
+        for lid, teams in leagues:
+            if lid not in (gen_teams.NATIONAL_LEAGUE, 2111):
+                out.update({t: gen_teams.team_grade(_CLUB_POWER[t]) for t in teams if t in _CLUB_POWER})
+    return out
+
+
+def arena_draw(rng):
+    """A run's clubs [{teamid, grade}]: one of each ARENA_BANDS (a band no club is in: the nearest stars)."""
+    clubs, out = arena_clubs(), []
+    for lo, hi in ARENA_BANDS:
+        free = sorted(t for t in clubs if t not in {x["teamid"] for x in out})
+        pool = [t for t in free if lo <= clubs[t] <= hi] or sorted(free, key=lambda t: (abs(clubs[t] - lo), t))[:5]
+        if pool:
+            t = rng.choice(pool)
+            out.append({"teamid": t, "grade": clubs[t]})
+    return out
+
+
+def arena_data(st):
+    """My Arena record {day, joins, run, wins, draws, losses, best}; the day's entrances start over
+    at 00:00 WIB."""
+    a = my_coach(st).setdefault("arena", {})
+    if a.get("day") != today_wib():
+        a.update(day=today_wib(), joins=0)
+    return a
+
+
+def arena_opponent(run, n):
+    """(teamid, stars, virtual manager) of the run's match n: a club one star under mine at first
+    and half a star stronger each match, never mine or one already met; his name is a manager's."""
+    clubs, rng = arena_clubs(), random.Random(f"{run['id']}/{n}")
+    want = max(0.5, min(5.0, run["grade"] + (n - 3) * 0.5))
+    met = {run["teamid"], *(m["opp"] for m in run["matches"])}
+    pool = sorted((t for t in clubs if t not in met), key=lambda t: (abs(clubs[t] - want), t))
+    t = rng.choice([x for x in pool if abs(clubs[x] - want) == abs(clubs[pool[0]] - want)])
+    return t, clubs[t], rng.choice(virtual_managers())
+
+
+def arena_rows(run):
+    """The run as the waiting room's list: a row per match, the played ones filled in. A lost or
+    forfeited match shows no EP."""
+    rows = []
+    for n in range(1, ARENA_MATCHES + 1):
+        m = run["matches"][n - 1] if n <= len(run["matches"]) else None
+        ep = m["ep"] if m else arena_ep(ARENA_WIN_EP[n - 1] * arena_factor(run["grade"]))
+        row = {"rewards": {"wincount": n, "matchcount": n, "win": {"money": 0 if run.get("forfeit") else ep, "items": []}}}
+        if m:
+            row.update(_id=f"{run['id']}{n}", oppteamid=m["opp"], oppteamgrade=m["grade"], goals=m["gf"], goalsconceded=m["ga"],
+                       shootout=m["sf"], shootoutconceded=m["sa"], breakgrade=int(m["bonus"] > 0 and not run.get("forfeit")))
+            if row["breakgrade"]:
+                row["rewards"]["gradebonus"] = {"money": m["bonus"], "items": []}
+        rows.append(row)
+    return rows
+
+
+def arena_record(st, p, mine, theirs, sh, sa):
+    """A finished Arena match (ladder_result): the run's next row. The run is over with its last
+    match (state closed) or its ARENA_OUT-th loss (out); the reward waits for PUT /boxingday/reward."""
+    a = arena_data(st)
+    run = a.get("run")
+    if not run or run["state"] != "playing" or len(run["matches"]) >= ARENA_MATCHES:
+        return
+    n = len(run["matches"]) + 1
+    res = 1 if (mine, sh) > (theirs, sa) else -1 if (mine, sh) < (theirs, sa) else 0
+    ep = arena_ep(ARENA_WIN_EP[n - 1] * arena_factor(run["grade"])) if res > 0 else 0
+    run["matches"].append({"opp": p["teamid"], "grade": p.get("grade", 0), "gf": mine, "ga": theirs, "sf": sh, "sa": sa, "res": res,
+                           "ep": ep, "bonus": nice_price(ep * ARENA_BREAK * max(0, p.get("grade", 0) - run["grade"]))})
+    key = ("losses", "draws", "wins")[res + 1]
+    a[key] = a.get(key, 0) + 1
+    if sum(m["res"] < 0 for m in run["matches"]) >= ARENA_OUT:
+        run["state"] = "out"
+    elif n >= ARENA_MATCHES:
+        run["state"] = "closed"
+
+
+def arena_statistics(coach):
+    """/coach/me statistics.boxingday (Info Manager reads pvp and pve without a guard)."""
+    a = coach.get("arena") or {}
+    row = lambda on: {"wins": a.get("wins", 0) * on, "draws": a.get("draws", 0) * on, "losses": a.get("losses", 0) * on,
+                      "maxstreak": a.get("best", 0) * on, "bestrank": 0}
+    return {"pvp": row(1), "pve": row(0)}
+
+
+def boxing_info(st):
+    """GET /boxingday/info's body: the Arena schedule with my run's state (none without a manager or
+    the clubs' ratings)."""
+    if not st["coaches"] or not arena_clubs():
+        return {"rewardedep": 0, "rewardlimit": 0, "schedules": {}}
+    run = arena_data(st).get("run") or {}
+    return {"rewardedep": 0, "rewardlimit": 0, "schedules": {str(ARENA_ID): {
+        "type": "arena", "state": run.get("state", "none"), "classlevel": 1, "fee": arena_ep(ARENA_FEE), "feeitem": 0,
+        "pvp": True, "pve": False, "teamselect": "club",
+        "schedule": {"startdate": "202001010000", "enddate": "209912312359", "starttime": "0000", "endtime": "0000",
+                     "week": [True] * 7}}}}
+
+
+def boxing_feed(st, delay=0.5):
+    """Push /boxingday/info a moment later (after the reply at hand is read): the feed that the
+    lobby button and the status machine wait for."""
+    threading.Timer(delay, messenger_push, ("/boxingday/info", boxing_info(st))).start()
+
+
+def ep_boxingday_info(query, body):
+    st = _state()
+    boxing_feed(st)
+    return _json(boxing_info(st))
+
+
+def ep_boxingday_summary(query, body):
+    st = _state()
+    if not st["coaches"]:
+        return _json({"summaries": {}})
+    best = sum(arena_ep(x * arena_factor(ARENA_BANDS[-1][0])) for x in ARENA_WIN_EP)
+    return _json({"summaries": {str(ARENA_ID): {"dailyreenter": ARENA_DAILY, "joincount": arena_data(st)["joins"],
+                                                "maxrewards": {"money": best}, "type": "arena"}}})
+
+
+def arena_room_team(room, run):
+    """The run's club on my side of its room (the waiting room's crest reads option.authTeamId)."""
+    if run["teamid"]:
+        room["side"]["left"]["authTeamId"] = run["teamid"]
+        room["option"] = {**(room.get("option") or {}), "authTeamId": run["teamid"]}
+
+
+def ep_boxingday_room(query, body):
+    """POST /boxingday/room: into my run's room. A new run takes the fee and draws its clubs; one
+    still on is entered again as it stands."""
+    req = json.loads(body or b"{}")
+    st = _state()
+    if not st["coaches"] or str(req.get("boxingid")) != str(ARENA_ID) or not arena_clubs():
+        return _json({"result": False, "reason": "invalid boxingid"})
+    a, fee = arena_data(st), arena_ep(ARENA_FEE)
+    run = a.get("run")
+    if run and run["state"] != "playing":
+        return _json({"result": False, "reason": "invalid stage"})  # its reward first
+    if not run and a["joins"] >= ARENA_DAILY:
+        return _json({"result": False, "reason": "exceeds joincount"})  # the client has its own text for this one
+    if not run and my_coach(st).get("ep", START_EP) < fee:
+        return _json({"result": False, "reason": "NOT_ENOUGH_EP"})
+    ep_room(query, json.dumps({"slotsize": 1, "type": "pvp_boxingday"}).encode())
+    st = _state()
+    a, room = arena_data(st), st["room"]
+    starting = not a.get("run")
+    if starting:
+        add_ep(st, -fee)
+        a["joins"] += 1
+        rid = os.urandom(4).hex()
+        a["run"] = {"id": rid, "state": "playing", "fee": fee, "teams": arena_draw(random.Random(rid)), "teamid": 0,
+                    "grade": 0, "matches": []}
+    run = a["run"]
+    arena_room_team(room, run)
+    _save(st)
+    boxing_feed(st)
+    return _json({"result": True, "boxingid": ARENA_ID, "starting": starting, "suggestiveteams": run["teams"], "teamid": run["teamid"],
+                  "resources": [{"uri": f"/room/{room['roomid']}", "body": room}] + coach_me_resources(st, _default_slot(st))})
+
+
+def _boxing_team(st, room, req):
+    """PUT /boxingday/room/<id>/team {teamid, boxingid}: one of the run's drawn clubs, for the whole run."""
+    run = arena_data(st).get("run") or {}
+    teamid = int(req.get("teamid") or 0)
+    pick = next((t for t in run.get("teams", []) if t["teamid"] == teamid), None)
+    if run.get("state") != "playing" or pick is None or run["teamid"] not in (0, teamid):
+        return _json({"result": False, "reason": "invalid team"})
+    run.update(teamid=teamid, grade=pick["grade"])
+    arena_room_team(room, run)
+
+
+def ep_boxingday_room_info(bid, mode, query, body):
+    """GET /boxingday/<id>/info/pvp: the waiting room. A run that is over is fed again, so the
+    client's status turns Reward now that the screen is there to ask for it."""
+    st = _state()
+    run = arena_data(st).get("run") if st["coaches"] else None
+    if str(bid) != str(ARENA_ID) or not run:
+        return _json({"record": {"win": 0, "lose": 0, "draw": 0, "matches": []}, "accumulate": True})
+    if run["state"] != "playing":
+        boxing_feed(st)
+    res = [m["res"] for m in run["matches"]]
+    return _json({"record": {"win": res.count(1), "lose": res.count(-1), "draw": res.count(0), "matches": arena_rows(run)},
+                  "accumulate": True, "teamgrade": run["grade"]})
+
+
+def ep_boxingday_alarm(bid, query, body):
+    """GET /boxingday/<id>/alarm: the waiting room's ticker, now and then a manager's wins."""
+    r = random.Random(int(time.time()) // 30)
+    if r.random() < 0.5:
+        return _json({})
+    return _json({"type": "pvp", "name": r.choice(virtual_managers())["name"], "win": r.randint(2, ARENA_MATCHES)})
+
+
+def ep_boxingday_close(bid, query, body):
+    """PUT /boxingday/<id>/close: giving up. The run ends without reward."""
+    st = _state()
+    run = arena_data(st).get("run") if st["coaches"] else None
+    if str(bid) != str(ARENA_ID) or not run or run["state"] != "playing":
+        return _json({"result": False, "reason": "invalid boxingid"})
+    run.update(state="out", forfeit=True)
+    _save(st)
+    boxing_feed(st)
+    return _json({"result": True})
+
+
+def ep_boxingday_reward(query, body):
+    """PUT /boxingday/reward {boxingid}: an ended run pays its EP and is gone; the next can start."""
+    req = json.loads(body or b"{}")
+    st = _state()
+    a = arena_data(st) if st["coaches"] else {}
+    run = a.get("run")
+    if str(req.get("boxingid")) != str(ARENA_ID) or not run or run["state"] == "playing":
+        return _json({"result": False, "reason": "invalid boxingid"})
+    bonus = 0 if run.get("forfeit") else sum(m["bonus"] for m in run["matches"])
+    win = 0 if run.get("forfeit") else sum(m["ep"] for m in run["matches"])
+    add_ep(st, win + bonus)
+    a["best"] = max(a.get("best", 0), sum(m["res"] > 0 for m in run["matches"]))
+    a["run"] = None
+    _save(st)
+    boxing_feed(st)
+    ep = lambda n: [{"itemid": EP_ITEM, "count": n}] if n else []
+    return _json({"result": True, "oldstate": run["state"], "teamid": run["teamid"], "matches": arena_rows(run), "accumulate": True,
+                  "pvp": {"rewards": {"win": ep(win), "streak": [], "breakbonus": [], "gradebonus": ep(bonus)}},
+                  "resources": coach_me_resources(st, _default_slot(st))})
+
+
+ENDPOINTS.update({"/boxingday/info": ep_boxingday_info, "/boxingday/summary": ep_boxingday_summary,
+                  "/boxingday/room": ep_boxingday_room, "/boxingday/reward": ep_boxingday_reward})
+ROUTES += [(re.compile(r"/boxingday/room/\d+/team"), room_change(_boxing_team)),
+           (re.compile(r"/boxingday/(\d+)/info/(pvp|pve)"), ep_boxingday_room_info),
+           (re.compile(r"/boxingday/(\d+)/alarm"), ep_boxingday_alarm),
+           (re.compile(r"/boxingday/(\d+)/close"), ep_boxingday_close)]
 
 
 RESPONSES = os.path.join(HERE, "responses")

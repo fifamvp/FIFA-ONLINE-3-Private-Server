@@ -425,6 +425,12 @@ Item saya, Gudang bên dưới là tên màn hình trong game, được giữ ng
 - **Huy hiệu CLB**: mọi CLB trong menu Klub (60 CLB AI và CLB của bạn) có huy hiệu riêng ở danh sách CLB và trang
   CLB thay cho huy hiệu mặc định: khiên, hình tròn hoặc cờ đuôi nheo theo màu CLB, do máy chủ vẽ từ id của CLB
   (PNG 20, 50 và 100 px, như game gốc). Huy hiệu CLB của bạn đổi theo màu chọn ở Klub > Manajemen.
+- **Arena** (nút sự kiện ở sảnh; chế độ "Boxing Day" của client mà FO3 ID chưa từng mở lịch): trả phí vào cửa
+  (100.000 EP, ba lượt mỗi ngày), chọn một trong năm CLB được rút với sức mạnh khác nhau (năm sao đến nửa sao) và
+  chơi tối đa bảy trận bằng đội hình gốc của CLB đó, gặp các CLB ngày càng mạnh và khó hơn, mang tên HLV ảo. Thua
+  hai trận là kết thúc lượt. Mỗi trận thắng trả EP (30.000 đến 300.000; CLB yếu hơn được nhiều hơn, cộng thưởng
+  "Break rank" khi thắng CLB nhiều sao hơn). Phòng chờ liệt kê các trận và giá trị từng trận, màn hình thưởng trả
+  tất cả khi lượt kết thúc; bỏ cuộc thì mất thưởng. Số EP theo giá cầu thủ ở tab Ekonomi.
 - **Mở được hộp ngẫu nhiên** (Kotak Platinum và các hộp khác, issue #12): màn hình hộp liệt kê phần thưởng
   từ `staticdata.availables`, trước đây bị thiếu, nên mọi hộp đều lỗi khi bấm "Gunakan" (dùng).
 - **Thẻ mới vào Tim Cadangan**: thẻ từ gói, giao dịch, Market, Bag hoặc trang quản trị hiện "-" ở cột Tim
