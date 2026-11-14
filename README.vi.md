@@ -431,6 +431,12 @@ Item saya, Gudang bên dưới là tên màn hình trong game, được giữ ng
   hai trận là kết thúc lượt. Mỗi trận thắng trả EP (30.000 đến 300.000; CLB yếu hơn được nhiều hơn, cộng thưởng
   "Break rank" khi thắng CLB nhiều sao hơn). Phòng chờ liệt kê các trận và giá trị từng trận, màn hình thưởng trả
   tất cả khi lượt kết thúc; bỏ cuộc thì mất thưởng. Số EP theo giá cầu thủ ở tab Ekonomi.
+- **Survival** (nút sự kiện thứ hai ở sảnh; loại "premier" của cùng chế độ): thử thách chuỗi thắng bằng đội hình của
+  chính bạn ở ba hạng Bronze, Silver và Gold (phí vào 50.000 / 150.000 / 400.000 EP, mỗi hạng ba lượt một ngày). Mỗi
+  trận gặp một HLV ảo có điểm Rank tăng theo hạng và độ dài chuỗi thắng; hòa thì đá hiệp phụ và luân lưu. Mỗi trận
+  thắng cộng EP vào phần thưởng đã tích lũy (Bronze 30.000 đến 140.000 cho trận thắng thứ năm; Silver gấp ba, Gold
+  gấp tám). "Menyerah" kết thúc lượt với phần đã tích lũy, thua thì kết thúc tay trắng, thắng năm trận liên tiếp
+  nhận toàn bộ.
 - **Mở được hộp ngẫu nhiên** (Kotak Platinum và các hộp khác, issue #12): màn hình hộp liệt kê phần thưởng
   từ `staticdata.availables`, trước đây bị thiếu, nên mọi hộp đều lỗi khi bấm "Gunakan" (dùng).
 - **Thẻ mới vào Tim Cadangan**: thẻ từ gói, giao dịch, Market, Bag hoặc trang quản trị hiện "-" ở cột Tim

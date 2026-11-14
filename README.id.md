@@ -475,6 +475,13 @@ Sudah ditambahkan dan lolos tes, tapi belum dicek di client:
   ditambah bonus "Break rank" bila mengalahkan klub berbintang lebih tinggi). Ruang tunggu menampilkan daftar
   pertandingan beserta nilainya, dan layar hadiah membayar semuanya saat rangkaian selesai; menyerah berarti
   hadiah hangus. Jumlah EP mengikuti harga pemain di tab Ekonomi.
+- **Survival** (tombol event kedua di lobi; jenis "premier" dari mode yang sama): tantangan kemenangan beruntun
+  memakai skuadmu sendiri dalam tiga kelas, Bronze, Silver dan Gold (biaya masuk 50.000 / 150.000 / 400.000
+  EP, tiga kali sehari untuk tiap kelas). Tiap pertandingan melawan manajer virtual yang rating Rank-nya naik
+  mengikuti kelas dan panjang rekor beruntun; skor imbang dilanjutkan ke perpanjangan waktu dan adu penalti.
+  Tiap kemenangan menambah EP ke hadiah terkumpul (Bronze 30.000 sampai 140.000 untuk kemenangan kelima;
+  Silver tiga kali, Gold delapan kali lipatnya). "Menyerah" mengakhiri rangkaian dengan hadiah yang sudah
+  terkumpul, kalah mengakhirinya tanpa hadiah, dan lima kemenangan beruntun membayar semuanya.
 - **Kotak acak bisa dibuka** (Kotak Platinum dan lainnya, issue #12): layar kotak menampilkan
   hadiahnya dari `staticdata.availables`, yang belum ada, jadi tiap kotak gagal saat "Gunakan".
 - **Kartu baru masuk Tim Cadangan**: kartu dari pak, trade, Market, Bag, atau halaman admin tampil

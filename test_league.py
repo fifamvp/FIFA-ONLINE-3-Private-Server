@@ -2110,12 +2110,12 @@ def main():
                 assert sch["schedule"]["starttime"] == sch["schedule"]["endtime"] == "0000" and sch["schedule"]["week"] == [True] * 7
                 fire(); assert pushed[n_push:] == [("/boxingday/info", info)]  # every GET is fed: its listeners take no GET reply
                 summ = B("/boxingday/summary")["summaries"][aid]
-                assert (summ["dailyreenter"], summ["joincount"], summ["type"]) == (hc.ARENA_DAILY, 0, "arena") and summ["maxrewards"]["money"] > fee
+                assert (summ["dailyreenter"], summ["joincount"], summ["type"]) == (hc.BOXING_DAILY, 0, "arena") and summ["maxrewards"]["money"] > fee
                 assert not B("/boxingday/room", {**enter, "boxingid": 99})["result"] and my_ep() == ep0
                 r = B("/boxingday/room", enter)
                 room, teams = r["resources"][0]["body"], r["suggestiveteams"]; rid = room["roomid"]
                 assert r["result"] and r["boxingid"] == hc.ARENA_ID and r["starting"] and r["teamid"] == 0 and room["type"] == "pvp_boxingday"
-                assert r["resources"][1]["uri"] == "/coach/me" and my_ep() == ep0 - fee and hc.arena_data(hc._state())["joins"] == 1
+                assert r["resources"][1]["uri"] == "/coach/me" and my_ep() == ep0 - fee and hc.arena_data(hc._state())["joins"] == {aid: 1}
                 assert len(teams) == len(hc.ARENA_BANDS) == len({t["teamid"] for t in teams})  # five clubs, strongest band first
                 assert [t["grade"] for t in teams] == sorted((t["grade"] for t in teams), reverse=True) and all(hc.has_kit(t["teamid"]) for t in teams)
                 assert B("/boxingday/summary")["summaries"][aid]["joincount"] == 1
@@ -2141,24 +2141,25 @@ def main():
                 def play(gf, ga):
                     rq(rid, "matchmaking"); fire()
                     st = hc._state(); m = st["match"]; opp = m["side"]["right"]["team"]["teamid"]
-                    n = len(hc.arena_data(st)["run"]["matches"])
-                    assert m["type"] == "Boxing_PvP" and m["side"]["left"]["team"]["teamid"] == hc.arena_data(st)["run"]["teamid"] != opp
+                    n = len(hc.boxing_run(st, hc.ARENA_ID)["matches"])
+                    assert m["type"] == "Boxing_PvP" and m["side"]["left"]["team"]["teamid"] == hc.boxing_run(st, hc.ARENA_ID)["teamid"] != opp
                     assert m["side"]["left"]["team"]["teamcolors"] == [] and m["gamesettings"]["difficulty"] == hc.ARENA_LEVELS[n]
-                    assert st["ladder_pending"]["kind"] == "boxing" and st["ladder_pending"]["teamid"] == opp
+                    assert st["ladder_pending"]["kind"] == "boxing" and st["ladder_pending"]["teamid"] == opp and st["ladder_pending"]["club"]
+                    assert "drawMode" not in m["gamesettings"] or m["gamesettings"]["drawMode"] != 1  # an Arena match may end level
                     end(gf, ga)
                     st = hc._state()
                     assert st["match"]["reward"]["players"] == [] and "ladder_pending" not in st and st["room"]["stage"] == "room"
                     return opp
                 opp = play(3, 1)
-                run = hc.arena_data(hc._state())["run"]; m0 = run["matches"][0]
+                run = hc.boxing_run(hc._state(), hc.ARENA_ID); m0 = run["matches"][0]
                 assert run["state"] == "playing" and (m0["opp"], m0["res"], m0["ep"]) == (opp, 1, win_ep(1, pick["grade"]))
                 assert m0["bonus"] == hc.nice_price(m0["ep"] * hc.ARENA_BREAK * max(0, m0["grade"] - pick["grade"]))
                 row = B(f"/boxingday/{aid}/info/pvp")["record"]["matches"][0]
                 assert row["_id"] and (row["oppteamid"], row["goals"], row["goalsconceded"], row["oppteamgrade"]) == (opp, 3, 1, m0["grade"])
                 met = [opp, play(1, 1), play(0, 2)]
-                assert hc.arena_data(hc._state())["run"]["state"] == "playing"
+                assert hc.boxing_run(hc._state(), hc.ARENA_ID)["state"] == "playing"
                 met.append(play(0, 1))  # the second loss: out
-                run = hc.arena_data(hc._state())["run"]
+                run = hc.boxing_run(hc._state(), hc.ARENA_ID)
                 assert run["state"] == "out" and len(set(met)) == 4 == len(run["matches"]) and pick["teamid"] not in met
                 wait = B(f"/boxingday/{aid}/info/pvp")
                 assert (wait["record"]["win"], wait["record"]["draw"], wait["record"]["lose"]) == (1, 1, 2)
@@ -2171,7 +2172,7 @@ def main():
                 assert len(rew["matches"]) == hc.ARENA_MATCHES and [r_["rewards"]["matchcount"] for r_ in rew["matches"]] == list(range(1, hc.ARENA_MATCHES + 1))
                 assert rew["pvp"]["rewards"]["win"] == [{"itemid": hc.EP_ITEM, "count": m0["ep"]}] and rew["pvp"]["rewards"]["streak"] == []
                 assert my_ep() == before + m0["ep"] + m0["bonus"] and rew["resources"][0]["uri"] == "/coach/me"
-                assert hc.arena_data(hc._state())["run"] is None and not B("/boxingday/reward", {"boxingid": hc.ARENA_ID})["result"]
+                assert hc.boxing_run(hc._state(), hc.ARENA_ID) is None and not B("/boxingday/reward", {"boxingid": hc.ARENA_ID})["result"]
                 assert B("/boxingday/info")["schedules"][aid]["state"] == "none"
                 # a run given up pays nothing
                 r = B("/boxingday/room", enter); rid = r["resources"][0]["body"]["roomid"]; weak = r["suggestiveteams"][-1]
@@ -2187,7 +2188,7 @@ def main():
                 assert team(weak["teamid"])["result"]
                 for _ in range(hc.ARENA_MATCHES):
                     play(1, 0)
-                run = hc.arena_data(hc._state())["run"]
+                run = hc.boxing_run(hc._state(), hc.ARENA_ID)
                 assert run["state"] == "closed" and [m_["ep"] for m_ in run["matches"]] == [win_ep(n, weak["grade"]) for n in range(1, hc.ARENA_MATCHES + 1)]
                 assert [m_["grade"] for m_ in run["matches"]] == sorted(m_["grade"] for m_ in run["matches"]) and run["matches"][-1]["bonus"] > 0
                 before, bonus = my_ep(), sum(m_["bonus"] for m_ in run["matches"])
@@ -2196,11 +2197,70 @@ def main():
                 assert my_ep() == before + sum(m_["ep"] for m_ in run["matches"]) + bonus
                 assert any(r_["breakgrade"] and r_["rewards"]["gradebonus"]["money"] > 0 for r_ in rew["matches"])
                 # the day's entrances are used up; Info Manager counts the matches
-                assert hc.ARENA_DAILY == 3 and B("/boxingday/room", enter) == {"result": False, "reason": "exceeds joincount"}
+                assert hc.BOXING_DAILY == 3 and B("/boxingday/room", enter) == {"result": False, "reason": "exceeds joincount"}
                 st = hc._state(); bx = hc.coach_me(st, hc._default_slot(st))["statistics"]["boxingday"]
                 assert bx["pvp"] == {"wins": 2 + hc.ARENA_MATCHES, "draws": 1, "losses": 2, "maxstreak": hc.ARENA_MATCHES, "bestrank": 0} and set(bx["pve"].values()) == {0}
                 st = hc._state(); hc.arena_data(st)["day"] = "2000-01-01"; hc._save(st)  # a new day
                 assert B("/boxingday/summary")["summaries"][aid]["joincount"] == 0
+                # a record from before Survival (one Arena run and its count) is read as it was
+                st = hc._state(); hc.my_coach(st)["arena"] = {"day": hc.today_wib(), "joins": 2, "run": {"id": "old", "state": "playing", "teamid": 0, "grade": 0, "teams": [], "matches": []}}
+                assert hc.arena_data(st)["joins"] == {aid: 2} and hc.boxing_run(st, hc.ARENA_ID)["bid"] == hc.ARENA_ID and "run" not in hc.my_coach(st)["arena"]
+                # --- Survival (the mode's type premier): a win streak with my own squad, in three classes
+                sch = B("/boxingday/info")["schedules"]
+                assert [(sch[str(b)]["type"], sch[str(b)]["classlevel"], sch[str(b)]["teamselect"], sch[str(b)]["fee"]) for b in hc.PREMIER_IDS] == [
+                    ("premier", lv, "user", hc.arena_ep(f)) for lv, f in enumerate(hc.PREMIER_FEE, 1)] and len(sch) == 1 + len(hc.PREMIER_IDS)
+                summ = B("/boxingday/summary")["summaries"]
+                assert all(summ[str(b)]["type"] == "premier" and summ[str(b)]["maxrewards"]["money"] == hc.boxing_best(b) > sch[str(b)]["fee"] for b in hc.PREMIER_IDS)
+                bronze, silver, gold = hc.PREMIER_IDS
+                st = hc._state(); hc.my_coach(st)["ep"] = ep0; hc._save(st)
+                go = lambda bid: B("/boxingday/room", {**enter, "boxingid": bid})
+                r = go(bronze); rid = r["resources"][0]["body"]["roomid"]
+                assert r["result"] and r["starting"] and r["boxingid"] == bronze and "teamid" not in r and "suggestiveteams" not in r
+                assert my_ep() == ep0 - hc.arena_ep(hc.PREMIER_FEE[0]) and r["resources"][0]["body"]["boxingid"] == bronze
+                assert go(gold) == {"result": False, "reason": "invalid stage"}  # one class at a time: the client resumes the one on
+                assert not team(1)["result"]  # no club to pick: my own squad plays
+                zero = {k: {"money": 0} for k in ("win", "streak", "breakbonus", "gradebonus")}
+                wait = B(f"/boxingday/{bronze}/info/pvp")
+                assert wait["record"]["win"] == 0 and len(wait["record"]["matches"]) == hc.PREMIER_WINS and wait["rewards"] == zero
+                assert wait["maxrewards"] == {"money": hc.boxing_best(bronze)} and "teamgrade" not in wait
+
+                def streak(gf, ga, bid):  # "Win streak challenge": my club against a manager; a level score is played out
+                    rq(rid, "matchmaking"); fire()
+                    st = hc._state(); m = st["match"]; lp = st["ladder_pending"]; run = hc.boxing_run(st, bid)
+                    assert m["type"] == "Boxing_PvP" and m["side"]["left"]["team"]["teamid"] == hc.my_teamid(st) and m["gamesettings"]["drawMode"] == 1
+                    assert m["gamesettings"]["difficulty"] == hc.boxing_level(run) and (lp["kind"], lp["boxingid"], lp["club"]) == ("boxing", bid, False)
+                    assert m["side"]["right"]["team"]["teamid"] == hc.vm_by_id(lp["opponent"])["teamid"] == lp["teamid"]
+                    end(gf, ga)
+                streak(2, 0, bronze); streak(1, 0, bronze)
+                run = hc.boxing_run(hc._state(), bronze); got = hc.premier_ep(bronze, 1) + hc.premier_ep(bronze, 2)
+                assert run["state"] == "playing" and sum(m_["ep"] for m_ in run["matches"]) == got and hc.premier_ep(bronze, 1) == hc.arena_ep(hc.PREMIER_WIN_EP[0])
+                wait = B(f"/boxingday/{bronze}/info/pvp")
+                assert wait["record"]["win"] == 2 and wait["rewards"] == {**zero, "win": {"money": got}}
+                assert [row["rewards"]["win"]["money"] for row in wait["record"]["matches"]] == [hc.premier_ep(bronze, n) for n in range(1, hc.PREMIER_WINS + 1)]
+                # "Menyerah": the run ends with what it collected
+                assert body(hc.route(f"/boxingday/{bronze}/close")("", b"{}"))["result"] and hc.boxing_run(hc._state(), bronze)["state"] == "closed"
+                before = my_ep()
+                rew = B("/boxingday/reward", {"boxingid": bronze})
+                assert rew["oldstate"] == "closed" and rew["rewards"] == {**zero, "win": {"money": got}} and len(rew["matches"]) == hc.PREMIER_WINS
+                assert rew["pvp"]["rewards"]["win"] == [{"itemid": hc.EP_ITEM, "count": got}] and my_ep() == before + got
+                # a match lost ends a run with nothing
+                r = go(gold); rid = r["resources"][0]["body"]["roomid"]
+                assert r["starting"] and hc.premier_ep(gold, 1) == hc.arena_ep(hc.PREMIER_WIN_EP[0] * hc.PREMIER_FEE[2] / hc.PREMIER_FEE[0])
+                streak(1, 0, gold); streak(0, 1, gold)
+                assert hc.boxing_run(hc._state(), gold)["state"] == "out"
+                before = my_ep()
+                rew = B("/boxingday/reward", {"boxingid": gold})
+                assert rew["oldstate"] == "out" and rew["rewards"] == zero and rew["pvp"]["rewards"]["win"] == [] and my_ep() == before
+                assert all(row["rewards"]["win"]["money"] == 0 for row in rew["matches"]) and rew["matches"][1]["goalsconceded"] == 1
+                # the whole streak: everything is paid
+                r = go(silver); rid = r["resources"][0]["body"]["roomid"]
+                for _ in range(hc.PREMIER_WINS):
+                    streak(3, 2, silver)
+                assert hc.boxing_run(hc._state(), silver)["state"] == "closed"
+                before = my_ep()
+                rew = B("/boxingday/reward", {"boxingid": silver})
+                assert rew["oldstate"] == "closed" and my_ep() == before + hc.boxing_best(silver) and hc.arena_data(hc._state())["runs"] == {}
+                assert hc.arena_data(hc._state())["joins"] == {str(bronze): 1, str(gold): 1, str(silver): 1}
             arena_checks()
         finally:
             hc.threading.Timer = real_timer

@@ -449,6 +449,12 @@ Added, passing the tests but not yet checked in the client:
   (30,000 up to 300,000; more with a weaker club, plus a "Break rank" bonus for beating a higher-rated
   club). The waiting room lists the matches and what each is worth, and the reward screen pays it all when
   the run ends; giving up forfeits it. EP amounts follow the Ekonomi tab's player prices.
+- **Survival** (the lobby's second event button; the same mode's "premier" type): a win-streak challenge
+  with your own squad in three classes, Bronze, Silver and Gold (50,000 / 150,000 / 400,000 EP to enter, three
+  runs of each a day). Every match is against a virtual manager whose Rank rating rises with the class and
+  the streak; a level score goes to extra time and penalties. Each win adds EP to what the run has collected
+  (Bronze 30,000 up to 140,000 for the fifth; Silver three times, Gold eight times as much). "Menyerah" ends
+  the run with what is collected, a lost match ends it with nothing, and five wins in a row pay everything.
 - **Random boxes open** (Kotak Platinum and the rest, issue #12): the box screen lists its prizes
   from `staticdata.availables`, which was missing, so every box failed at "Gunakan".
 - **New cards join Tim Cadangan**: a card from a pack, a trade, the Market, the Bag or the admin
