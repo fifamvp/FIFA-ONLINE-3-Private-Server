@@ -8579,7 +8579,7 @@ def vm_say_result():
 # and cheer my results. The week's club points give their boosts to my match rewards, and my own
 # points of a day (CLUB_DAY_GOAL) pay CLUB_DAY_REWARD EP to the Bag.
 # Left out: the club facility and club ranking (their features are off in account_base.json),
-# club matches (PvP rooms) and emblems (the default crest shows).
+# club matches (PvP rooms). Emblems: see club_emblems.
 # --------------------------------------------------------------------------- #
 CLUB_FEE, CLUB_EXPAND_FEE = 10000, 5000  # EP: founding a club; one expansion
 CLUB_LIMIT, CLUB_EXPAND, CLUB_LIMIT_MAX = 30, 10, 60  # members: a new club, one expansion, at most
@@ -9371,6 +9371,7 @@ def ep_club_settings(what, value, query, body):
         c["skipjudgement"] = value == "true"
     elif what == "color" and isinstance(req.get("color"), int):
         c["color"] = req["color"]
+        messenger_push("/club/me/settings/emblem/latest", {"clubid": c["_id"]})  # its emblem follows (club_emblems)
     return club_reply(st)
 
 
@@ -9466,6 +9467,150 @@ def ep_club_record(what, query, body):
             {"clubid": c["_id"], "clubname": c["name"], "level": club_level(club_points(st, c, None)[0])[0], "rank": i + 1,
              "wins": 0, "forfeitwins": 0, "totalwins": 0, "totalforfeitwins": 0, "total": 0, "wp": 0} for i, c in enumerate(clubs)]})
     return _json({"month": month, "opponentrecords": [], "recentmatches": []})
+
+
+# Club emblems (user: "lanjutkan fitur selanjutnya", after the loan squad: the clubs' own crests).
+# ExternalAssetLoaderUtil.loadClubEmblem asks GET /club/<id>/emblem/small|medium|large.png (on
+# Module.server, not the CDN) for every club a screen shows; the original game's files in the
+# client's _cache/club/<id>/emblem are 20, 50 and 100 px RGBA PNGs. The request got {} (the client
+# kept that as the picture, so the default crest showed). Now every club has an emblem of its own,
+# drawn here without an image library: a shield, roundel or pennant in the club's colour with one
+# of ten fields and a charge, all drawn from the club's id (emblem_design), so a club keeps its
+# emblem and my own club's follows the colour picked in Klub > Manajemen: that save pushes
+# /club/me/settings/emblem/latest {clubid}, on which the client drops its cached files
+# (CoachProxy "ClubEmblemInvalidator") and loads them again.
+EMBLEM_PX = {"small": 20, "medium": 50, "large": 100}
+EMBLEM_MASTER = 200  # drawn at this size, then averaged down to each file's
+EMBLEM_INNER = 0.86  # the field inside the border, as a share of the whole
+EMBLEM_SHAPES, EMBLEM_FIELDS, EMBLEM_CHARGES = 3, 10, 5
+EMBLEM_STAR = [(0.5 + r * math.sin(i * math.pi / 5), 0.47 - r * math.cos(i * math.pi / 5))
+               for i in range(10) for r in [0.2 if i % 2 == 0 else 0.085]]
+
+
+def png_rgba(px, w, h):
+    """An 8-bit RGBA PNG of the pixel bytes px (rows from the top)."""
+    chunk = lambda k, c: struct.pack(">I", len(c)) + k + c + struct.pack(">I", zlib.crc32(k + c))
+    raw = b"".join(b"\0" + px[y * w * 4:(y + 1) * w * 4] for y in range(h))
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(raw, 9)) + chunk(b"IEND", b""))
+
+
+def emblem_design(cid, color):
+    """(shape, field, charge, (colour, second, border, charge colour)) of a club's emblem."""
+    r = random.Random(vmseed(f"emblem/{cid}"))
+    a = (color >> 16 & 255, color >> 8 & 255, color & 255)
+    light = (a[0] * 299 + a[1] * 587 + a[2] * 114) // 1000 >= 150
+    second = (24, 32, 44) if light else (240, 240, 240)
+    gold = (242, 194, 48)
+    return (r.randrange(EMBLEM_SHAPES), r.randrange(EMBLEM_FIELDS), r.randrange(EMBLEM_CHARGES),
+            (a, second, tuple(v * 45 // 100 for v in a), gold if sum(abs(x - y) for x, y in zip(a, gold)) > 150 else second))
+
+
+def emblem_in(shape, x, y):
+    """Is (x, y) of the unit square inside the outline: 0 shield, 1 roundel, 2 pennant."""
+    if shape == 1:
+        return (x - 0.5) ** 2 + (y - 0.5) ** 2 <= 0.2116
+    if not 0.04 <= y <= 0.96:
+        return False
+    if shape == 0:
+        half = 0.43 if y <= 0.5 else 0.43 * max(0.0, 1 - ((y - 0.5) / 0.46) ** 2) ** 0.5
+    else:
+        half = 0.43 if y <= 0.34 else 0.43 * (1 - ((y - 0.34) / 0.62) ** 1.8)
+    return abs(x - 0.5) <= half
+
+
+def emblem_charge(charge, u, v, grow=1.0):
+    """Is (u, v) on the charge (1 disc, 2 star, 3 lozenge, 4 ring), scaled by grow about its centre."""
+    u, v = 0.5 + (u - 0.5) / grow, 0.47 + (v - 0.47) / grow
+    d = (u - 0.5) ** 2 + (v - 0.47) ** 2
+    if charge == 1:
+        return d <= 0.0225
+    if charge == 3:
+        return abs(u - 0.5) / 0.13 + abs(v - 0.47) / 0.19 <= 1
+    if charge == 4:
+        return 0.0121 <= d <= 0.03
+    if charge == 2 and d <= 0.04:
+        hit, pts = False, EMBLEM_STAR
+        for (x1, y1), (x2, y2) in zip(pts, pts[1:] + pts[:1]):
+            if (y1 > v) != (y2 > v) and u < x1 + (v - y1) * (x2 - x1) / (y2 - y1):
+                hit = not hit
+        return hit
+    return False
+
+
+def emblem_field(field, u, v):
+    """Is (u, v) of the field in its second colour."""
+    if field == 1:
+        return int(u * 5) % 2 == 1  # pales
+    if field == 2:
+        return 0.37 <= v <= 0.6  # a band across
+    if field == 3:
+        return abs(u - v) <= 0.13  # a bend
+    if field == 4:
+        return u >= 0.5  # halves
+    if field == 5:
+        return (u < 0.5) != (v < 0.47)  # quarters
+    if field == 6:
+        return abs(v - 0.3 - abs(u - 0.5) * 0.9) <= 0.09  # a chevron
+    if field == 7:
+        return abs(u - 0.5) <= 0.085 or abs(v - 0.42) <= 0.085  # a cross
+    if field == 8:
+        return int(v * 6) % 2 == 1  # hoops
+    if field == 9:
+        return v <= 0.32  # a chief
+    return False
+
+
+@functools.lru_cache(maxsize=256)
+def club_emblems(cid, color):
+    """{size: PNG bytes} of a club's emblem in its colour (kept: a drawing takes about 0.1 s)."""
+    shape, field, charge, (a, second, border, cc) = emblem_design(cid, color)
+    n, k = EMBLEM_MASTER, 1 / EMBLEM_INNER
+    master = []  # premultiplied (r, g, b, alpha 0|1) per sample
+    for j in range(n):
+        y = (j + 0.5) / n
+        v = 0.5 + (y - 0.5) * k
+        for i in range(n):
+            x = (i + 0.5) / n
+            if not emblem_in(shape, x, y):
+                master.append(None)
+                continue
+            u = 0.5 + (x - 0.5) * k
+            if not emblem_in(shape, u, v):
+                master.append(border)
+            elif charge and emblem_charge(charge, u, v):
+                master.append(cc)
+            elif charge and emblem_charge(charge, u, v, 1.22):
+                master.append(border)
+            else:
+                master.append(second if emblem_field(field, u, v) else a)
+    out = {}
+    for size, px in EMBLEM_PX.items():
+        f, buf = n // px, bytearray()
+        for j in range(px):
+            for i in range(px):
+                cells = [master[(j * f + dj) * n + i * f + di] for dj in range(f) for di in range(f)]
+                hit = [c for c in cells if c is not None]
+                if hit:
+                    buf += bytes(sum(c[ch] for c in hit) // len(hit) for ch in range(3)) + bytes([255 * len(hit) // len(cells)])
+                else:
+                    buf += b"\0\0\0\0"
+        out[size] = png_rgba(bytes(buf), px, px)
+    return out
+
+
+def club_colour(st, cid):
+    """The colour of club cid (mine or an AI club), None for no such club."""
+    mine = st.get("club") or {}
+    if not mine.get("ai") and cid == mine.get("_id"):
+        return mine.get("color", CLUB_COLORS[0])
+    return (ai_clubs_now().get(cid) or {}).get("color")
+
+
+def ep_club_emblem(cid, size, query, body):
+    """GET /club/<id>/emblem/small|medium|large.png."""
+    color = club_colour(_state(), cid)
+    return ep_empty(query, body) if color is None else ("image/png", club_emblems(cid, color)[size])
 
 
 def club_id(st):
@@ -9950,6 +10095,7 @@ ROUTES = [
     (re.compile(r"/club/me/join/(\w+)"), ep_club_request), (re.compile(r"/club/me/expand/(\d+)"), ep_club_expand),
     (re.compile(r"/club/me/settings/(description|news|allowjoin|skipjudgement|color)(?:/(\w+))?"), ep_club_settings),
     (re.compile(r"/club/me/post/(\w*)"), ep_club_post), (re.compile(r"/club/record/(\w+)"), ep_club_record),
+    (re.compile(r"/club/(\w+)/emblem/(small|medium|large)\.png"), ep_club_emblem),
     (re.compile(r"/club/(\w+)/join"), ep_club_join), (re.compile(r"/club/(\w+)"), ep_club_get),
 ]
 

@@ -463,6 +463,10 @@ Sudah ditambahkan dan lolos tes, tapi belum dicek di client:
   lalu mereka pulang. Pertandingan yang dimainkan langsung memberi poin transfer selama ada skuad sewaan
   (menang 3, seri 1); 100 poin membuat satu kartu sewaan jadi milikmu ("Transfer"; kartu itu tidak bisa
   dijual atau ditukar). Selama ada kartu sewaan, klub tetap menyimpan 18 kartu miliknya sendiri.
+- **Lambang klub**: setiap klub di menu Klub (60 klub AI dan klubmu sendiri) punya lambang sendiri di daftar
+  klub dan halaman klub, bukan lagi lambang bawaan: perisai, bulatan atau panji berwarna klub, digambar
+  server dari id klub (PNG 20, 50 dan 100 px, seperti di game aslinya). Lambang klubmu mengikuti warna yang
+  dipilih di Klub > Manajemen.
 - **Kotak acak bisa dibuka** (Kotak Platinum dan lainnya, issue #12): layar kotak menampilkan
   hadiahnya dari `staticdata.availables`, yang belum ada, jadi tiap kotak gagal saat "Gunakan".
 - **Kartu baru masuk Tim Cadangan**: kartu dari pak, trade, Market, Bag, atau halaman admin tampil

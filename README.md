@@ -438,6 +438,10 @@ Added, passing the tests but not yet checked in the client:
   release) until the month ends, when they leave. Live matches pay transfer points while a squad is rented
   (win 3, draw 1); 100 points make a rented card yours for good ("Transfer"; such a card cannot be sold or
   traded). While cards are rented the club keeps 18 of its own.
+- **Club emblems**: every club in Klub (the 60 AI clubs and your own) has an emblem of its own in the club
+  lists and on the club page instead of the default crest: a shield, roundel or pennant in the club's
+  colour, drawn by the server from the club's id (20, 50 and 100 px PNGs, like the original game's). Your
+  club's emblem follows the colour picked in Klub > Manajemen.
 - **Random boxes open** (Kotak Platinum and the rest, issue #12): the box screen lists its prizes
   from `staticdata.availables`, which was missing, so every box failed at "Gunakan".
 - **New cards join Tim Cadangan**: a card from a pack, a trade, the Market, the Bag or the admin

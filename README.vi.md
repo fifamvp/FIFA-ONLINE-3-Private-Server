@@ -422,6 +422,9 @@ Item saya, Gudang bên dưới là tên màn hình trong game, được giữ ng
   dạng thẻ mượn (biểu tượng cấp thẻ mượn; không bán, nâng cấp, trao đổi hay thả được) đến hết tháng, rồi họ rời đi.
   Các trận tự chơi cho điểm chuyển nhượng khi đang mượn đội hình (thắng 3, hòa 1); 100 điểm biến một thẻ mượn thành
   của bạn vĩnh viễn ("Transfer"; thẻ đó không bán hay trao đổi được). Khi còn thẻ mượn, CLB giữ 18 thẻ của mình.
+- **Huy hiệu CLB**: mọi CLB trong menu Klub (60 CLB AI và CLB của bạn) có huy hiệu riêng ở danh sách CLB và trang
+  CLB thay cho huy hiệu mặc định: khiên, hình tròn hoặc cờ đuôi nheo theo màu CLB, do máy chủ vẽ từ id của CLB
+  (PNG 20, 50 và 100 px, như game gốc). Huy hiệu CLB của bạn đổi theo màu chọn ở Klub > Manajemen.
 - **Mở được hộp ngẫu nhiên** (Kotak Platinum và các hộp khác, issue #12): màn hình hộp liệt kê phần thưởng
   từ `staticdata.availables`, trước đây bị thiếu, nên mọi hộp đều lỗi khi bấm "Gunakan" (dùng).
 - **Thẻ mới vào Tim Cadangan**: thẻ từ gói, giao dịch, Market, Bag hoặc trang quản trị hiện "-" ở cột Tim

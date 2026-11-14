@@ -1825,6 +1825,20 @@ def main():
             ai = next(c for c in found["clubs"] if c["_id"] != club["_id"] and c["allowjoin"])
             assert all(c["membercount"] < c["limits"]["members"] for c in found["clubs"])  # an AI club always has a seat
             assert q(f"/club/{ai['_id']}")["name"] == ai["name"] and q("/club/nope") == {"result": False, "reason": "deleted club"}
+            # club emblems: every club's own 20 / 50 / 100 px RGBA PNG, drawn from its id in its colour; mine
+            # follows the colour saved in Manajemen (a push has the game load its files again)
+            emb = lambda cid, size: hc.route(f"/club/{cid}/emblem/{size}.png")("", b"")
+            for size, px in hc.EMBLEM_PX.items():
+                ctype, png = emb(ai["_id"], size)
+                assert ctype == "image/png" and png[:8] == b"\x89PNG\r\n\x1a\n" and struct.unpack(">IIBB", png[16:26]) == (px, px, 8, 6)
+                assert emb(ai["_id"], size)[1] == png and emb(club["_id"], size)[0] == "image/png"
+            assert body(emb("nope", "large")) == {} and hc.route("/club/nope/emblem/huge.png") is None
+            assert len({hc.emblem_design(c, 0)[:3] for c in hc.ai_clubs_now()}) > 20  # many designs
+            assert hc.club_colour({"club": {"ai": ai["_id"], "_id": "x"}}, ai["_id"]) == hc.ai_clubs_now()[ai["_id"]]["color"]
+            mine_png, n_push = emb(club["_id"], "large")[1], len(pushed)
+            assert q("/club/me/settings/color", "PUT", color=hc.CLUB_COLORS[3])["result"]
+            assert ("/club/me/settings/emblem/latest", {"clubid": club["_id"]}) in pushed[n_push:]
+            assert emb(club["_id"], "large")[1] != mine_png
             # managers ask to join (Manajemen > permohonan): one taken in, one turned down
             st = hc._state(); st["club"]["next"] = time.time() - 4 * hc.CLUB_ASK; hc._save(st)
             asks = q("/club/me/join/requests")
