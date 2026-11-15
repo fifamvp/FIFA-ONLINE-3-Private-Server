@@ -10013,8 +10013,9 @@ def roster_seasons(raw):
     listed = {v for s in d["seasons"] for v in s["value"]}
     src = asset_path(LANG_PACK)
     names = client_json(src, LANG_ENTRY) if src else {}
-    d["seasons"] += [{"season": f"$TRANSFERMARKET_SEASON_{s}" if f"TRANSFERMARKET_SEASON_{s}" in names else str(s),
-                      "value": [s], **frame} for s in card_seasons() if s not in listed]
+    # TODO：暂时不考虑把数据库所有赛季都列出转会市场筛选框
+    # d["seasons"] += [{"season": f"$TRANSFERMARKET_SEASON_{s}" if f"TRANSFERMARKET_SEASON_{s}" in names else str(s),
+    #                   "value": [s], **frame} for s in card_seasons() if s not in listed]
     if gen_teams.WORLD == "classic":
         d["seasons"] = [s for s in d["seasons"] if not set(s["value"]) & ADDED_SEASONS]
     else:
