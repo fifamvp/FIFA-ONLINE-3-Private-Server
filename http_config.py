@@ -6363,7 +6363,7 @@ def ep_bag_unpackall(query, body):
 # draws from (counter, target, GP, an own name), how many a week, the reward boxes (item, GP).
 # --------------------------------------------------------------------------- #
 MISSIONS_FILE = os.path.join(HERE, "gamedata", "missions.json")
-MISSION_LANGS = {"id": "Bahasa Indonesia", "en": "English", "vi": "Tiếng Việt"}
+MISSION_LANGS = {"id": "Bahasa Indonesia", "en": "English", "vi": "Tiếng Việt", "sc": "简体中文"}
 # (id, group, counter or "level" / "grade" / "value" (from the coach and the club now), targets
 # of its grades, stars). Daily ones: one grade, counted today
 ACHIEVEMENTS = ((101, "lv", "level", (10, 20, 40, 70, 100), 2), (102, "lv", "match", (10, 50, 150, 400, 1000), 2),
@@ -6386,29 +6386,38 @@ MISSIONS_DEFAULT = {"enabled": True, "lang": "id", "targets": 1.0, "rewards": 1.
 MISSION_TEXT = {  # counter: {lang: (name, the goal ({0} = target), the goal said in full)}
     "level": {"id": ("Level manajer", "Capai level {0}", "Naikkan level manajer sampai level {0}."),
               "en": ("Manager level", "Reach level {0}", "Raise your manager to level {0}."),
-              "vi": ("Cấp HLV", "Đạt cấp {0}", "Nâng HLV lên cấp {0}.")},
+              "vi": ("Cấp HLV", "Đạt cấp {0}", "Nâng HLV lên cấp {0}."),
+              "sc": ("经理等级", "达到 {0} 级", "将经理等级提升到 {0} 级.")},
     "match": {"id": ("Pertandingan", "Main {0} pertandingan", "Mainkan {0} pertandingan di Liga, Cup atau Rank."),
               "en": ("Matches", "Play {0} matches", "Play {0} matches in League, Cup or Rank."),
-              "vi": ("Trận đấu", "Chơi {0} trận", "Chơi {0} trận ở Giải đấu, Cúp hoặc Rank.")},
+              "vi": ("Trận đấu", "Chơi {0} trận", "Chơi {0} trận ở Giải đấu, Cúp hoặc Rank."),
+              "sc": ("比赛", "进行 {0} 场比赛", "在联赛、杯赛或排位赛中进行 {0} 场比赛.")},
     "win": {"id": ("Kemenangan", "Menangi {0} pertandingan", "Menangkan {0} pertandingan."),
-            "en": ("Wins", "Win {0} matches", "Win {0} matches."), "vi": ("Chiến thắng", "Thắng {0} trận", "Thắng {0} trận.")},
+            "en": ("Wins", "Win {0} matches", "Win {0} matches."), "vi": ("Chiến thắng", "Thắng {0} trận", "Thắng {0} trận."),
+            "sc": ("胜利", "赢得 {0} 场比赛", "赢得 {0} 场比赛.")},
     "goal": {"id": ("Gol", "Cetak {0} gol", "Cetak {0} gol di pertandingan yang kamu mainkan."),
              "en": ("Goals", "Score {0} goals", "Score {0} goals in the matches you play."),
-             "vi": ("Bàn thắng", "Ghi {0} bàn", "Ghi {0} bàn trong các trận bạn chơi.")},
+             "vi": ("Bàn thắng", "Ghi {0} bàn", "Ghi {0} bàn trong các trận bạn chơi."),
+             "sc": ("进球", "打进 {0} 个进球", "在你进行的比赛中打进 {0} 个进球.")},
     "rank": {"id": ("Rank", "Main {0} pertandingan Rank", "Mainkan {0} pertandingan Rank."),
-             "en": ("Rank", "Play {0} Rank matches", "Play {0} Rank matches."), "vi": ("Rank", "Chơi {0} trận Rank", "Chơi {0} trận Rank.")},
+             "en": ("Rank", "Play {0} Rank matches", "Play {0} Rank matches."), "vi": ("Rank", "Chơi {0} trận Rank", "Chơi {0} trận Rank."),
+             "sc": ("排位赛", "进行 {0} 场排位赛", "进行 {0} 场排位赛.")},
     "rankwin": {"id": ("Kemenangan Rank", "Menang {0} kali di Rank", "Menangkan {0} pertandingan Rank."),
                 "en": ("Rank wins", "Win {0} Rank matches", "Win {0} Rank matches."),
-                "vi": ("Thắng Rank", "Thắng {0} trận Rank", "Thắng {0} trận Rank.")},
+                "vi": ("Thắng Rank", "Thắng {0} trận Rank", "Thắng {0} trận Rank."),
+                "sc": ("排位胜场", "排位赛获胜 {0} 次", "赢得 {0} 场排位赛.")},
     "upgrade": {"id": ("Upgrade berhasil", "Upgrade pemain {0} kali", "Berhasil meng-upgrade pemain {0} kali."),
                 "en": ("Successful upgrades", "Upgrade players {0} times", "Upgrade players successfully {0} times."),
-                "vi": ("Nâng cấp thành công", "Nâng cấp cầu thủ {0} lần", "Nâng cấp cầu thủ thành công {0} lần.")},
+                "vi": ("Nâng cấp thành công", "Nâng cấp cầu thủ {0} lần", "Nâng cấp cầu thủ thành công {0} lần."),
+                "sc": ("强化成功", "强化球员 {0} 次", "成功强化球员 {0} 次.")},
     "grade": {"id": ("Pemain berkelas", "Punya pemain +{0}", "Miliki pemain dengan grade +{0} atau lebih."),
               "en": ("Top grade", "Own a +{0} player", "Own a player of grade +{0} or higher."),
-              "vi": ("Thẻ cấp cao", "Sở hữu cầu thủ +{0}", "Sở hữu cầu thủ cấp +{0} trở lên.")},
+              "vi": ("Thẻ cấp cao", "Sở hữu cầu thủ +{0}", "Sở hữu cầu thủ cấp +{0} trở lên."),
+              "sc": ("高等级球员", "拥有 +{0} 球员", "拥有 +{0} 或更高等级的球员.")},
     "value": {"id": ("Nilai tim", "Nilai tim {0} EP", "Naikkan nilai Tim inti sampai {0} EP."),
               "en": ("Team value", "Team value {0} EP", "Raise your first team's value to {0} EP."),
-              "vi": ("Giá trị đội", "Giá trị đội {0} EP", "Nâng giá trị đội hình chính lên {0} EP.")},
+              "vi": ("Giá trị đội", "Giá trị đội {0} EP", "Nâng giá trị đội hình chính lên {0} EP."),
+              "sc": ("球队价值", "球队价值 {0} EP", "将首发球队的价值提升到 {0} EP.")},
 }
 MISSION_WORDS = {  # lang: (group names, "Daily", "today", the reset note)
     "id": ({"lv": "Manajer", "upg": "Upgrade", "tv": "Nilai tim", "gol": "Gol", "misc": "Misi harian"},
@@ -6417,6 +6426,8 @@ MISSION_WORDS = {  # lang: (group names, "Daily", "today", the reset note)
            "Daily", "today", "Resets every day at 00:00 WIB."),
     "vi": ({"lv": "HLV", "upg": "Nâng cấp", "tv": "Giá trị đội", "gol": "Bàn thắng", "misc": "Nhiệm vụ hằng ngày"},
            "Hằng ngày", "hôm nay", "Làm mới mỗi ngày lúc 00:00 WIB."),
+    "sc": ({"lv": "经理", "upg": "升级", "tv": "球队价值", "gol": "进球", "misc": "每日任务"},
+           "每日", "今天", "每天 00:00（印尼时间）重置."),
 }
 
 
@@ -8128,7 +8139,7 @@ def ladder_record(st, i, vm, mine, theirs, sh=0, sa=0):
 # --------------------------------------------------------------------------- #
 VM_CHAT_FILE = os.path.join(HERE, "gamedata", "vm_chat.json")
 VM_CHAT_DEFAULT = {"enabled": True, "lang": "id", "newsregions": []}  # newsregions: the global chat's news besides the global
-VM_CHAT_LANGS = {"id": "Bahasa Indonesia", "en": "English", "vi": "Tiếng Việt"}  # responses/vm_chat.json
+VM_CHAT_LANGS = {"id": "Bahasa Indonesia", "en": "English", "vi": "Tiếng Việt", "sc": "简体中文"}  # responses/vm_chat.json
 VM_PERSONALITIES = ("friendly", "competitive", "funny", "confident", "playful")
 VM_CHAT_ODDS = {"hello": 0.9, "goal": 1, "conceded": 0.85, "miss": 0.5, "save": 0.45, "reply": 0.6}
 VM_CHAT_GAP, VM_CHAT_SHOT = 6, 4  # s between his lines (goals excepted); s for a shot to become a goal
