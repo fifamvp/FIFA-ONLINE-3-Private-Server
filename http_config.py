@@ -2467,6 +2467,30 @@ def ep_l2_achievement(query, body):
 # {leagueid: [teamid]}; the picked club's squad is /static/info/authentic/team/licensed/<id>
 # ({teamid, summary, team}, built by gen_teams.team like the six recommended clubs).
 CLUB_MIN_PLAYERS = 16  # licensed 2017 cards a club needs to be listed
+# Authoritative league -> teams from the client's chi.db.db2 (its `team` table), exported by
+# tools/team_manager.py to gamedata/team_league.json as {leagueid: {chi_name, teamids}}. A card's
+# own leagueid is unreliable: a player once on loan in Italy keeps leagueid 31 on a later Sevilla
+# card (spid 88179645). The transfer market looks a club up by teamid, so do we: league membership
+# comes from this table, never from the card.
+TEAM_LEAGUE_FILE = os.path.join(HERE, "gamedata", "team_league.json")
+_TEAM_LEAGUE = None
+
+def team_league():
+    """The raw {leagueid: {chi_name, teamids}} map from gamedata/team_league.json."""
+    global _TEAM_LEAGUE
+    if _TEAM_LEAGUE is None:
+        try:
+            with open(TEAM_LEAGUE_FILE, encoding="utf-8") as f:
+                _TEAM_LEAGUE = json.load(f)
+        except (OSError, ValueError):
+            _TEAM_LEAGUE = {}
+    return _TEAM_LEAGUE
+
+def _team_league_lookup():
+    """{teamid: leagueid} reverse map built from team_league(), for club_index."""
+    return {tid: int(lid) for lid, info in team_league().items()
+            for tid in info.get("teamids", ())}
+
 REST_OF_WORLD = 999998  # FO3's team for players of unlicensed clubs (26 LIVE has 91 such cards): not a club
 _CLUBS = []
 
@@ -2482,8 +2506,13 @@ def club_index():
                                  WHERE p.spid / 1000000 = ?1 OR (p.spid / 1000000 = ?2 AND p.playerid NOT IN
                                        (SELECT playerid FROM players WHERE spid / 1000000 = ?1))""",
                              (gen_teams.CURRENT_SEASON, gen_teams.LEGACY_SEASON)).fetchall()
+        # League membership is authoritative from the team table, not the card's own leagueid.
+        # A club with no table row (e.g. a newly injected local team) falls back to its cards'
+        # league; national teams are keyed by nationalteamid as before.
+        tl = _team_league_lookup()
         squads, nats = {}, {}
-        for spid, lid, tid, ntid, nat, ovr in rows:
+        for spid, card_lid, tid, ntid, nat, ovr in rows:
+            lid = tl.get(tid, card_lid)
             squads.setdefault((lid, tid), {})[spid] = ovr
             if ntid > 0:  # -1 / 0 = none
                 squads.setdefault((gen_teams.NATIONAL_LEAGUE, ntid), {})[spid] = ovr
