@@ -74,6 +74,33 @@ def ep_locale(query, body):
 
 LANGUAGE = os.environ.get("FO3_LANGUAGE", "ind")
 
+# 本地化文本支持
+# --------------------------------------------------------------------------- #
+# Server-side text localization. Hardcoded UI strings in this file (item names,
+# descriptions, ...) live in responses/localization.json, keyed by LANGUAGE then
+# a dotted path: {"chi": {"ITEMS.501.name": "..."}}. Code keeps its literals as
+# the fallback, so a missing key/empty file never changes the shipped game.
+# --------------------------------------------------------------------------- #
+LOCALIZATION_FILE = os.path.join(HERE, "responses", "localization.json")
+_LOCALIZATION = None
+
+
+def localization():
+    """{language: {dotted_key: text}} from responses/localization.json (lazy, cached)."""
+    global _LOCALIZATION
+    if _LOCALIZATION is None:
+        try:
+            with open(LOCALIZATION_FILE, encoding="utf-8") as f:
+                _LOCALIZATION = json.load(f) or {}
+        except (OSError, ValueError):
+            _LOCALIZATION = {}
+    return _LOCALIZATION
+
+
+def tr(key, default=None):
+    """Translated text for `key` in the current LANGUAGE; `default` if absent."""
+    return localization().get(LANGUAGE, {}).get(key, default)
+
 
 GAME = os.environ.get("FO3_GAME", r"D:\FO3ID\32795")  # the FO3 ID client install
 # The client's own downloaded copy of the Garena CDN (externalAssets/...).
@@ -5065,6 +5092,60 @@ MONTHLY = {  # itemid: (name, icon, days, items now, daily items, description)
     81000003: ("Paket Bulanan Premium", "ID50841", 30, [(50121, 1)], [(45013, 1), (EP_ITEM, 500_000)],
                "Langsung Kotak Platinum, lalu This Season Top 30 dan 500.000 EP tiap hari selama 30 hari."),
 }
+
+# 注入本地化文本
+def localize_tuple_table(table, prefix, slots):
+    """Overlay a table's tuple text fields from localization.json for the current LANGUAGE.
+
+    Keys are "<prefix>.<row_id>.<field>" (e.g. "ITEMS.501.name"); `slots` maps a field
+    name to its tuple index. Only fields present in the JSON are replaced, so every
+    hardcoded literal stays as the fallback and the table's structure is untouched.
+    """
+    for key, text in localization().get(LANGUAGE, {}).items():
+        parts = key.split(".")
+        if len(parts) != 3 or parts[0] != prefix or parts[2] not in slots:
+            continue
+        try:
+            row_id = int(parts[1])
+        except ValueError:
+            continue
+        if row_id in table:
+            row = list(table[row_id])
+            row[slots[parts[2]]] = text
+            table[row_id] = tuple(row)
+
+
+# item tuples: index 0 = name, 4 = description (icon/type/effect are data, not text)
+localize_tuple_table(ITEMS, "ITEMS", {"name": 0, "description": 4})
+# package tuples: index 0 = name, 3 = description (index 2 = contents, data not text)
+localize_tuple_table(PACKAGES, "PACKAGES", {"name": 0, "description": 3})
+# monthly tuples: index 0 = name, 5 = description (index 2..4 = days/items, data not text)
+localize_tuple_table(MONTHLY, "MONTHLY", {"name": 0, "description": 5})
+
+
+def localize_pack_terms(packs, prefix="PACK_TERM."):
+    """Translate recurring words inside pack names for the current LANGUAGE.
+
+    Unlike whole-name overrides, this rewrites just the listed terms so a name like
+    "World Legend Draft Pick 3" becomes "世界传奇 选秀 3" while numbers/grade suffixes
+    survive. Keys are "<prefix><term>": "<translation>" in localization.json; terms are
+    applied longest-first so overlapping phrases (e.g. "Team of the Season" vs "Season")
+    resolve to the most specific one. `pool` (index 1) is never touched.
+    """
+    terms = {k[len(prefix):]: v for k, v in localization().get(LANGUAGE, {}).items()
+             if k.startswith(prefix) and isinstance(v, str)}
+    if not terms:
+        return
+    ordered = sorted(terms.items(), key=lambda kv: -len(kv[0]))  # longest phrase first
+    for itemid, (name, pool) in list(packs.items()):
+        new = name
+        for term, zh in ordered:
+            new = new.replace(term, zh)
+        if new != name:
+            packs[itemid] = (new, pool)
+
+
+localize_pack_terms(PACKS)
 
 
 def use_item_def(itemid, prizes=True):
