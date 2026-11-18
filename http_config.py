@@ -2312,6 +2312,36 @@ def league_teams(leagueid, mine):
     teams = next((ts for _, leagues in club_index() for lid, ts in leagues if lid == leagueid), [])
     return [mine] + [t for t in teams if t != mine][:LEAGUE_MAX - 1]
 
+#region 联赛难度调整
+# Master league (difficultyselect 20-24 = LEAGUE2_DIFFICULTY_11..15 "大师级联赛 +1..+5") fields
+# enhanced CPU squads: the opponent's cards show and play as +N. Normal league (10-19) keeps +0
+# cards. The five master levels map to +1/+3/+5/+8/+10 (the grade boost cap), a rising challenge.
+MASTER_CPU_GRADE = {20: 1, 21: 3, 22: 5, 23: 8, 24: 10}
+
+
+def cpu_grade(difficulty):
+    """Grade forced onto every CPU card at this league difficulty (0 = normal league, untouched)."""
+    return MASTER_CPU_GRADE.get(int(difficulty or 10), 0)
+
+
+def graded_roster_team(teamid, grade, level=0):
+    """A CPU club's roster with every player's grade and EXP level set, for a master-league match
+    side. The roster files/gen_teams carry neither field (so a normal club plays +0, LV.1 cards);
+    setting them here makes owned_team() show +N / LV.<level> cards and player_ovr/team_summary
+    score them with GRADE_BOOST[grade] + level - 1. Level 0 leaves levelinfo untouched."""
+    team = roster_team(teamid)
+    if grade or level:
+        players = []
+        for p in team["players"]:
+            q = dict(p)
+            if grade:
+                q["grade"] = grade
+            if level:
+                q["levelinfo"] = {"level": level, "exp": 0}
+            players.append(q)
+        team = dict(team, players=players)
+    return team
+#endregion
 
 def league_round(teams, rnd):
     """Fixtures [(home, away)] of round rnd: LeagueCupProxy.createSchedule/getRotatedIndexAt
@@ -2339,10 +2369,14 @@ def _poisson(rng, lam):
         k += 1
 
 
-def team_strength(st, teamid):
-    """Average rating (+ grade boost) of the best 11."""
-    raw = st["teams"].get(str(_default_slot(st))) if teamid == my_teamid(st) else None
-    ovrs = sorted((player_ovr(p) for p in (raw or roster_team(teamid))["players"]), reverse=True)[:11]
+def team_strength(st, teamid, grade=0, level=0):
+    """Average rating (+ grade boost + level - 1) of the best 11. `grade`/`level` (master-league
+    CPU cards) are applied to a simulated opponent so sim and played matches rate them the same;
+    my own club is always read from its stored cards and never boosted."""
+    mine = teamid == my_teamid(st)
+    raw = st["teams"].get(str(_default_slot(st))) if mine else None
+    roster = graded_roster_team(teamid, grade, level) if ((grade or level) and not mine) else (raw or roster_team(teamid))
+    ovrs = sorted((player_ovr(p) + max(0, level - 1) for p in roster["players"]), reverse=True)[:11]
     return sum(ovrs) / len(ovrs) if ovrs else 60
 
 
@@ -2596,13 +2630,15 @@ def league_play_round(st, rnd, mine=None, seed=None):
         return {"matchtype": "league", "round": rnd, "leaguematches": [m for m in league["matchrecords"] if m["round"] == rnd]}
     rng = random.Random(seed)
     me = my_teamid(st); played = []
+    grade = cpu_grade(lg.get("difficultyselect", 10))  # master-league CPU cards are enhanced in sims too
+    level = PLAYER_MAX_LEVEL if grade else 0  # master CPU players are all max level (LV.23)
     for h, a in league_round(league["teams"], rnd):
         if h is None or a is None:
             continue
         if mine is not None and me in (h, a):
             gh, ga = mine
         else:
-            gh, ga = sim_score(rng, team_strength(st, h), team_strength(st, a))
+            gh, ga = sim_score(rng, team_strength(st, h, grade, level), team_strength(st, a, grade, level))
         if me in (h, a):  # played or simulated: Info Manager's league record
             record_match(st, "league", *((gh, ga) if h == me else (ga, gh)))
         played.append({"type": "league", "matchtype": "league", "round": rnd, "home": h, "away": a,
@@ -2619,9 +2655,11 @@ def league_match_body(st, req, playtype):
     opp = req["away"] if req["home"] == teamid else req["home"]
     user = {"id": me["id"], "name": me["name"], "levelinfo": me["levelinfo"]}
     lg = st["league2"]
+    grade = cpu_grade(lg.get("difficultyselect", 10))  # master league: enhanced CPU cards
+    level = PLAYER_MAX_LEVEL if grade else 0  # master league: max-level (LV.23) CPU players
     match = new_match("League_2_league_MGR" if playtype == "mgr" else "League_2_league",
                       match_side(st["teams"][str(_default_slot(st))], teamid, user, _tactics(st)[1]),
-                      match_side(roster_team(opp), opp))
+                      match_side(graded_roster_team(opp, grade, level), opp))
     gs = match["gamesettings"]
     gs["home"] = req["home"] == teamid  # I am always the left side
     gs["kit"] = ["home", "away"] if gs["home"] else ["away", "home"]
