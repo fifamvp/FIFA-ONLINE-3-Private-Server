@@ -5337,10 +5337,10 @@ def shop_worth(itemid, depth=0):
 
 apply_shop()
 
-
+# 控制“特殊商品”弹窗的接口
 def ep_specifictarget(query, body):
     """GET /specifictarget: Special Bonus is open for me (ShopController.getSpecialShopInfo)."""
-    return _json({"issell": True, "targets": [{"stid": STSHOPID + i, "endtime": "2035-01-01T00:00:00.000Z"}
+    return _json({"issell": False, "targets": [{"stid": STSHOPID + i, "endtime": "2035-01-01T00:00:00.000Z"}
                                               for i in SPECIAL if i not in SHOP_HIDDEN]})
 
 
