@@ -41,6 +41,14 @@ def _walk(t):
     p = 0x11
     for _ in range(dec(struct.unpack(">I", t[8:12])[0])):
         off, size, usize, nl = (dec(v) for v in struct.unpack(">4I", t[p:p + 16]))
+        # 修复tx版本的解包问题
+        # A zero-length placeholder entry (e.g. .../dummy.seq) is written by the
+        # packer with a RAW usize field of 0x00000000 -- NOT enc(0).  dec(0) is
+        # garbage (0xD6C7058D), which would make big_manager mislabel the entry
+        # as RefPack and fail its inflated-size check.  An empty entry has no
+        # compressed payload by definition, so force usize to 0 when size is 0.
+        if size == 0:
+            usize = 0
         k, name = size & 0xFF, bytearray()
         for c in t[p + 16:p + 16 + nl]:
             d = ((c << 4) | (c >> 4)) & 0xFF
