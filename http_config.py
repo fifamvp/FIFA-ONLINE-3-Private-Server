@@ -4584,6 +4584,31 @@ def ep_player_move(pid, where, query, body):
     _save(st)
     return _json({"result": True, "resources": coach_me_resources(st, slot)})
 
+# 删除球员
+def ep_player_delete(pid, query, body):
+    """POST /player/<_id> {_method: DELETE}: Hapus (release) a card from my club.
+
+    Upstream had no handler for this route, so the client's DELETE fell through to
+    ep_telemetry/ep_empty and the card silently stayed in the club. Like the market
+    sell path, only a card outside the 18-man squad can be released (the client
+    moves it to Tim Cadangan first); remove_player also drops it from the squad,
+    captain and kickers. The reply carries refreshed coach resources so the UI
+    stops showing the card."""
+    req = json.loads(body or b"{}")
+    if req.get("_method") != "DELETE":
+        return _json({"result": False, "reason": "ITEM_USE_ERROR"})
+    st = _state()
+    slot = _default_slot(st)
+    team = st["teams"][str(slot)]
+    p = next((x for x in team["players"] if iid(x) == pid), None)
+    if p is None:
+        return _json({"result": False, "reason": "NO_SUCH_PLAYER"})
+    if in_squad(team, p):
+        return _json({"result": False, "reason": "TRANSFERMARKET_SELL_ERROR_FIRSTTEAM"})
+    remove_player(team, p)
+    _save(st)
+    return _json({"result": True, "resources": coach_me_resources(st, slot)})
+
 
 def ep_trade3_info(query, body):
     """POST /trade3/info {}: the client only reads the pushed resources (scouters)."""
@@ -9727,6 +9752,7 @@ ROUTES = [
     (re.compile(r"/lockerroom/(\w+)/jersey"), ep_lockerroom_jersey),
     (re.compile(r"/static/info/authentic/team/(licensed|all)/(\d+)"), ep_authentic_team),
     (re.compile(r"/static/info/team/summary/(\d+)"), ep_team_summary),
+    (re.compile(r"/player/(\w+)"), ep_player_delete),
     (re.compile(r"/player/(\w+)/move/(firstteam|secondteam)"), ep_player_move),
     (re.compile(r"/player/(\w+)/extra/growth"), ep_player_growth),
     (re.compile(r"/player/(\w+)/enhance/(\w+)/preview"), ep_enhance_preview),
