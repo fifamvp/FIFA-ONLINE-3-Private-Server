@@ -102,6 +102,12 @@ def tr(key, default=None):
     return localization().get(LANGUAGE, {}).get(key, default)
 
 
+def trf(key, default, **kw):
+    """`tr()` with str.format placeholders, e.g. trf("TEAMCOLOR.season.description",
+    "Pemain season {label}", label="07"). The literal default must carry the same names."""
+    return tr(key, default).format(**kw)
+
+
 GAME = os.environ.get("FO3_GAME", r"D:\FO3ID\32795")  # the FO3 ID client install
 # The client's own downloaded copy of the Garena CDN (externalAssets/...).
 ASSETS = os.environ.get("FO3_ASSETS", os.path.join(GAME, "_cache", "games", "fo3id"))
@@ -1637,8 +1643,11 @@ def tc_custom():
 
 
 def tc_specials():
-    """TC_NAMED_SPECIALS and the admin page's colors: (id, description, condition, boost, best N)."""
-    return TC_NAMED_SPECIALS + tuple((cid, desc, cond, b, best) for cid, _, desc, cond, b, best in tc_custom())
+    """TC_NAMED_SPECIALS and the admin page's colors: (id, description, condition, boost, best N).
+    A description is its own key in responses/localization.json (a missing one keeps the Indonesian
+    literal below, so the defaults never change). The admin page's own descriptions are as given."""
+    return (tuple((cid, tr(desc, desc), cond, b, best) for cid, desc, cond, b, best in TC_NAMED_SPECIALS)
+            + tuple((cid, desc, cond, b, best) for cid, _, desc, cond, b, best in tc_custom()))
 
 
 def _tc_boost(groups, boost):
@@ -1681,14 +1690,19 @@ def tc_colors():
     own = {cid: name for cid, name, *_ in tc_custom()}
     key = lambda cid: own.get(cid) or TC_KEYS.get(cid, f"TEAMCOLOR_ATTRIBUTES_TEAM{cid}")
     club = {"teamcolorid": TC_CLUB, "type": "club", "teamid": -1, "name": key(TC_CLUB),
-            "description": "Pemain dari klub yang sama", "boostgroups": TC_CLUB_GROUPS}
+            "description": trf("TEAMCOLOR.club.description", "Pemain dari klub yang sama"),
+            "boostgroups": TC_CLUB_GROUPS}
     nation = {"teamcolorid": TC_NATION, "type": "nation", "teamid": -1, "name": key(TC_NATION),
-              "description": "Pemain dari negara yang sama", "boostgroups": TC_GROUPS}
+              "description": trf("TEAMCOLOR.nation.description", "Pemain dari negara yang sama"),
+              "boostgroups": TC_GROUPS}
     grades = [{"teamcolorid": cid, "type": "grade", "grade": g, "teamid": -1, "name": name,
-               "description": f"Pemain grade +{g} ke atas", "boostgroups": groups} for cid, g, name, groups in TC_GRADE]
-    clubs = [{"teamcolorid": cid, "type": "club", "teamid": t, "name": key(cid), "description": "Pemain klub ini (sekarang atau dulu)",
+               "description": trf("TEAMCOLOR.grade.description", "Pemain grade +{g} ke atas", g=g),
+               "boostgroups": groups} for cid, g, name, groups in TC_GRADE]
+    clubs = [{"teamcolorid": cid, "type": "club", "teamid": t, "name": key(cid),
+              "description": trf("TEAMCOLOR.namedclub.description", "Pemain klub ini (sekarang atau dulu)"),
               "boostgroups": _tc_boost(TC_CLUB_GROUPS, b)} for cid, t, b in TC_NAMED_CLUBS]
-    nations = [{"teamcolorid": cid, "type": "nation", "teamid": n, "name": key(cid), "description": "Pemain dari negara ini",
+    nations = [{"teamcolorid": cid, "type": "nation", "teamid": n, "name": key(cid),
+                "description": trf("TEAMCOLOR.namednation.description", "Pemain dari negara ini"),
                 "boostgroups": _tc_boost(TC_GROUPS, b)} for cid, n, b in TC_NAMED_NATIONS]
     # a special color's teamid is a STRING: TeamColorController copies teamid to __teamid and hands
     # the list to native (setTeamColorList); at half time native re-checks the colors (0x94EB70) and
@@ -1700,7 +1714,8 @@ def tc_colors():
         tid, b = TC_SEASON_NAMES.get(codes[0], (None, None))
         name = tid if isinstance(tid, str) else key(tid) if tid else f"Season {label}"
         specials.append({"teamcolorid": cid, "type": "special", "teamid": str(cid), "name": name,
-                         "description": f"Pemain season {label}", "boostgroups": _tc_special_groups(b) if b else TC_GROUPS})
+                         "description": trf("TEAMCOLOR.season.description", "Pemain season {label}", label=label),
+                         "boostgroups": _tc_special_groups(b) if b else TC_GROUPS})
     for cid, desc, _, b, _ in tc_specials():
         if sets[cid][1]:
             specials.append({"teamcolorid": cid, "type": "special", "teamid": str(cid), "name": key(cid),
@@ -2340,20 +2355,39 @@ def league_teams(leagueid, mine):
     return [mine] + [t for t in teams if t != mine][:LEAGUE_MAX - 1]
 
 #region 联赛难度调整
-# Master league (difficultyselect 20-24 = LEAGUE2_DIFFICULTY_11..15 "大师级联赛 +1..+5") fields
-# enhanced CPU squads: the opponent's cards show and play as +N. Normal league (10-19) keeps +0
-# cards. The five master levels map to +1/+3/+5/+8/+10 (the grade boost cap), a rising challenge.
+# CPU squads are boosted by the league difficulty (difficultyselect = LEAGUE2_DIFFICULTY_<difficulty - 9>):
+#   normal 10-19 = 普通1..普通10: cards stay +0, the EXP level rises evenly from LV.1 to LV.23
+#                                 (1..PLAYER_MAX_LEVEL spread over the 10 tiers, 普通1 = LV.1,
+#                                  普通10 = LV.23)
+#   master 20-24 = 大师级 +1..+5: cards get +1/+3/+5/+8/+10 (the grade boost cap) and every
+#                                 one of them plays at max level
+# Grade and level are exactly what PlayerListUtil.fillPlayerStaticData calls totalBonus
+# (level - 1 + GRADE_BOOST[grade]): owned_team() shows "+N / LV.<level>" cards, player_ovr /
+# team_summary score them with it, and team_strength() applies the same to simulated fixtures,
+# so a simulated and a played match rate the CPU identically.
 MASTER_CPU_GRADE = {20: 1, 21: 3, 22: 5, 23: 8, 24: 10}
+# 1 + round((PLAYER_MAX_LEVEL - 1) * (n - 1) / 9) for n = 1..10, integer math (round half up):
+# 普通1..普通10 -> LV.1/3/6/8/11/13/16/18/21/23
+NORMAL_CPU_LEVEL = {9 + n: 1 + (2 * (PLAYER_MAX_LEVEL - 1) * (n - 1) + 9) // 18
+                    for n in range(1, 11)}
 
 
 def cpu_grade(difficulty):
-    """Grade forced onto every CPU card at this league difficulty (0 = normal league, untouched)."""
+    """Grade forced onto every CPU card at this league difficulty (0 = normal league, +0 cards)."""
     return MASTER_CPU_GRADE.get(int(difficulty or 10), 0)
 
 
+def cpu_level(difficulty):
+    """EXP level forced onto every CPU card at this league difficulty (0 = leave the roster's LV.1)."""
+    d = int(difficulty or 10)
+    if d in MASTER_CPU_GRADE:
+        return PLAYER_MAX_LEVEL
+    return NORMAL_CPU_LEVEL.get(d, 0)
+
+
 def graded_roster_team(teamid, grade, level=0):
-    """A CPU club's roster with every player's grade and EXP level set, for a master-league match
-    side. The roster files/gen_teams carry neither field (so a normal club plays +0, LV.1 cards);
+    """A CPU club's roster with every player's grade and EXP level set, for a league match side.
+    The roster files/gen_teams carry neither field (so a normal club plays +0, LV.1 cards);
     setting them here makes owned_team() show +N / LV.<level> cards and player_ovr/team_summary
     score them with GRADE_BOOST[grade] + level - 1. Level 0 leaves levelinfo untouched."""
     team = roster_team(teamid)
@@ -2397,9 +2431,9 @@ def _poisson(rng, lam):
 
 
 def team_strength(st, teamid, grade=0, level=0):
-    """Average rating (+ grade boost + level - 1) of the best 11. `grade`/`level` (master-league
-    CPU cards) are applied to a simulated opponent so sim and played matches rate them the same;
-    my own club is always read from its stored cards and never boosted."""
+    """Average rating (+ grade boost + level - 1) of the best 11. `grade`/`level` (the league CPU
+    boost for this difficulty) are applied to a simulated opponent so sim and played matches rate
+    them the same; my own club is always read from its stored cards and never boosted."""
     mine = teamid == my_teamid(st)
     raw = st["teams"].get(str(_default_slot(st))) if mine else None
     roster = graded_roster_team(teamid, grade, level) if ((grade or level) and not mine) else (raw or roster_team(teamid))
@@ -2657,8 +2691,8 @@ def league_play_round(st, rnd, mine=None, seed=None):
         return {"matchtype": "league", "round": rnd, "leaguematches": [m for m in league["matchrecords"] if m["round"] == rnd]}
     rng = random.Random(seed)
     me = my_teamid(st); played = []
-    grade = cpu_grade(lg.get("difficultyselect", 10))  # master-league CPU cards are enhanced in sims too
-    level = PLAYER_MAX_LEVEL if grade else 0  # master CPU players are all max level (LV.23)
+    grade = cpu_grade(lg.get("difficultyselect", 10))  # CPU cards are boosted by league difficulty,
+    level = cpu_level(lg.get("difficultyselect", 10))  # in simulated fixtures just like in played ones
     for h, a in league_round(league["teams"], rnd):
         if h is None or a is None:
             continue
@@ -2682,8 +2716,8 @@ def league_match_body(st, req, playtype):
     opp = req["away"] if req["home"] == teamid else req["home"]
     user = {"id": me["id"], "name": me["name"], "levelinfo": me["levelinfo"]}
     lg = st["league2"]
-    grade = cpu_grade(lg.get("difficultyselect", 10))  # master league: enhanced CPU cards
-    level = PLAYER_MAX_LEVEL if grade else 0  # master league: max-level (LV.23) CPU players
+    grade = cpu_grade(lg.get("difficultyselect", 10))  # normal: +0 cards at LV.1..23 (rising per tier)
+    level = cpu_level(lg.get("difficultyselect", 10))  # master: +N cards, every one at LV.23
     match = new_match("League_2_league_MGR" if playtype == "mgr" else "League_2_league",
                       match_side(st["teams"][str(_default_slot(st))], teamid, user, _tactics(st)[1]),
                       match_side(graded_roster_team(opp, grade, level), opp))
