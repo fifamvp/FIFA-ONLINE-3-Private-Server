@@ -1975,7 +1975,7 @@ def team_kit(teamid):
     return {"availables": {k: {"id": teamid << 5 | t} for k, t in (("home", 0), ("away", 1), ("goalie", 2))}}
 
 
-START_EP = 1000000
+START_EP = 1000000000 # 起步资金
 
 # The economy (issue #30, the reporter: "make player prices and player card packs more expensive
 # and realistic ... configurable through the GM Admin Panel"). gamedata/economy.json, set on the
