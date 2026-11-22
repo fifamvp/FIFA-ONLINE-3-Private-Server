@@ -1975,7 +1975,7 @@ def team_kit(teamid):
     return {"availables": {k: {"id": teamid << 5 | t} for k, t in (("home", 0), ("away", 1), ("goalie", 2))}}
 
 
-START_EP = 1000000000 # 起步资金
+START_EP = 10000000000 # 起步资金
 
 # The economy (issue #30, the reporter: "make player prices and player card packs more expensive
 # and realistic ... configurable through the GM Admin Panel"). gamedata/economy.json, set on the
@@ -3596,12 +3596,15 @@ def balance_first_team(team):
 # The virtual managers trade on it (issue #30, stage 3; user: "manajer market virtual berjalan").
 # Client shapes (TransferMarketProxy and the Transfer* screens): every element of a search / top
 # list is its own row (several prices and grades of one card are fine), "Kuantitas" = count, and a
-# purchase posts that row's spid / grade / price. Rows: the +1..+3 stock at the market price
-# (MARKET_STOCK an hour, never sold out), plus the managers' own listings of the hour
-# (VM_LIST_ROWS, grades VM_LIST_GRADES) a little under the market price (market_factor; never
-# below 0.96 of it, so buying there and selling back at the market price gains nothing after the
-# fee). What I buy comes off the hour's counts (MARKET_BOUGHT, kept in memory).
+# purchase posts that row's spid / grade / price. Rows: the stock at the market price
+# (MARKET_STOCK an hour, never sold out) in every grade of MARKET_STOCK_GRADES (user: "saya mau
+# grade +1 sampai +8 ada semua" -- a card's whole upgrade range on sale, not just +1..+3, so one
+# search shows what an Upgrade needs), plus the managers' own listings of the hour (VM_LIST_ROWS,
+# grades VM_LIST_GRADES) a little under the market price (market_factor; never below 0.96 of it,
+# so buying there and selling back at the market price gains nothing after the fee). What I buy
+# comes off the hour's counts (MARKET_BOUGHT, kept in memory).
 MARKET_STOCK = (3, 30)
+MARKET_STOCK_GRADES = (1, 2, 3, 4, 5, 6, 7, 8)  # +1..+8 always on sale; +9/+10 only by upgrading
 VM_LIST_ROWS = (0, 0, 1, 1, 2, 3)  # one is drawn per card and hour
 VM_LIST_GRADES = (1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 7, 8)
 MARKET_BOUGHT = {}  # (spid, grade, price, hour key) -> cards bought from that row this hour
@@ -3674,14 +3677,14 @@ def sell_band(spid, grade):
 
 
 def market_rows(spid, t=None):
-    """The Market's rows of one card now: [{spid, expandme, grade, price, count}], the +1..+3
-    stock first; [] if it is not tradeable."""
+    """The Market's rows of one card now: [{spid, expandme, grade, price, count}], the stock
+    (+1..+8, MARKET_STOCK_GRADES) first; [] if it is not tradeable."""
     if not on_market(spid):
         return []
     now = time.time() if t is None else t
     day, key = vm_day(now), f"{vm_day(now)}/{time.gmtime(now).tm_hour}"
     r = random.Random(f"market/{spid}/{key}")
-    rows = {(g, market_value(spid, g, now)): r.randint(*MARKET_STOCK) for g in (1, 2, 3)}
+    rows = {(g, market_value(spid, g, now)): r.randint(*MARKET_STOCK) for g in MARKET_STOCK_GRADES}
     for _ in range(r.choice(VM_LIST_ROWS)):
         g = r.choice(VM_LIST_GRADES)
         p = card_price(spid, g)
@@ -3693,19 +3696,19 @@ def market_rows(spid, t=None):
     out = []
     for (g, price), n in rows.items():
         n -= MARKET_BOUGHT.get((spid, g, price, key), 0)
-        stock = g <= 3 and price == market_value(spid, g, now)
+        stock = g in MARKET_STOCK_GRADES and price == market_value(spid, g, now)
         if n > 0 or stock:
             out.append({"spid": spid, "expandme": "player", "grade": g, "price": price, "count": max(1, n)})
     return out
 
 
 def market_buy(spid, grade, price, t=None):
-    """The row I buy from: (price paid, row) or None when no such row is left this hour (a +1..+3
-    at the market price always is)."""
+    """The row I buy from: (price paid, row) or None when no such row is left this hour (a stock
+    grade, MARKET_STOCK_GRADES, at the market price always is)."""
     now = time.time() if t is None else t
     key = f"{vm_day(now)}/{time.gmtime(now).tm_hour}"
     row = next((r for r in market_rows(spid, now) if r["grade"] == grade and r["price"] == price), None)
-    if row is None and on_market(spid) and grade in (1, 2, 3) and price == market_value(spid, grade, now):
+    if row is None and on_market(spid) and grade in MARKET_STOCK_GRADES and price == market_value(spid, grade, now):
         row = {"grade": grade, "price": price}  # the stock, seen in an older list (the client caches 30 s)
     if row is None:
         return None

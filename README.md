@@ -184,8 +184,9 @@ Added, passing the tests but not yet checked in the client:
   button shows his profile and squad.
 - **The Market lives** (issue #30): virtual managers buy the cards you list ("Dijual" turns "Terjual"
   on its own within a few minutes, sooner when cheaper, with a "terjual seharga" toast and a
-  notification naming the buyer; Batal and Ulang work) and list cards of their own beside the +1..+3
-  stock, other grades too, a little under the market price, with the Kuantitas changing every hour.
+  notification naming the buyer; Batal and Ulang work) and list cards of their own beside the +1..+8
+  stock (every grade an Upgrade needs, never sold out), a little under the market price, with the
+  Kuantitas changing every hour. +9 and +10 still only come out of an Upgrade.
   The card window's Market Price tab draws the last 30 days' price.
 - **Economy settings** (issue #30): the admin page's new Ekonomi tab makes the game as hard as you
   like: player and pack price multipliers, a new manager's EP, the Shop's free switch, and a dynamic
