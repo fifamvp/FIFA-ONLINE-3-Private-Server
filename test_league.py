@@ -545,6 +545,10 @@ def main():
             for big, tag in (("eng.big", "ENG"), ("ind.big", "IND")):
                 masked |= {w.lower() for w in hc.client_json(os.path.join(hc.GAME, "data", "ui", "localization", big),
                                                              f"data/ui/localization/FORBIDDENWORDS_CHAT_{tag}.json")}
+            # the chat font: no markup, no emoji (the sc library is Chinese, so CJK and its full
+            # width punctuation are fine; the emoji and variation selectors are not)
+            font = lambda s: 3 <= len(s) <= 60 and not set(s) & set("<>&") and not any(
+                0x2600 <= ord(ch) <= 0x27BF or 0xFE00 <= ord(ch) <= 0xFE0F or 0x1F000 <= ord(ch) <= 0x1FBFF for ch in s)
             assert set(chat) == set(hc.VM_CHAT_LANGS)
             for lang, triggers in chat.items():
                 lines = [s for cells in triggers.values() for v in cells.values() for s in v]
@@ -552,7 +556,7 @@ def main():
                 assert all(set(cells) == set(hc.VM_PERSONALITIES) and all(len(v) == 20 for v in cells.values())
                            for cells in triggers.values())
                 assert len({s.lower() for s in lines}) == len(lines) == 900
-                assert all(3 <= len(s) <= 60 and not set(s) & set("<>&") and max(map(ord, s)) < 0x1F00 for s in lines)
+                assert all(font(s) for s in lines)
                 assert not [s for s in lines if any(w in s.lower() for w in masked)], lang
             # the club chat's library (issue #36), the same rules: 10 per trigger and personality
             club_chat = json.load(open(os.path.join(hc.RESPONSES, "vm_club_chat.json"), encoding="utf-8"))
@@ -564,7 +568,7 @@ def main():
                 assert all(set(cells) == set(hc.VM_PERSONALITIES) and all(len(v) == 10 for v in cells.values())
                            for cells in triggers.values())
                 assert len({s.lower() for s in lines}) == len(lines) == 600
-                assert all(3 <= len(s) <= 60 and not set(s) & set("<>&") and max(map(ord, s)) < 0x1F00 for s in lines)
+                assert all(font(s) for s in lines)
                 assert not [s for s in lines if any(w in s.lower() for w in masked)], lang
 
             def after(act):  # what goes out for act, its timers fired
@@ -872,9 +876,9 @@ def main():
         # price, Kuantitas per hour; buying takes from the row the path names, a row sold out (or never
         # there) is NO_SUCH_OFFER ("Pemain tidak ada.")
         rows = body(hc.route(f"/transfer/search/{spid}")("", b""))
-        assert [r["grade"] for r in rows[:3]] == [1, 2, 3] and all(r["count"] >= 1 for r in rows)
+        assert [r["grade"] for r in rows[:len(hc.MARKET_STOCK_GRADES)]] == list(hc.MARKET_STOCK_GRADES) and all(r["count"] >= 1 for r in rows)
         s, r = next((s, r) for s in sorted(hc.market_spids()) if hc.card_price(s) < 20000
-                    for r in hc.market_rows(s) if r["grade"] >= 4 and r["price"] < ep() // 4)
+                    for r in hc.market_rows(s) if r["grade"] >= 4 and r["price"] < hc.market_value(s, r["grade"]))
         assert 0.955 * hc.card_price(s, r["grade"]) <= r["price"] <= hc.card_price(s, r["grade"])
         ep2, had = ep(), {hc.iid(p) for p in team()["players"]}
         for _ in range(r["count"]):
@@ -2504,7 +2508,8 @@ def main():
         net = lambda s, g: hc.sale_net({"price": hc.sell_band(s, g)[1], "completefee": {"base": int(hc.sell_band(s, g)[1] * hc.SALE_FEE)}})
         assert all(net(s, g) <= hc.market_value(s, g) for s in sorted(hc.market_spids())[:300] for g in (1, 2, 3))
         assert hc.market_rows(m88)[0]["price"] == v
-        lows = [r["price"] / hc.market_value(s, r["grade"]) for s in sorted(hc.market_spids())[:400] for r in hc.market_rows(s)[3:]]
+        lows = [r["price"] / hc.market_value(s, r["grade"]) for s in sorted(hc.market_spids())[:400]
+                for r in hc.market_rows(s) if r["price"] != hc.market_value(s, r["grade"])]
         assert lows and min(lows) < 0.95 and all(0.85 <= x <= 1.03 for x in lows)  # bargains now and then
         o = {"_id": "t", "spid": m88, "grade": 1, "price": upper}
         now = time.time(); hc.vm_buyer(o, now)
