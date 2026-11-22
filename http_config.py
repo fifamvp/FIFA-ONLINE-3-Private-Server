@@ -1556,7 +1556,7 @@ TC_NAMED_SPECIALS = (  # (TEAM<id>, description, SQL condition on players p, boo
         (32, 18, ("", "strength", 1)), (33, 10, ("fw", "acceleration", 2)), (34, 40, ("", "positioning", 2)),
         (35, 83, ("", "headingaccuracy", 2)), (36, 108, ("", "marking", 3)), (37, 117, ("", "reactions", 2)),
         (38, 167, ("", "reactions", 2)), (39, 163, ("", "shortpassing", 2)))),
-    *((TC_WC18 + n, "Pemain WC18 dari negara ini", f"{_S(78)} AND p.nationality = {n}", _TC_OVR, None) for n in TC_WC18_NATIONS),
+    # *((TC_WC18 + n, "Pemain WC18 dari negara ini", f"{_S(78)} AND p.nationality = {n}", _TC_OVR, None) for n in TC_WC18_NATIONS), # TODO: 隐藏18WC
     *((tid, "50 kartu terbaik negara ini", f"p.nationality = {n}", _TC_OVR, 50) for tid, n in (
         (20007, 21), (20008, 45), (20009, 18), (20010, 27), (20011, 14), (20012, 54), (20013, 52),
         (20014, 7), (20015, 38), (20016, 56), (20017, 60))),
@@ -1604,8 +1604,9 @@ TC_NAMED_SPECIALS = (  # (TEAM<id>, description, SQL condition on players p, boo
     (20070, "Heading 85 ke atas", "p.headingaccuracy >= 85", ("", "strength", 5), None),
     (20071, "Reputasi internasional 4 bintang ke atas", "p.internationalrep >= 4", ("", "ovr", 4), None),
 )
-TC_KEYS = {34024: "TEAMCOLOR_ATTRIBUTES_EVOLVE34024",  # every other name is TEAMCOLOR_ATTRIBUTES_TEAM<id>
-           **{TC_WC18 + n: f"18 WC {name}" for n, name in TC_WC18_NATIONS.items()}}  # names of ours, shown as given
+# TC_KEYS = {34024: "TEAMCOLOR_ATTRIBUTES_EVOLVE34024",  # every other name is TEAMCOLOR_ATTRIBUTES_TEAM<id>
+#            **{TC_WC18 + n: f"18 WC {name}" for n, name in TC_WC18_NATIONS.items()}}  # names of ours, shown as given
+TC_KEYS = {34024: "TEAMCOLOR_ATTRIBUTES_EVOLVE34024"}  # TODO：隐藏18WC
 # The admin page's own colors (user: "bisa tambahkan team color baru"): gamedata/teamcolors.json,
 # [{id (TC_CUSTOM + n), name, desc, seasons, clubs, nations, players (player ids), min_ovr, best,
 # target (fw/mf/df/gk, "" = all), stat ("ovr" or a stat), amount}]; a card belongs when it meets
