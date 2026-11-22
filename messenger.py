@@ -10,7 +10,7 @@ auth needs "result" truthy (no "reason") to reach NOTIFICATION_SERVER_CONNECTED.
 Needs the `cryptography` package (Blowfish).
 Usage: python messenger.py [port=28002]   |   python messenger.py --selftest
 """
-import json, os, socket, socketserver, struct, sys, threading, time, warnings
+import json, os, socket, socketserver, struct, sys, threading, time, traceback, warnings
 
 warnings.filterwarnings("ignore")  # Blowfish is "decrepit" in newer cryptography
 try:
@@ -65,7 +65,10 @@ def replies(msg):
 
 def log(line):
     line = f"{time.strftime('%H:%M:%S')} {line}"
-    print(line, flush=True)
+    try:
+        print(line, flush=True)
+    except UnicodeEncodeError:  # console codepage cannot show every language
+        print(line.encode("ascii", "backslashreplace").decode("ascii"), flush=True)
     with open(LOG, "a", encoding="utf-8") as f:
         f.write(line + "\n")
 
@@ -102,28 +105,50 @@ class H(socketserver.BaseRequestHandler):
 
     def serve(self):
         buf = b""
-        while True:
-            data = self.request.recv(65536)
-            if not data:
-                break
-            buf += data
-            while len(buf) >= 4:
-                ln, ty = struct.unpack_from("<HH", buf)
-                if len(buf) < 4 + ln:
-                    break
-                body, buf = buf[4:4 + ln], buf[4 + ln:]
+        try:
+            while True:
                 try:
-                    msg = decode(body) if ty == 2 else {"raw": body.hex(), "type": ty}
-                except Exception as e:
-                    msg = {"undecodable": body.hex(), "error": repr(e)}
-                if msg.get("cmd") != "ping":
-                    log(f"<- {msg}")
-                for out in replies(msg):
-                    with SEND_LOCK:
-                        self.request.sendall(encode(out))
-                    if out["cmd"] != "ping":
-                        log(f"-> {str(out)[:300]}")
-        log(f"closed {self.client_address}")
+                    data = self.request.recv(65536)
+                except (ConnectionError, TimeoutError):  # client exited on RST, not FIN
+                    break
+                if not data:
+                    break
+                buf += data
+                while len(buf) >= 4:
+                    ln, ty = struct.unpack_from("<HH", buf)
+                    if len(buf) < 4 + ln:
+                        break
+                    body, buf = buf[4:4 + ln], buf[4 + ln:]
+                    try:
+                        msg = decode(body) if ty == 2 else {"raw": body.hex(), "type": ty}
+                    except Exception as e:
+                        msg = {"undecodable": body.hex(), "error": repr(e)}
+                    if msg.get("cmd") != "ping":
+                        log(f"<- {msg}")
+                    for out in replies(msg):
+                        try:
+                            with SEND_LOCK:
+                                self.request.sendall(encode(out))
+                        except OSError:  # client already gone mid-reply
+                            return
+                        if out["cmd"] != "ping":
+                            log(f"-> {str(out)[:300]}")
+                    if msg.get("cmd") == "safeout":
+                        return  # the client's last frame before it closes
+        finally:
+            log(f"closed {self.client_address}")
+
+
+class Server(socketserver.ThreadingTCPServer):
+    daemon_threads = True
+
+    def handle_error(self, request, client_address):
+        # Keep unexpected handler errors out of the console: start_all.py pipes stdout
+        # through a text decoder, and a raw traceback with a non-UTF-8 byte kills it.
+        tb = traceback.format_exc()
+        log(f"handler error from {client_address}: {tb.strip().splitlines()[-1]}")
+        with open(LOG, "a", encoding="utf-8") as f:
+            f.write(tb + "\n")
 
 
 def selftest():
@@ -145,5 +170,5 @@ if __name__ == "__main__":
         os.makedirs(os.path.dirname(LOG), exist_ok=True)
         print(f"messenger on 0.0.0.0:{PORT} (pushes from 127.0.0.1:{PUSH_PORT}), log -> {LOG}", flush=True)
         threading.Thread(target=push_loop, daemon=True).start()
-        socketserver.ThreadingTCPServer.allow_reuse_address = os.name != "nt"  # no double bind on Windows
-        socketserver.ThreadingTCPServer(("0.0.0.0", PORT), H).serve_forever()
+        Server.allow_reuse_address = os.name != "nt"  # no double bind on Windows
+        Server(("0.0.0.0", PORT), H).serve_forever()

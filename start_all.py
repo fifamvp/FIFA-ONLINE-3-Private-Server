@@ -17,16 +17,32 @@ selftest = "--selftest" in sys.argv
 procs = []
 
 
+def emit(text):
+    """Print a child line even when the console's own codec cannot encode it."""
+    try:
+        sys.stdout.write(text)
+        sys.stdout.flush()
+    except UnicodeEncodeError:
+        buf = getattr(sys.stdout, "buffer", None)
+        if buf is not None:
+            buf.write(text.encode("utf-8", "replace"))
+            buf.flush()
+
+
 def pump(name, proc):
     for line in proc.stdout:
-        sys.stdout.write(f"[{name}] {line}")
-        sys.stdout.flush()
+        emit(f"[{name}] {line}")
 
 
 def start(name, extra):
+    # text=True alone decodes with the locale codec (cp936 here), while play.bat /
+    # the launcher set PYTHONIOENCODING=utf-8 for the children. Pin both sides to
+    # UTF-8 so a Chinese log line (or a traceback containing one) cannot kill pump.
+    env = os.environ.copy()
+    env["PYTHONIOENCODING"] = "utf-8"
     p = subprocess.Popen([sys.executable, "-u", os.path.join(HERE, name), *extra],
-                         cwd=HERE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                         text=True, bufsize=1)
+                         cwd=HERE, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                         text=True, encoding="utf-8", errors="replace", bufsize=1)
     threading.Thread(target=pump, args=(name, p), daemon=True).start()
     procs.append((name, p))
 
