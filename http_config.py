@@ -3303,13 +3303,30 @@ def ep_cup_list(query, body):
     return _json([] if "type=wcpve" in query else CUPS)  # wcpve = World Cup PvE list
 
 
+def cup_club_ids(min_players=16):
+    """Club teamids with >= min_players licensed CURRENT-season cards, strongest first.
+
+    A club qualifies through its current-season cards; the unlicensed ones are the engine's
+    template cards. The old pool filter was `spid < 1000000` (season-0 template cards), a
+    season this fifadb has no rows for at all, so the pool came back empty and every cup was
+    built with one team and three empty groups -- the client's CupMainGroupStageTabPage then
+    reads a team that is not there and throws AS3 #1010 (2026-11-23). National teams are
+    excluded: they also carry licensed cards under their own id, and a cup is a club cup."""
+    with closing(_db()) as c:
+        rows = c.execute("""SELECT p.teamid FROM players p
+                            JOIN permid m ON m.spid = p.spid AND m.licensed = 1
+                            WHERE p.spid / 1000000 = ?
+                              AND p.teamid NOT IN (SELECT DISTINCT nationalteamid FROM players
+                                                   WHERE nationalteamid > 0 AND nationalteamid < 900000)
+                            GROUP BY p.teamid HAVING COUNT(*) >= ?
+                            ORDER BY MAX(p.overallrating) DESC, p.teamid""",
+                         (gen_teams.CURRENT_SEASON, min_players)).fetchall()
+    return [r[0] for r in rows]
+
+
 def cup_pool(metaid, mine):
     """15 AI clubs: the strongest clubs in fifadb (cup 1) or the next tier (cup 2)."""
-    with closing(_db()) as c:
-        rows = c.execute("""SELECT p.teamid FROM players p JOIN permid m ON m.spid = p.spid AND m.licensed = 1
-                            WHERE p.spid < 1000000 GROUP BY p.teamid HAVING COUNT(*) >= 16
-                            ORDER BY MAX(p.overallrating) DESC LIMIT 60""").fetchall()
-    ids = [r[0] for r in rows if r[0] != mine]
+    ids = [t for t in cup_club_ids() if t != mine]
     return ids[:15] if metaid == 1 else ids[15:30]
 
 
@@ -3324,6 +3341,8 @@ def new_cup(st, meta, difficulty):
     shootout?} index into that group's teams; rounds[].shuffle -> the draw screen."""
     me = my_teamid(st)
     teams = [me] + cup_pool(meta["metaid"], me)
+    if len(teams) < 16:  # never leave a group empty: the client's group page indexes it (#1010)
+        teams += [t for t in cup_club_ids(11) if t not in teams][:16 - len(teams)]
     random.shuffle(teams)
     groups = [{"teams": [cup_team(st, t) for t in teams[g * 4:g * 4 + 4]],
                "rounds": [{"shuffle": r == 0, "pairs": [{"legs": [{"homeidx": h, "awayidx": a}]}
