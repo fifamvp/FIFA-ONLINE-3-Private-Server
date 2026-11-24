@@ -231,6 +231,12 @@ def _state():
             return json.load(f)
     except FileNotFoundError:
         return {"coaches": [], "defaultcoachid": "", "teams": {}}
+    except UnicodeDecodeError:  # a hand-edited / non-ASCII state.json: read it as UTF-8 instead.
+        # _save() writes with json.dump's default ensure_ascii=True, so files this code writes are
+        # pure ASCII and decode under any locale; a state.json with real UTF-8 text used to kill
+        # every request with a 500 (the client then dies on the loading screen, 2026-11-23).
+        with open(STATE, encoding="utf-8") as f:
+            return json.load(f)
 
 
 def _save(st):
