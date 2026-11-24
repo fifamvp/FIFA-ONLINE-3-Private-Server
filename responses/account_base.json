@@ -32,7 +32,9 @@
     "teaminfo": {}
    },
    "teammanagement": {
-    "squad": {},
+    "squad": {
+     "workrate": {}
+    },
     "tactic": {},
     "playerrole": {}
    },
