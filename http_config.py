@@ -3312,6 +3312,20 @@ def cup_meta(metaid, name, trophy, quality, matchcount, teams, reward):
 CUPS = [cup_meta(1, "European Champions Cup", "66", 4, 6, 16, 6000000),  # 3 group + QF/SF/F
         cup_meta(2, "South American Cup", "300000", 3, 6, 16, 4000000)]
 
+# Cup AI sides field +1 cards. An AI squad is built straight from fifadb (gen_teams), and a raw
+# card list carries no grade, which the client reads as +0 -- an unenhanced card with no boost.
+# The player's own club-cup side is his stored team (it keeps whatever grade he gave those cards).
+CUP_AI_GRADE = 1
+
+
+def set_card_grade(team, grade):
+    """A copy of a generated squad with every card at grade +N, made before owned_team copies it
+    into the match side: the pre-match squad list (Attr), the card price and the native boost all
+    read it. A copy, because a generated squad can be cached and shared between matches."""
+    if not (team and grade):
+        return team
+    return dict(team, players=[dict(p, grade=int(grade)) for p in team.get("players") or ()])
+
 
 def ep_cup_list(query, body):
     return _json([] if "type=wcpve" in query else CUPS)  # wcpve = World Cup PvE list
@@ -3585,7 +3599,8 @@ def ep_cup_match(cupid, query, body):
     opp = away if home == teamid else home
     user = {"id": me["id"], "name": me["name"], "levelinfo": me["levelinfo"]}
     match = new_match("Cup_PvE", match_side(st["teams"][str(_default_slot(st))], teamid, user, _tactics(st)[1]),
-                      match_side(roster_team(opp), opp))
+                      # the AI clubs only; my own cards keep the grades I gave them
+                      match_side(set_card_grade(roster_team(opp), CUP_AI_GRADE), opp))
     gs = match["gamesettings"]
     gs["home"] = home == teamid
     gs["kit"] = ["home", "away"] if gs["home"] else ["away", "home"]
