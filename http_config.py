@@ -613,13 +613,19 @@ def ep_team_role(kicker, query, body):
 
 def roster(teamid):
     """{summary, team} of a club: the gen_teams.py roster file if there is one (2017 squads, so
-    not while 26 LIVE is the current season), else built the same way straight from fifadb."""
+    not while 26 LIVE is the current season), else built the same way straight from fifadb.
+
+    A national team id resolves here too, by nationality: a nation's cards are filed at its
+    players' clubs, and the 14W set lost nationalteamid on 547 of 1040 cards (Italy keeps 4 of
+    them), so the teamid lookup builds nothing at all -- Italy falls back here, and it is what
+    the cup picker's wheel was missing Brazil for."""
     f = os.path.join(RESPONSES, f"static_info_authentic_team_all_{teamid}.json")
     if os.path.isfile(f) and gen_teams.CURRENT_SEASON == gen_teams.LEGACY_SEASON:
         with open(f) as fh:
             return json.load(fh)
     with closing(_db()) as c:
-        return gen_teams.team(c, teamid) or {"summary": {}, "team": {"players": [], "squad": {"positions": [], "kickers": []}}}
+        t = gen_teams.team(c, teamid) or gen_teams.team(c, teamid, national=True, by_nation=True)
+    return t or {"summary": {}, "team": {"players": [], "squad": {"positions": [], "kickers": []}}}
 
 
 def roster_team(teamid):
@@ -2658,11 +2664,27 @@ def ep_sortleague(query, body):
     return _json({str(n): [lid for lid, _ in ls] for n, ls in club_index()})
 
 
+def national_teamids():
+    """league-78 ids the cup picker offers: every national side club_index can field, plus every
+    configured pot team appended in place (club_index files a nation by the cards that kept
+    nationalteamid, and the 14W set lost it on 547 of 1040, which drops Brazil). Appended rather
+    than merged so the wheel's default entry does not move. A national side being here is also what
+    tells ep_authentic_team that a teamid is a nation, not a club -- the picker offers China and
+    India too (joinable.allteams stays true), and those are in no cup's pots."""
+    base = next((ts for _, ls in club_index() for lid, ts in ls
+                 if lid == gen_teams.NATIONAL_LEAGUE), [])
+    have = set(base)
+    return base + [t for t in tournament_teamids() if t not in have]
+
+
 def ep_sortteam(query, body):
     """/static/db/SORTTEAM {leagueid: [teamid]}: the club picker above; Liga's creation screen
     counts my own league's clubs (the ones its calendar will use)."""
     st = _state()
     out = {str(lid): ts for _, ls in club_index() for lid, ts in ls}
+    nations = national_teamids()
+    if nations:
+        out[str(gen_teams.NATIONAL_LEAGUE)] = nations
     if st["coaches"]:
         teamid = my_teamid(st)
         lid = roster_summary(teamid).get("league", {}).get("id", 0)
@@ -2671,14 +2693,35 @@ def ep_sortteam(query, body):
 
 
 def ep_authentic_team(kind, teamid, query, body):
-    """/static/info/authentic/team/licensed|all/<teamid>: a club's starter squad {teamid, summary,
+    """/static/info/authentic/team/licensed|all/<teamid>: a team's starter squad {teamid, summary,
     team} (responses/ files override for the recommended clubs). StartupPlayerSelectionScreen
     (after "Tim lain") looks up team.captain among team.players by id and dresses its 3D player
-    in kit.availables.home/goalie."""
-    r = roster(int(teamid))
-    team = dict(r["team"], players=[dict(p, id=str(p["spid"])) for p in r["team"]["players"]])
+    in kit.availables.home/goalie.
+
+    A national side takes the other branch: with cup.teamselect == "authentic" the cup's team
+    picker previews the squad of the team under the cursor
+    (CupCreationTeamSelectionScene.updateSelectedTeamInfo -> setPlayerStepper), and asks here for
+    it -- the plain roster files one by teamid, which for a national team is empty. Every card
+    comes back state "first": setPlayerStepper keeps only Enums.isFirstTeam(state) and
+    getPlayerState(undefined) is SECOND team, i.e. an empty player wheel.
+
+    Not every national side the picker offers is in a cup's pots (China, India: the wheel stays
+    open via joinable.allteams), so tournament_entry_of_team has nothing for those; they borrow the
+    card sources of the tournament whose picker this is (the authentic one -- the request carries
+    no cup id)."""
+    t = int(teamid)
+    entry = tournament_entry_of_team(t)
+    if entry is None and t in national_teamids():
+        entry = next((e for e in tournament_config() if e.get("teamselect") == "authentic"), {})
+    if entry is not None:
+        r = tournament_roster(t, entry) or roster(t)
+        team = dict(r["team"], players=[dict(p, id=str(p["spid"]), state="first")
+                                        for p in r["team"]["players"]])
+    else:
+        r = roster(t)
+        team = dict(r["team"], players=[dict(p, id=str(p["spid"])) for p in r["team"]["players"]])
     team["captain"] = str(team["squad"].get("captain") or "")
-    return _json({**r, "team": team, "teamid": int(teamid), "kit": team_kit(int(teamid))})
+    return _json({**r, "team": team, "teamid": t, "kit": team_kit(t)})
 
 
 def ep_recommendation(query, body):
@@ -3354,7 +3397,11 @@ TOURNAMENT_CONFIG_FILE = os.path.join(HERE, "config", "tournaments.json")
 # every future tournament. A cup that says nothing falls back to the plain current pool.
 TOURNAMENT_DEFAULTS = {"card_sources": [{"current": True}],
                        "squad_size": gen_teams.SELECTABLE, "min_players": 11, "type": "wcpve",
-                       "teamselect": "nation", "trophy": "66", "skin": "66", "quality": 4,
+                       # "authentic" = the player takes over a licensed side, so the team picker
+                       # previews THAT side's squad instead of the coach's own club (see
+                       # ep_authentic_team); "user" would lock the coach's club, "nation" opens the
+                       # same picker but previews his own players. Per cup override as usual.
+                       "teamselect": "authentic", "trophy": "66", "skin": "66", "quality": 4,
                        "card_grade": CUP_AI_GRADE,
                        "matchcount": 7, "reward": 6000000, "format": {}}
 _TOUR_CACHE = {"mtime": None, "cups": []}
@@ -3394,15 +3441,47 @@ def tournament_entry(metaid):
     return next((e for e in tournament_config() if int(e.get("metaid") or 0) == metaid), None)
 
 
+def tournament_teamids(entry=None):
+    """The national teamids a configured cup fields, pot by pot (pot 1 = the seeds first, which is
+    the order the team wheel shows). entry=None gives the whole configured set. The pots, not
+    gen_teams.club_index, are the authority: club_index drops any side whose 14W cards lost
+    nationalteamid (Brazil), and they are still in the draw."""
+    out = []
+    for e in ([entry] if entry is not None else tournament_config()):
+        for pot in e.get("pots") or ():
+            for t in pot.get("teams") or ():
+                tid = int(t[0])
+                if tid not in out:
+                    out.append(tid)
+    return out
+
+
+def tournament_entry_of_team(teamid):
+    """The configured cup that fields this national team, or None (a club id)."""
+    return next((e for e in tournament_config() if int(teamid) in tournament_teamids(e)), None)
+
+
 def tournament_meta(entry, list_type="wcpve"):
     """A /cup/list entry for a tournament. list_type="pve" is what CupFrontScreen draws (the
     instance itself stays "wcpve", which is what ep_cup_next/ep_cup_match branch on);
-    teamselect="nation" is what makes CupController open the 3-wheel nation picker instead of
-    locking the coach's own club."""
+    teamselect != "user" is what makes CupController open the 3-wheel nation picker instead of
+    locking the coach's own club ("authentic" additionally makes the picker preview the picked
+    team's own squad, and hides the squad screen's contract-extension button).
+
+    joinable is not just a fee/flag bag: CupProxy hands it to TeamSelectionUtil.rearrangeData as
+    the picker's whitelist, which runs only while joinable.allteams is falsy and then keeps just
+    joinable.teamids. Leaving it true hands the picker SORTTEAM's whole league-78 list (every
+    nation with a playable squad plus the cups' pot teams, Brazil included), which is what a
+    private server wants: pick China or India and the draw files you in pot 4. A cup that should
+    only offer its own participants -- the real 32-team World Cup -- sets joinable_teams="pots"."""
     n = sum(len(p.get("teams") or ()) for p in entry.get("pots") or ())
     meta = cup_meta(entry["metaid"], entry["name"], entry.get("trophy"), entry.get("quality"),
                     entry.get("matchcount"), n or 32, entry.get("reward"))
-    return dict(meta, type=list_type, teamselect=entry.get("teamselect"), skin=entry.get("skin"))
+    teams = tournament_teamids(entry)
+    pots_only = teams and entry.get("joinable_teams") == "pots"
+    joinable = dict(meta["joinable"], allteams=False, teamids=teams) if pots_only else meta["joinable"]
+    return dict(meta, type=list_type, teamselect=entry.get("teamselect"), skin=entry.get("skin"),
+                joinable=joinable)
 
 
 def ep_cup_list(query, body):
@@ -3429,18 +3508,23 @@ def tournament_card_sources(entry, teamid):
             or TOURNAMENT_DEFAULTS["card_sources"])
 
 
-def tournament_roster_team(teamid, entry=None):
-    """A tournament team's squad: the configured card sources, so both my side and the opponents
-    field the real players of that competition instead of the best cards this DB happens to have
-    for that nation. Picked by nationality (see gen_teams._team_filter), so a nation whose cards
-    lost nationalteamid still gets its full set. A nation even the sources cannot make 11 players
-    for falls back to its plain roster rather than folding an empty squad into a match."""
+def tournament_roster(teamid, entry=None):
+    """{summary, team} of a tournament side, or None when even the sources cannot make 11 players
+    for it: the configured card sources, so both my side and the opponents field the real players
+    of that competition instead of the best cards this DB happens to have for that nation. Picked
+    by nationality (see gen_teams._team_filter), so a nation whose cards lost nationalteamid still
+    gets its full set."""
     with closing(_db()) as c:
-        t = gen_teams.team(c, teamid, tournament_card_sources(entry, teamid), national=True,
-                           by_nation=True,
-                           min_players=int((entry or {}).get("squad_size") or gen_teams.SELECTABLE),
-                           min_lines=(entry or {}).get("squad_lines"))
-    return (t or {}).get("team") or roster_team(teamid)
+        return gen_teams.team(c, teamid, tournament_card_sources(entry, teamid), national=True,
+                              by_nation=True,
+                              min_players=int((entry or {}).get("squad_size") or gen_teams.SELECTABLE),
+                              min_lines=(entry or {}).get("squad_lines"))
+
+
+def tournament_roster_team(teamid, entry=None):
+    """tournament_roster's team half for a match side: a nation the sources cannot fill falls back
+    to its plain roster rather than folding an empty squad into a match."""
+    return (tournament_roster(teamid, entry) or {}).get("team") or roster_team(teamid)
 
 
 def tournament_squad(entry, teamid):
@@ -3846,10 +3930,13 @@ def tournament_play_round(st, cup, mine=None):
 
 def cup_resources(cup):
     """The cup with its meta's trophy and skin (issue #36: CupMainScreen draws
-    trophies/t<currentCup.trophy>.png, and cups saved without them asked for tundefined.png)."""
+    trophies/t<currentCup.trophy>.png, and cups saved without them asked for tundefined.png) and
+    teamselect (CupMainScreen/CupSquadSettingHandler ask currentCup.teamselect whether this is a
+    licensed side: it hides the squad screen's contract-extension button and the OVR rank)."""
     uri = f"/cup/{cup['_id']}"
     meta = cup_or_tournament_meta(cup.get("metaid")) or {}
-    return [{"resource": uri, "uri": uri, "body": {"trophy": meta.get("trophy"), "skin": meta.get("skin"), **cup}}]
+    return [{"resource": uri, "uri": uri, "body": {"trophy": meta.get("trophy"), "skin": meta.get("skin"),
+                                                  "teamselect": meta.get("teamselect"), **cup}}]
 
 
 def ep_cup_new(query, body):
