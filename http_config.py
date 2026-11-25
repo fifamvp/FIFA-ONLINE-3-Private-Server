@@ -3363,9 +3363,14 @@ def new_cup(st, meta, difficulty):
                                                          for h, a in league_round([0, 1, 2, 3], r)]}
                           for r in range(3)]} for g in range(4)]
     cupid = f"{int(time.time()):08x}{os.urandom(8).hex()}"
+    # phase.name is a LOCALIZATION KEY, not a label: CupMainStandingTabPage.makeTab does
+    # Localization.getLocalizedString(phase.name) for its tab labels and shows the string as-is
+    # when the key is unknown (upstream shipped "Fase grup" in Indonesian, which is why the
+    # client displayed "Fase grup" no matter the language). PVECUP_PROG_LEAGUE = 小组赛,
+    # MODENAME_MULTI_TOUNAMENT = 淘汰赛.
     cup = {"_id": cupid, "metaid": meta["metaid"], "name": meta["name"], "type": "pve",
            "difficulty": difficulty, "current": {"phase": 0, "round": 0, "leg": 0},
-           "phases": [{"system": "round-robin", "name": "Fase grup", "maxrounds": 3, "groups": groups}],
+           "phases": [{"system": "round-robin", "name": "PVECUP_PROG_LEAGUE", "maxrounds": 3, "groups": groups}],
            "coaches": [{"_id": coach_id(_default_slot(st)), "state": "playing"}],
            "teams": [cup_team(st, t) for t in teams]}
     cup_refresh_stats(cup)
@@ -3457,7 +3462,7 @@ def cup_play_round(st, cup, mine=None):
         for x, y in ((0, 1), (2, 3)):
             qual += [phase["groups"][x]["teams"][tables[x][0]], phase["groups"][y]["teams"][tables[y][1]],
                      phase["groups"][y]["teams"][tables[y][0]], phase["groups"][x]["teams"][tables[x][1]]]
-        cup["phases"].append({"system": "knock-out", "name": "Babak gugur", "maxrounds": 3, "groups": [{"teams": qual, "rounds": [
+        cup["phases"].append({"system": "knock-out", "name": "MODENAME_MULTI_TOUNAMENT", "maxrounds": 3, "groups": [{"teams": qual, "rounds": [
             {"shuffle": True, "pairs": [{"legs": [{"homeidx": i, "awayidx": i + 1}]} for i in range(0, 8, 2)]},
             {"pairs": [{"legs": [{}]} for _ in range(2)]}, {"pairs": [{"legs": [{}]}]}]}]})
         cup.update(current={"phase": cur["phase"] + 1, "round": 0, "leg": 0})
