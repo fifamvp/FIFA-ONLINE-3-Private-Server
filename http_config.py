@@ -3314,21 +3314,204 @@ CUPS = [cup_meta(1, "European Champions Cup", "66", 4, 6, 16, 6000000),  # 3 gro
 
 # Cup AI sides field +1 cards. An AI squad is built straight from fifadb (gen_teams), and a raw
 # card list carries no grade, which the client reads as +0 -- an unenhanced card with no boost.
-# The player's own club-cup side is his stored team (it keeps whatever grade he gave those cards).
+# The player's own club-cup side is his stored team (it keeps whatever grade he gave those cards);
+# a tournament side is generated on both ends, so both take the event's card_grade instead.
 CUP_AI_GRADE = 1
 
 
 def set_card_grade(team, grade):
     """A copy of a generated squad with every card at grade +N, made before owned_team copies it
     into the match side: the pre-match squad list (Attr), the card price and the native boost all
-    read it. A copy, because a generated squad can be cached and shared between matches."""
+    read it. A copy, because tournament squads are cached and shared between matches."""
     if not (team and grade):
         return team
     return dict(team, players=[dict(p, grade=int(grade)) for p in team.get("players") or ()])
 
 
+# --------------------------------------------------------------------------- #
+# Tournament cups (PvE). Config-first: a cup is one entry in config/tournaments.json -- metaid,
+# name, the seeding pots (id + name per team), the card sources a team is built from, and the
+# format. A World Cup, a European Championship, a Copa America is a config entry, not code.
+#
+# The client has no worldcup button (MainMenuInfoDefines hardcodes league/cup/rtw) and its
+# competition creation scene cannot be reached, but CupFrontScreen draws any /cup/list tile -- so
+# a tournament is a cup-shaped instance: /cup/list (a pve tile) -> the shared 3-wheel team picker
+# (SORTNATION/SORTLEAGUE/SORTTEAM) -> POST /cup/new -> /cup/<id>, /cup/<id>/next, /cup/<id>/match,
+# the same CupProxy code as the club cups above. The player coaches a NATIONAL team;
+# nationalteamid -> nation is resolved by the client from its own static DB, the server only
+# carries the id, exactly as the club cups carry club teamids. The squad behind that id is picked
+# by NATIONALITY, not nationalteamid: 547 of the 1040 14W cards have nationalteamid -1 and the
+# whole of Italy's 2014 set does, so the id-keyed pool loses half the card set (gen_teams
+# .national_code / ._team_filter).
+#
+# This lives in config/ and not in responses/: responses/<path>.json is an HTTP response override
+# keyed by request path (see from_file), so a file there would shadow an endpoint; this is server
+# configuration for one handler.
+# --------------------------------------------------------------------------- #
+TOURNAMENT_CONFIG_FILE = os.path.join(HERE, "config", "tournaments.json")
+# The event's own card sources are part of the event, not of these defaults: 14W is season 77,
+# 2018 is another season code, and a config that puts one of them here would field 14W players in
+# every future tournament. A cup that says nothing falls back to the plain current pool.
+TOURNAMENT_DEFAULTS = {"card_sources": [{"current": True}],
+                       "squad_size": gen_teams.SELECTABLE, "min_players": 11, "type": "wcpve",
+                       "teamselect": "nation", "trophy": "66", "skin": "66", "quality": 4,
+                       "card_grade": CUP_AI_GRADE,
+                       "matchcount": 7, "reward": 6000000, "format": {}}
+_TOUR_CACHE = {"mtime": None, "cups": []}
+_TOUR_SQUADS = {}
+
+
+def tournament_config():
+    """The enabled cups of config/tournaments.json with the defaults merged in, re-read when the
+    file's mtime changes: a config edit needs no server restart for the NEXT cup created. A cup
+    already in progress keeps the copy of the format stored on it (cup["format"])."""
+    try:
+        mtime = os.stat(TOURNAMENT_CONFIG_FILE).st_mtime
+    except OSError:
+        return []
+    if _TOUR_CACHE["mtime"] != mtime:
+        with open(TOURNAMENT_CONFIG_FILE, encoding="utf-8") as f:
+            cfg = json.load(f)
+        base = dict(TOURNAMENT_DEFAULTS, **(cfg.get("defaults") or {}))
+        cups = []
+        for e in cfg.get("cups") or []:
+            if not e.get("enabled", True):
+                continue
+            d = dict(base, **{k: v for k, v in e.items() if not k.startswith("_")})
+            d["format"] = dict(base.get("format") or {}, **(e.get("format") or {}))
+            cups.append(d)
+        _TOUR_CACHE.update(mtime=mtime, cups=cups)
+        _TOUR_SQUADS.clear()
+    return _TOUR_CACHE["cups"]
+
+
+def tournament_entry(metaid):
+    """One configured cup by metaid, or None."""
+    try:
+        metaid = int(metaid or 0)
+    except (TypeError, ValueError):
+        return None
+    return next((e for e in tournament_config() if int(e.get("metaid") or 0) == metaid), None)
+
+
+def tournament_meta(entry, list_type="wcpve"):
+    """A /cup/list entry for a tournament. list_type="pve" is what CupFrontScreen draws (the
+    instance itself stays "wcpve", which is what ep_cup_next/ep_cup_match branch on);
+    teamselect="nation" is what makes CupController open the 3-wheel nation picker instead of
+    locking the coach's own club."""
+    n = sum(len(p.get("teams") or ()) for p in entry.get("pots") or ())
+    meta = cup_meta(entry["metaid"], entry["name"], entry.get("trophy"), entry.get("quality"),
+                    entry.get("matchcount"), n or 32, entry.get("reward"))
+    return dict(meta, type=list_type, teamselect=entry.get("teamselect"), skin=entry.get("skin"))
+
+
 def ep_cup_list(query, body):
-    return _json([] if "type=wcpve" in query else CUPS)  # wcpve = World Cup PvE list
+    if "type=wcpve" in query:  # the native WCProxy list: only a client in WC mode asks for it
+        return _json([tournament_meta(e) for e in tournament_config()])
+    return _json(CUPS + [tournament_meta(e, "pve") for e in tournament_config() if e.get("listed", True)])
+
+
+def cup_or_tournament_meta(metaid):
+    """The /cup/list entry of any cup id: a club cup from CUPS, or a configured tournament (list
+    type "pve"; the instance itself is "wcpve"). Callers only read trophy / skin / prize off it."""
+    meta = next((m for m in CUPS if m["metaid"] == metaid), None)
+    if meta is not None:
+        return meta
+    e = tournament_entry(metaid)
+    return tournament_meta(e, "pve") if e else None
+
+
+def tournament_card_sources(entry, teamid):
+    """The card sources of one tournament team: its own override in the cup config, else the cup's
+    (the event's own card season first, topped up with the current pool), else the current pool."""
+    ov = ((entry or {}).get("team_overrides") or {}).get(str(teamid)) or {}
+    return (ov.get("card_sources") or (entry or {}).get("card_sources")
+            or TOURNAMENT_DEFAULTS["card_sources"])
+
+
+def tournament_roster_team(teamid, entry=None):
+    """A tournament team's squad: the configured card sources, so both my side and the opponents
+    field the real players of that competition instead of the best cards this DB happens to have
+    for that nation. Picked by nationality (see gen_teams._team_filter), so a nation whose cards
+    lost nationalteamid still gets its full set. A nation even the sources cannot make 11 players
+    for falls back to its plain roster rather than folding an empty squad into a match."""
+    with closing(_db()) as c:
+        t = gen_teams.team(c, teamid, tournament_card_sources(entry, teamid), national=True,
+                           by_nation=True,
+                           min_players=int((entry or {}).get("squad_size") or gen_teams.SELECTABLE),
+                           min_lines=(entry or {}).get("squad_lines"))
+    return (t or {}).get("team") or roster_team(teamid)
+
+
+def tournament_squad(entry, teamid):
+    """tournament_roster_team, cached per config revision + team: the draw, the strength estimates
+    and the match sides ask for the same 32 squads over and over."""
+    tournament_config()
+    key = (_TOUR_CACHE["mtime"], int((entry or {}).get("metaid") or 0), teamid)
+    if key not in _TOUR_SQUADS:
+        _TOUR_SQUADS[key] = tournament_roster_team(teamid, entry)
+    return _TOUR_SQUADS[key]
+
+
+def tournament_strength(entry, teamid):
+    """Best-XI average of a tournament squad -- the counterpart of team_strength(), which reads
+    the plain club/nation roster and would rate a 14W side by its current-season cards."""
+    ratings = sorted((p.get("price") or 0 for p in tournament_squad(entry, teamid).get("players") or ()),
+                     reverse=True)
+    return sum(ratings[:11]) / 11 if len(ratings) >= 11 else 60
+
+
+def tournament_draw(entry, mine_teamid, seed=None):
+    """The teams of one tournament, group by group: every group gets exactly one team per pot.
+
+    The player's nation keeps its pot when the cup knows it (Brazil stays a seed, and its group
+    still gets a pot-2, a pot-3 and a pot-4 side). A nation the cup does not know did not qualify,
+    so it is a pot-4 team: it takes the place of a random pot-4 side.
+
+    A team whose cards cannot make `min_players` players is replaced by one of `reserves` inside
+    its own pot -- a fifadb without that nation would otherwise fold an empty squad into the cup.
+    The pots themselves already carry a substitute for every nation the client cannot name (its
+    TEAMNAMES_CHI only has 47 national teams), so this is the second line of defence."""
+    fmt = entry.get("format") or {}
+    names = fmt.get("group_names") or "ABCDEFGH"
+    pots = [[(int(t[0]), str(t[1]) if len(t) > 1 else "") for t in (p.get("teams") or ())]
+            for p in entry.get("pots") or ()]
+    if len(pots) < 2 or any(len(p) != len(names) for p in pots):
+        raise ValueError("tournaments.json: every pot needs exactly len(group_names) teams")
+    floor = int(entry.get("min_players") or 11)
+    rng = random.Random(seed)
+    reserves = [(int(t[0]), str(t[1]) if len(t) > 1 else "") for t in entry.get("reserves") or ()]
+    used = {t[0] for pot in pots for t in pot}
+    dealt = []
+    for pot in pots:
+        row = []
+        for team in pot:
+            if len(tournament_squad(entry, team[0]).get("players") or ()) >= floor:
+                row.append(team)
+                continue
+            sub = next((t for t in reserves if t[0] not in used), None)
+            if sub is None:
+                row.append(team)  # nothing left to swap in: its plain roster still has 11+
+                continue
+            used.add(sub[0])
+            row.append(sub)
+        dealt.append(row)
+    mine = int(mine_teamid or 0)
+    my_pot = next((i for i, pot in enumerate(dealt) if any(t[0] == mine for t in pot)), None)
+    if my_pot is None:  # an outsider: pot 4, replacing a random pot-4 team
+        my_pot = len(dealt) - 1
+        dealt[my_pot][rng.randrange(len(dealt[my_pot]))] = (mine, "")
+    my_group = rng.randrange(len(names))
+    groups = [{} for _ in names]
+    for pi, pot in enumerate(dealt):
+        teams = [t for t in pot if t[0] != mine]
+        rng.shuffle(teams)
+        slots = [g for g in range(len(names)) if not (pi == my_pot and g == my_group)]
+        for g, team in zip(slots, teams):
+            groups[g][pi] = team
+        if pi == my_pot:
+            groups[my_group][pi] = (mine, "")
+    return [[groups[g][pi] for pi in range(len(dealt))] for g in range(len(names))]
 
 
 def cup_club_ids(min_players=16):
@@ -3358,8 +3541,8 @@ def cup_pool(metaid, mine):
     return ids[:15] if metaid == 1 else ids[15:30]
 
 
-def cup_team(st, teamid):
-    me = my_teamid(st)
+def cup_team(st, teamid, mine_id=None):
+    me = my_teamid(st) if mine_id is None else mine_id
     return {"teamid": teamid, "coach": coach_id(_default_slot(st)) if teamid == me else None}
 
 
@@ -3502,22 +3685,188 @@ def cup_play_round(st, cup, mine=None):
             me_state["state"] = "won" if my_idx in winners else "eliminated"  # CupMainScreen._cupState
 
 
+# --- Tournament instance ---------------------------------------------------- #
+def new_tournament_cup(st, entry, difficulty, mine_teamid, seed=None):
+    """A tournament instance, cup-shaped so CupProxy/CupMainScreen render it: one round-robin
+    phase of len(format.group_names) groups (format.group_rounds rounds each, one team of every
+    pot in each group), then the knock-out bracket built from format.knockout_pairs. The instance
+    keeps its own copy of the format, so editing the config cannot change a cup in progress."""
+    fmt = dict(entry.get("format") or {})
+    names = fmt.get("group_names") or "ABCDEFGH"
+    size = int(fmt.get("group_size") or len(entry.get("pots") or ()))
+    rounds = int(fmt.get("group_rounds") or max(1, size - 1))
+    teams = tournament_draw(entry, mine_teamid, seed)
+    groups = [{"name": f"Grup {names[g]}", "id": names[g],
+               "teams": [cup_team(st, t[0], mine_teamid) for t in teams[g]],
+               "rounds": [{"shuffle": r == 0, "pairs": [{"legs": [{"homeidx": h, "awayidx": a}]}
+                                                       for h, a in league_round(list(range(size)), r)]}
+                          for r in range(rounds)]} for g in range(len(teams))]
+    cupid = f"{int(time.time()):08x}{os.urandom(8).hex()}"
+    cup = {"_id": cupid, "metaid": entry["metaid"], "name": entry["name"], "type": "wcpve",
+           "nation": mine_teamid, "difficulty": difficulty,
+           "format": fmt, "current": {"phase": 0, "round": 0, "leg": 0},
+           "phases": [{"system": "round-robin", "name": "PVECUP_PROG_LEAGUE", "maxrounds": rounds, "groups": groups}],
+           "coaches": [{"_id": coach_id(_default_slot(st)), "state": "playing"}],
+           "teams": [cup_team(st, t[0], mine_teamid) for grp in teams for t in grp]}
+    cup_refresh_stats(cup)
+    return cup
+
+
+def tournament_group_stats(g):
+    """{team index: (points, goal difference, goals)} of one group: the numbers group_table()
+    sorts on, kept because the best third-placed teams are compared across groups."""
+    t = {i: [0, 0, 0] for i in range(len(g["teams"]))}
+    for rnd in g["rounds"]:
+        for pair in rnd["pairs"]:
+            leg = pair["legs"][0]
+            if "score" not in leg:
+                continue
+            for i, f, a in ((leg["homeidx"], leg["score"]["home"], leg["score"]["away"]),
+                            (leg["awayidx"], leg["score"]["away"], leg["score"]["home"])):
+                t[i][0] += 3 if f > a else 1 if f == a else 0
+                t[i][1] += f - a
+                t[i][2] += f
+    return {i: tuple(v) for i, v in t.items()}
+
+
+def tournament_qualifiers(cup, fmt):
+    """(qualifiers, pairs). qualifiers = [A1, A2, B1, B2, ...] in group order; when
+    format.best_thirds > 0 the best third-placed teams follow (points / goal difference / goals),
+    so they get the indices after the per-group ones. pairs are indices into that list:
+    format.knockout_pairs, or sequential pairs when the config does not say."""
+    per = int(fmt.get("qualify_per_group") or 2)
+    groups = cup["phases"][0]["groups"]
+    qual, thirds = [], []
+    for g in groups:
+        stats = tournament_group_stats(g)
+        order = sorted(stats, key=lambda i: tuple(-v for v in stats[i]))
+        qual += [g["teams"][order[k]] for k in range(per)]
+        if len(order) > per:
+            thirds.append((stats[order[per]], g["teams"][order[per]]))
+    best = int(fmt.get("best_thirds") or 0)
+    if best:
+        qual += [team for _, team in sorted(thirds, key=lambda s: tuple(-v for v in s[0]))[:best]]
+    pairs = fmt.get("knockout_pairs") or [[i, i + 1] for i in range(0, len(qual), 2)]
+    return qual, [list(p) for p in pairs]
+
+
+def tournament_knockout(fmt, qual, pairs):
+    """Single-elimination bracket laid out from the pairs: len(pairs) -> /2 -> ... -> 1 rounds
+    (8/4/2/1 for a 16-team bracket), plus the third-place match in the last round
+    (format.third_place_match). Legs are left empty; tournament_play_round fills each round from
+    the previous winners."""
+    n, sizes = len(pairs), []
+    while n >= 1:
+        sizes.append(n)
+        n //= 2
+    rounds = [{"shuffle": i == 0, "pairs": [{"legs": [{}]} for _ in range(k)]}
+              for i, k in enumerate(sizes)]
+    for k, (i, j) in enumerate(pairs):
+        rounds[0]["pairs"][k]["legs"][0] = {"homeidx": i, "awayidx": j}
+    if fmt.get("third_place_match", True) and len(rounds) > 1:
+        rounds[-1]["pairs"].append({"legs": [{}]})  # third place, after the final
+    return {"system": "knock-out", "name": "MODENAME_MULTI_TOUNAMENT", "maxrounds": len(rounds),
+            "groups": [{"teams": qual, "rounds": rounds}]}
+
+
+def tournament_play_round(st, cup, mine=None):
+    """Same contract as cup_play_round but generic in the format: the group stage advances through
+    its rounds then builds the bracket from tournament_qualifiers(); knock-out draws are settled by
+    penalties, and the two semi-final losers go into the third-place pair."""
+    entry = tournament_entry(cup.get("metaid")) or {}
+    fmt = cup.get("format") or entry.get("format") or {}
+    cur = cup["current"]; phase = cup["phases"][cur["phase"]]; ko = phase["system"] == "knock-out"
+    rng = random.Random()
+    for g in phase["groups"]:
+        for pair in g["rounds"][cur["round"]]["pairs"]:
+            leg = pair["legs"][cur["leg"]]
+            if "score" in leg or leg.get("homeidx") is None:
+                continue
+            h, a = g["teams"][leg["homeidx"]], g["teams"][leg["awayidx"]]
+            played = mine is not None and (h["coach"] or a["coach"])
+            if played:
+                gh, ga = mine[:2]
+            else:
+                gh, ga = sim_score(rng, tournament_strength(entry, h["teamid"]), tournament_strength(entry, a["teamid"]))
+            leg["score"] = {"home": gh, "away": ga}
+            if h["coach"] or a["coach"]:
+                record_match(st, "cup", *((gh, ga) if h["coach"] else (ga, gh)))
+            if ko and gh == ga and played and len(mine) > 3 and mine[2] != mine[3]:
+                leg["shootout"] = {"home": mine[2], "away": mine[3]}
+            elif ko and gh == ga:
+                ph = rng.randint(3, 5); pa = ph + rng.choice((-1, 1)) if ph < 5 else ph - 1
+                leg["shootout"] = {"home": ph, "away": pa}
+    me_state = cup["coaches"][0]
+    if not ko:
+        if cur["round"] + 1 < len(phase["groups"][0]["rounds"]):
+            cur["round"] += 1
+            return
+        qual, pairs = tournament_qualifiers(cup, fmt)
+        cup["phases"].append(tournament_knockout(fmt, qual, pairs))
+        cup.update(current={"phase": cur["phase"] + 1, "round": 0, "leg": 0})
+        if not any(t["coach"] for t in qual):
+            me_state["state"] = "eliminated"
+        return
+    g = phase["groups"][0]; rounds = g["rounds"]
+    results = []
+    for pair in rounds[cur["round"]]["pairs"]:
+        leg = pair["legs"][0]; s = leg.get("shootout") or leg.get("score")
+        if s is None or leg.get("homeidx") is None:
+            results.append(None)
+            continue
+        win = leg["homeidx"] if s["home"] > s["away"] else leg["awayidx"]
+        lose = leg["awayidx"] if s["home"] > s["away"] else leg["homeidx"]
+        results.append((win, lose))
+    played = [r for r in results if r]
+    winners = [w for w, _ in played]
+    my_idx = next((i for i, t in enumerate(g["teams"]) if t["coach"]), None)
+    if my_idx is not None and me_state["state"] == "playing" and my_idx not in winners and \
+            any(my_idx in (p["legs"][0].get("homeidx"), p["legs"][0].get("awayidx"))
+                for p in rounds[cur["round"]]["pairs"]):
+        me_state["state"] = "eliminated"
+    if cur["round"] < len(rounds) - 2:  # before the semis: fill the next round from the winners
+        for k, pair in enumerate(rounds[cur["round"] + 1]["pairs"]):
+            pair["legs"][0] = {"homeidx": winners[2 * k], "awayidx": winners[2 * k + 1]}
+        cur["round"] += 1
+    elif cur["round"] == len(rounds) - 2:  # semis done: final + third place
+        fin = rounds[-1]["pairs"][0]["legs"][0]
+        fin.update(homeidx=played[0][0], awayidx=played[1][0])
+        if len(rounds[-1]["pairs"]) > 1:
+            third = rounds[-1]["pairs"][1]["legs"][0]
+            third.update(homeidx=played[0][1], awayidx=played[1][1])
+        cur["round"] = len(rounds) - 1
+    else:  # final (and third place) played
+        cup["finished"] = True
+        if me_state["state"] == "playing":
+            fin = rounds[-1]["pairs"][0]["legs"][0]
+            s = fin.get("shootout") or fin["score"]
+            winner = fin["homeidx"] if s["home"] > s["away"] else fin["awayidx"]
+            me_state["state"] = "won" if my_idx == winner else "eliminated"
+
+
 def cup_resources(cup):
     """The cup with its meta's trophy and skin (issue #36: CupMainScreen draws
     trophies/t<currentCup.trophy>.png, and cups saved without them asked for tundefined.png)."""
     uri = f"/cup/{cup['_id']}"
-    meta = next((m for m in CUPS if m["metaid"] == cup.get("metaid")), {})
+    meta = cup_or_tournament_meta(cup.get("metaid")) or {}
     return [{"resource": uri, "uri": uri, "body": {"trophy": meta.get("trophy"), "skin": meta.get("skin"), **cup}}]
 
 
 def ep_cup_new(query, body):
-    """POST /cup/new {metaid, difficulty, teamid, lineup}."""
+    """POST /cup/new {metaid, difficulty, teamid, lineup}. For a tournament meta the client
+    sends `teamid` = the national team picked in the 3-wheel picker, not the club."""
     req = json.loads(body or b"{}")
-    meta = next((m for m in CUPS if m["metaid"] == int(req.get("metaid") or 0)), None)
+    metaid = int(req.get("metaid") or 0)
+    meta = cup_or_tournament_meta(metaid)
     if meta is None:
         return _json({"result": False, "reason": "invalid metaid"})
     st = _state()
-    cup = new_cup(st, meta, int(req.get("difficulty") or 0))
+    entry = tournament_entry(metaid)
+    if entry is not None:
+        nation = int(req.get("teamid") or 0) or my_teamid(st)
+        cup = new_tournament_cup(st, entry, int(req.get("difficulty") or 0), nation)
+    else:
+        cup = new_cup(st, meta, int(req.get("difficulty") or 0))
     st.setdefault("cups", {})[cup["_id"]] = cup
     r = coach_record(my_coach(st), "cup")
     r["totalchallenges"] = r.get("totalchallenges", 0) + 1
@@ -3544,7 +3893,8 @@ def ep_cup_next(cupid, query, body):
     def step(st, cup):
         if cup.get("finished"):
             return
-        cup_play_round(st, cup, cup.pop("_mine", None))
+        play = tournament_play_round if cup.get("type") == "wcpve" else cup_play_round
+        play(st, cup, cup.pop("_mine", None))
         cup_refresh_stats(cup)
     return cup_step(cupid, step)
 
@@ -3553,7 +3903,7 @@ def cup_reward_ep(cup):
     """EP for an ended cup: the meta's prize for the champion, a share of it by the round
     reached otherwise (group exit 10%, QF 20%, SF 35%, final 50%); 0 while still playing."""
     state = cup["coaches"][0]["state"]
-    meta = next((m for m in CUPS if m["metaid"] == cup["metaid"]), CUPS[0])
+    meta = cup_or_tournament_meta(cup["metaid"]) or CUPS[0]
     prize = meta["bestrewards"][-1][0]["count"]
     if state == "won":
         return prize
@@ -3594,13 +3944,39 @@ def ep_cup_match(cupid, query, body):
     g, leg = cup_my_pair(cup) if cup else (None, None)
     if leg is None or "score" in leg:
         return _json({"result": False, "reason": "already played match"})
-    me = coach_me(st, _default_slot(st)); teamid = me["teamid"]
+    me = coach_me(st, _default_slot(st))
+    tournament = cup.get("type") == "wcpve"
+    # In a tournament cup the player coaches a national team, not his club: the side is
+    # cup["nation"] and its roster is the nation's, so home/away/opponent all key
+    # off that id instead of the coach's club teamid.
+    teamid = cup["nation"] if tournament else me["teamid"]
     home = g["teams"][leg["homeidx"]]["teamid"]; away = g["teams"][leg["awayidx"]]["teamid"]
     opp = away if home == teamid else home
     user = {"id": me["id"], "name": me["name"], "levelinfo": me["levelinfo"]}
-    match = new_match("Cup_PvE", match_side(st["teams"][str(_default_slot(st))], teamid, user, _tactics(st)[1]),
-                      # the AI clubs only; my own cards keep the grades I gave them
-                      match_side(set_card_grade(roster_team(opp), CUP_AI_GRADE), opp))
+    if tournament:
+        entry = tournament_entry(cup.get("metaid"))
+        # BOTH sides come from the cup's card sources (the event's own card season first), so the
+        # opponent really is the squad the draw put in this group; a nation the sources cannot
+        # make 11 players for falls back to its normal roster (tournament_roster_team does that).
+        #
+        # match type is Cup_PvE, NOT WorldCup_PvE: a tournament here is reached through the cup
+        # flow (CupFrontScreen -> CupCreationScreen -> CupSquadSettingScreen), and that flow ends on
+        # LeagueCupGameSettingScreen. Its onPlaying() branches on the match type and, for a
+        # WorldCup_* type, reads the native WC screens' data (WCProxy / the WC player-pack screen),
+        # which this flow never loads -- that object is null and it throws AS3 #1009 before
+        # StartSingleMatch ("Cannot access a property or method of a null object reference at
+        # LeagueCupGameSettingScreen/onPlaying", 2026-11-23). A Cup_PvE match keeps the same cup
+        # data and rules (drawMode 2 extra time, cup_pending scoring) without that branch.
+        # +N cards: a generated squad carries no grade (= +0), so an AI side would show every card
+        # unenhanced. Both ends of a tournament are generated, so both take the event's card_grade.
+        grade = (entry or {}).get("card_grade", CUP_AI_GRADE)
+        match = new_match("Cup_PvE", match_side(set_card_grade(tournament_squad(entry, teamid), grade),
+                                                teamid, user, _tactics(st)[1]),
+                          match_side(set_card_grade(tournament_squad(entry, opp), grade), opp))
+    else:
+        match = new_match("Cup_PvE", match_side(st["teams"][str(_default_slot(st))], teamid, user, _tactics(st)[1]),
+                          # the AI clubs only; my own cards keep the grades I gave them
+                          match_side(set_card_grade(roster_team(opp), CUP_AI_GRADE), opp))
     gs = match["gamesettings"]
     gs["home"] = home == teamid
     gs["kit"] = ["home", "away"] if gs["home"] else ["away", "home"]
