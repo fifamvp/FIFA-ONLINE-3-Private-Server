@@ -3939,26 +3939,52 @@ def cup_resources(cup):
                                                   "teamselect": meta.get("teamselect"), **cup}}]
 
 
+def ongoing_cup(st, metaid):
+    """The cup of this meta that was not left yet, or None.
+
+    POST /cup/new is what the client sends right after the team picker, and it sends it every
+    time: the front screen knows a cup is already running only through CupProxy.cupPlayList, and
+    that list is filled from /coach/me's `cups` and refreshed only when that resource changes --
+    a cup created in this session stayed invisible to the picker until the next login, so leaving
+    the cup menu and opening it again re-picked a team and started a second, empty cup while the
+    one just played sat in the state (2026-11-25). Handing the running cup back instead of a new
+    one keeps the progress, and the reply carries /coach/me so the list is right from then on.
+
+    First match wins: /coach/me lists the cups in insertion order and the front screen resumes the
+    first entry whose metaid matches (ArrayUtil.findIndexOf), so the same cup must win here."""
+    for cup in (st.get("cups") or {}).values():
+        if int(cup.get("metaid") or 0) == int(metaid or 0):
+            return cup
+    return None
+
+
 def ep_cup_new(query, body):
     """POST /cup/new {metaid, difficulty, teamid, lineup}. For a tournament meta the client
-    sends `teamid` = the national team picked in the 3-wheel picker, not the club."""
+    sends `teamid` = the national team picked in the 3-wheel picker, not the club.
+
+    A cup already running for that metaid is returned as it is (see ongoing_cup); the original
+    server answered "already this cup is in progress" here, which the client turns into an error
+    popup -- resuming is what a private server wants."""
     req = json.loads(body or b"{}")
     metaid = int(req.get("metaid") or 0)
     meta = cup_or_tournament_meta(metaid)
     if meta is None:
         return _json({"result": False, "reason": "invalid metaid"})
     st = _state()
-    entry = tournament_entry(metaid)
-    if entry is not None:
-        nation = int(req.get("teamid") or 0) or my_teamid(st)
-        cup = new_tournament_cup(st, entry, int(req.get("difficulty") or 0), nation)
-    else:
-        cup = new_cup(st, meta, int(req.get("difficulty") or 0))
-    st.setdefault("cups", {})[cup["_id"]] = cup
-    r = coach_record(my_coach(st), "cup")
-    r["totalchallenges"] = r.get("totalchallenges", 0) + 1
-    _save(st)
-    return _json({"result": True, "resources": cup_resources(cup)})
+    cup = ongoing_cup(st, metaid)
+    if cup is None:
+        entry = tournament_entry(metaid)
+        if entry is not None:
+            nation = int(req.get("teamid") or 0) or my_teamid(st)
+            cup = new_tournament_cup(st, entry, int(req.get("difficulty") or 0), nation)
+        else:
+            cup = new_cup(st, meta, int(req.get("difficulty") or 0))
+        st.setdefault("cups", {})[cup["_id"]] = cup
+        r = coach_record(my_coach(st), "cup")
+        r["totalchallenges"] = r.get("totalchallenges", 0) + 1
+        _save(st)
+    return _json({"result": True, "resources":
+                  cup_resources(cup) + coach_me_resources(st, _default_slot(st))})
 
 
 def cup_step(cupid, fn):
@@ -4022,7 +4048,10 @@ def ep_cup_leave(cupid, query, body):
         if ep > (r.get("best") or {}).get("prize", 0):
             r["best"] = {"prize": ep, "metaid": cup["metaid"], "date": w3c(time.time())}
     _save(st)
-    return _json({"result": True, "rewards": [{"itemid": 1, "count": ep}] if ep else []})
+    # /coach/me carries the remaining cups: feeding it makes CoachController raise onCupsChanged,
+    # so CupProxy.cupPlayList drops the cup the client just left instead of offering a resume.
+    return _json({"result": True, "rewards": [{"itemid": 1, "count": ep}] if ep else [],
+                  "resources": coach_me_resources(st, _default_slot(st))})
 
 
 def ep_cup_match(cupid, query, body):
