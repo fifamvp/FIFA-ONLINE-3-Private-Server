@@ -2594,6 +2594,10 @@ def _team_league_lookup():
             for tid in info.get("teamids", ())}
 
 REST_OF_WORLD = 999998  # FO3's team for players of unlicensed clubs (26 LIVE has 91 such cards): not a club
+# The picker's first wheel is a NATION name, so the national-team group (league 78) must not be
+# labelled with one country. fifadb has no row for 300 and the client's NATIONNAMES_CHI names it
+# "国家代表", which reads as the group header we want -- used for league 78 only.
+NATION_PLACEHOLDER = 300
 _CLUBS = []
 
 
@@ -2627,7 +2631,11 @@ def club_index():
         by_nation = {}
         for lid, teams in leagues.items():
             teams.sort(reverse=True)
-            by_nation.setdefault(nats[lid].most_common(1)[0][0], []).append((teams[0][0], lid, [t for _, t in teams]))
+            # League 78 is not a country: label it with NATION_PLACEHOLDER ("国家代表") instead of
+            # its players' most common nationality (which made the wheel read "印度").
+            nat = (NATION_PLACEHOLDER if lid == gen_teams.NATIONAL_LEAGUE
+                   else nats[lid].most_common(1)[0][0])
+            by_nation.setdefault(nat, []).append((teams[0][0], lid, [t for _, t in teams]))
         # the national teams' nation last (they made it the strongest; the picker opens on the first).
         # One assignment: two first builds at once (a request and presence_loop) give the same list
         _CLUBS[:] = [(n, [(lid, ts) for _, lid, ts in sorted(ls, reverse=True)])
@@ -2637,7 +2645,13 @@ def club_index():
 
 
 def ep_sortnation(query, body):
-    return _json([n for n, _ in club_index()])
+    """SORTNATION: the 3-wheel picker's first wheel. CupCreationScreen is the only client
+    screen carrying the three SORT urls (checked: no other SWF in the archives contains
+    SORTNATION/SORTLEAGUE/SORTTEAM), and the only cup that opens the picker is the World Cup
+    tile, whose teams are all national teams (league 78). So the wheel offers that one entry --
+    NATION_PLACEHOLDER (NATIONNAMES_CHI 300 "国家代表") -- and the player cannot scroll to a
+    club group."""
+    return _json([NATION_PLACEHOLDER])
 
 
 def ep_sortleague(query, body):
