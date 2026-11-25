@@ -111,30 +111,166 @@ def _hc():
     return m if hasattr(m, "ROLE_WEIGHTS") else __import__("http_config")
 
 
-def team(c, teamid):
+def national_code(c, teamid):
+    """A national team's nationality code: fifadb links the two 1:1 (England 1318 -> 14), but only
+    on the cards that kept the link -- 547 of the 1040 14W cards carry nationalteamid -1 and
+    Italy's 49 carry none at all, so the code is read from the cards that do have it."""
+    r = c.execute("""SELECT nationality FROM players WHERE nationalteamid = ?
+                     GROUP BY nationality ORDER BY count(*) DESC, nationality LIMIT 1""", (teamid,)).fetchone()
+    return r[0] if r else None
+
+
+def _team_filter(teamid, nation):
+    """(SQL condition, params) for "this team's cards": by nationality for a national side, by
+    teamid for a club. nationalteamid is only set on half the 14W cards (Italy: none), so a
+    nationalteamid filter leaves a national squad half empty -- nationality is the real key."""
+    if nation:
+        return "p.nationality = ?", (int(nation),)
+    return "? IN (p.teamid, p.nationalteamid)", (int(teamid),)
+
+
+def current_rows(c, teamid, nation=None):
+    """The normal squad pool: the team's current-season cards (as on fifaaddict) plus 2017 ones,
+    older ones only for players who have no current card. With 26 LIVE current, a player who has
+    a 26 LIVE card plays for that card's club only (his 2017 card is at his 2017 club).
+    `nation` selects the pool by nationality instead (a national team)."""
+    cond, args = _team_filter(teamid, nation)
+    return c.execute(f"""SELECT p.* FROM players p JOIN permid m ON m.spid = p.spid AND m.licensed = 1
+                         WHERE {cond}
+                         AND (? = ? OR p.spid / 1000000 = ?
+                              OR p.playerid NOT IN (SELECT playerid FROM players WHERE spid / 1000000 = ?))
+                         ORDER BY (p.spid / 1000000 != ?), (p.spid / 1000000 != ?), (p.spid < 1000000), p.spid""",
+                     args + (CURRENT_SEASON, LEGACY_SEASON, CURRENT_SEASON, CURRENT_SEASON,
+                             CURRENT_SEASON, LEGACY_SEASON)).fetchall()
+
+
+def _source_rows(c, teamid, src, nation=None):
+    """The cards one card source offers, best first. {"team": T} means T's own cards whatever the
+    squad is (a club's, e.g. China's "2016 中国最强"); anything else follows the squad's own key
+    -- nationality for a national team, teamid for a club (see _team_filter)."""
+    team = int(src["team"]) if src.get("team") else teamid
+    nat = None if src.get("team") else nation
+    if src.get("current"):
+        return current_rows(c, team, nat)
+    cond, args = _team_filter(team, nat)
+    return c.execute(f"""SELECT p.* FROM players p
+                         WHERE {cond} AND p.spid / 1000000 = ?
+                         ORDER BY p.overallrating DESC""",
+                     args + (int(src["season"]),)).fetchall()
+
+
+def squad_pool(c, teamid, sources=None, nation=None):
+    """Every card the sources offer, one list per source, in priority order."""
+    return ([_source_rows(c, teamid, src, nation) for src in sources] if sources
+            else [current_rows(c, teamid, nation)])
+
+
+def squad_rows(c, teamid, sources=None, min_players=SELECTABLE, nation=None):
+    """The cards a squad is built from, in priority order, one entry per card source:
+    [{"season": 77}, {"season": 81, "team": 113395}, {"current": True}]
+
+    - {"season": N} = the team's own cards of season N, no permid filter (only 172 of the 1040
+      14W cards are licensed, so a licensed filter leaves ~13 per nation). For a national team
+      "own" means its nationality, not nationalteamid (see _team_filter). {"season": N, "team": T}
+      = another team's cards of that season -- China's best squad is "2016 中国最强" (team 113395,
+      39 cards), which is filed under that club, not under nationalteamid 1413.
+    - {"current": True} = the normal pool (current season + 2017, see current_rows).
+
+    Sources are concatenated in order and de-duplicated by player (first source wins), so the
+    earlier entries are the ones that make the squad; later ones only top it up to `min_players`.
+    The first source is always taken whole (a nation with 23 14W cards fields all 23, not the best
+    18). `sources=None` is the plain current-season pool the clubs use."""
+    if not sources:
+        return current_rows(c, teamid, nation)
+    out, seen = [], set()
+    for i, rows in enumerate(squad_pool(c, teamid, sources, nation)):
+        whole = i == 0  # the first source decides the squad; the rest only fill the bench
+        for r in rows:
+            if r["playerid"] in seen:
+                continue
+            seen.add(r["playerid"])
+            out.append(r)
+            if not whole and len(out) >= min_players:
+                return out
+        if whole and len(out) >= min_players:
+            return out
+    return out
+
+
+def player_line(pos):
+    """Enums.PLAYERPOSITION index -> the line it belongs to."""
+    return "GK" if pos == 0 else ("DF" if pos in LINES["DF"] else ("MF" if pos in LINES["MF"] else "FW"))
+
+
+def fill_lines(c, teamid, sources, rows, mins, nation=None):
+    """Append players until the squad meets the per-line minimums ({"GK": 1, "DF": 4, "MF": 5,
+    "FW": 1}), taking the best ones still available. Picking 18 cards by rating does not give that
+    for free: Austria's 14W set has no goalkeeper at all and Scotland's two defenders, so the XI
+    would put an outfielder in goal. Cards the sources skip (unlicensed, older seasons) are the
+    last resort -- an Austrian keeper exists in season 88 but not as a licensed card."""
+    have = [player_line(r["preferredposition1"]) for r in rows]
+    seen = {r["playerid"] for r in rows}
+    pools = squad_pool(c, teamid, sources, nation) + [None]
+    extra = []
+    for ln, need in mins.items():
+        short = int(need) - have.count(ln)
+        for pool in pools:
+            if short <= 0:
+                break
+            if pool is None:  # any card this team has, whatever its season or license
+                cond, args = _team_filter(teamid, nation)
+                pool = c.execute(f"""SELECT p.* FROM players p WHERE {cond}
+                                     ORDER BY p.overallrating DESC""", args).fetchall()
+            for r in pool:
+                if short <= 0:
+                    break
+                if r["playerid"] in seen or player_line(r["preferredposition1"]) != ln:
+                    continue
+                seen.add(r["playerid"])
+                extra.append(r)
+                short -= 1
+    if not extra:
+        return rows
+    return (rows[:max(0, 30 - len(extra))] + extra) if len(rows) + len(extra) > 30 else rows + extra
+
+
+def team(c, teamid, sources=None, national=None, min_players=SELECTABLE, min_lines=None, by_nation=False):
+    """A stored team {teamid, summary, team}. `sources` picks the card seasons (see squad_rows);
+    `national` says the team is a national side even when its cards are filed under a club (China
+    fields "2016 中国最强", whose cards carry nationalteamid -1), so the squad still counts as a
+    national team for the league/nation fields; `min_lines` ({"GK": 1, "DF": 4, ...}) tops the
+    squad up per line, see fill_lines; `by_nation` builds a national squad from its players'
+    nationality instead of nationalteamid (which half the 14W cards lost)."""
     hc = _hc()
     if teamid <= 0:  # no card has one; nationalteamid -1 = none (would match 53k cards)
         return None
-    # with 26 LIVE current, a player who has a 26 LIVE card plays for that card's club only (his
-    # 2017 card is at his 2017 club); then 2017 cards, then older ones
-    rows = c.execute("""SELECT p.* FROM players p JOIN permid m ON m.spid = p.spid AND m.licensed = 1
-                        WHERE ?1 IN (p.teamid, p.nationalteamid)
-                        AND (?2 = ?3 OR p.spid / 1000000 = ?2
-                             OR p.playerid NOT IN (SELECT playerid FROM players WHERE spid / 1000000 = ?2))
-                        ORDER BY (p.spid / 1000000 != ?2), (p.spid / 1000000 != ?3), (p.spid < 1000000), p.spid""",
-                     (teamid, CURRENT_SEASON, LEGACY_SEASON)).fetchall()
-    national = any(r["nationalteamid"] == teamid for r in rows)
-    best = {}
-    # the club's current-season cards (as on fifaaddict); older seasons (former players, e.g.
-    # a 2006 Ronaldinho at Barcelona) and season 0 (engine template cards, ratings 120+, not on
-    # fifaaddict) only when the current squad is too small
-    for r in rows:
-        if r["spid"] // 1000000 in (CURRENT_SEASON, LEGACY_SEASON) or len(best) < SELECTABLE:
+    nat = national_code(c, teamid) if by_nation else None
+    if nat is not None:
+        national = True  # a squad picked by nationality is a national side by construction
+    rows = squad_rows(c, teamid, sources, min_players, nat)
+    inferred = national is None
+    national = any(r["nationalteamid"] == teamid for r in rows) if inferred else bool(national)
+    if sources:
+        # already in priority order: first source first, its cards by rating
+        best = {}
+        for r in rows:
             best.setdefault(r["playerid"], r)
-    # current-season cards first (2017's overallrating column runs ~5 above the client's rating)
-    rows = sorted(best.values(), key=lambda r: (r["spid"] // 1000000 != CURRENT_SEASON, -r["overallrating"]))[:30]
+        rows = list(best.values())[:30]
+    else:
+        best = {}
+        # the club's current-season cards (as on fifaaddict); older seasons (former players, e.g.
+        # a 2006 Ronaldinho at Barcelona) and season 0 (engine template cards, ratings 120+, not on
+        # fifaaddict) only when the current squad is too small
+        keep = (CURRENT_SEASON, LEGACY_SEASON)
+        for r in rows:
+            if r["spid"] // 1000000 in keep or len(best) < SELECTABLE:
+                best.setdefault(r["playerid"], r)
+        # current-season cards first (2017's overallrating column runs ~5 above the client's rating)
+        rows = sorted(best.values(), key=lambda r: (r["spid"] // 1000000 != CURRENT_SEASON, -r["overallrating"]))[:30]
     if len(rows) < 11:
         return None
+    if min_lines:  # 1 GK / 4 DF / 5 MF / 1 FW, before the XI is picked
+        rows = fill_lines(c, teamid, sources, rows, min_lines, nat)
     # XI: best (player, slot) pairs by the client's rating at that slot (the "Attr" the squad
     # screens show); goalkeepers only in goal. A slot left over takes the best remaining player.
     at = lambda r, pos: sum(r[k] * w for k, w in hc.ROLE_WEIGHTS[hc.POS_ROLE[pos]].items()) // 100
@@ -161,7 +297,9 @@ def team(c, teamid):
     formations = [{"formationid": FORMATION_ID, "formationname": "4-4-2",
                    "positions": [f[0] for f in FORMATION], "offsets": [{"x": f[1], "y": f[2]} for f in FORMATION]}]
     league = NATIONAL_LEAGUE if national else max(set(r["leagueid"] for r in rows), key=[r["leagueid"] for r in rows].count)
-    nation = max(set(r["nationality"] for r in rows), key=[r["nationality"] for r in rows].count)
+    # a national side is named by its own id: a squad topped up from another team's cards (China's
+    # 2016 set carries nationality 155) would otherwise show that team's country
+    nation = teamid if (national and not inferred) else max(set(r["nationality"] for r in rows), key=[r["nationality"] for r in rows].count)
     name, rival = TEAM_INFO.get(teamid, ("", ""))
     # TeamInfoNew (club confirmation popup): TEAMNAME + crest by id, ovr.FW/MF/DF bars and
     # teamgrade stars: card ratings at each player's own position (the lobby HUD's
