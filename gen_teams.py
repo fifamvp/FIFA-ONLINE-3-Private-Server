@@ -297,9 +297,20 @@ def team(c, teamid, sources=None, national=None, min_players=SELECTABLE, min_lin
     formations = [{"formationid": FORMATION_ID, "formationname": "4-4-2",
                    "positions": [f[0] for f in FORMATION], "offsets": [{"x": f[1], "y": f[2]} for f in FORMATION]}]
     league = NATIONAL_LEAGUE if national else max(set(r["leagueid"] for r in rows), key=[r["leagueid"] for r in rows].count)
-    # a national side is named by its own id: a squad topped up from another team's cards (China's
-    # 2016 set carries nationality 155) would otherwise show that team's country
-    nation = teamid if (national and not inferred) else max(set(r["nationality"] for r in rows), key=[r["nationality"] for r in rows].count)
+    # A national side is named by the nation its cards carry, not by the team id: the client names
+    # nations by the nationality code (NATIONNAMES_CHI 27 = 意大利, 54 = 巴西), so nation.id 1343
+    # names nothing. The code is read from the cards that kept nationalteamid and falls back to the
+    # squad's most common nationality (Italy kept 4 of them in 14W).
+    nation = nat if nat is not None else (national_code(c, teamid) if national else None)
+    if nation is None:
+        nation = max(set(r["nationality"] for r in rows), key=[r["nationality"] for r in rows].count)
+    # A league has no country of its own, but the cup picker's right panel asks for one:
+    # CupCreationTeamSelectionScene.setTeamInfo prints NATIONNAME(summary.league.nationid) and
+    # loads the flag by the same id, so a national side carries its nation code next to league 78
+    # (NATIONNAMES_CHI 54 = 巴西). Only for national sides -- a club's league id is a real league.
+    league_info = {"id": league}
+    if national:
+        league_info["nationid"] = int(nation)
     name, rival = TEAM_INFO.get(teamid, ("", ""))
     # TeamInfoNew (club confirmation popup): TEAMNAME + crest by id, ovr.FW/MF/DF bars and
     # teamgrade stars: card ratings at each player's own position (the lobby HUD's
@@ -308,7 +319,7 @@ def team(c, teamid, sources=None, national=None, min_players=SELECTABLE, min_lin
     line = {k: round(sum(ovr[p["spid"]] for p in positions if p["pos"] in r) / sum(p["pos"] in r for p in positions))
             for k, r in LINES.items()}
     summary = {"teamid": teamid, "id": teamid, "numofselectableplayers": SELECTABLE, "name": name,
-               "league": {"id": league}, "nation": {"id": nation, "name": NATION_NAMES.get(nation, "")},
+               "league": league_info, "nation": {"id": nation, "name": NATION_NAMES.get(nation, "")},
                "rival": {"name": rival}, "ovr": line, "teamgrade": team_grade(sum(ovr.values()) / len(ovr))}
     return {"teamid": teamid, "summary": summary,
             "team": {"teamid": teamid, "squad": squad, "players": players, "formations": formations}}
