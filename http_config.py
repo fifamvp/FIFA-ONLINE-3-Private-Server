@@ -3309,8 +3309,8 @@ def cup_meta(metaid, name, trophy, quality, matchcount, teams, reward):
             "joinable": {"fee": 0, "igr": False, "vip": 0, "allteams": True, "dayofweek": [1, 1, 1, 1, 1, 1, 1]}}
 
 
-CUPS = [cup_meta(1, "European Champions Cup", "66", 4, 6, 16, 60000),  # 3 group + QF/SF/F
-        cup_meta(2, "South American Cup", "300000", 3, 6, 16, 40000)]
+CUPS = [cup_meta(1, "European Champions Cup", "66", 4, 6, 16, 6000000),  # 3 group + QF/SF/F
+        cup_meta(2, "South American Cup", "300000", 3, 6, 16, 4000000)]
 
 
 def ep_cup_list(query, body):
