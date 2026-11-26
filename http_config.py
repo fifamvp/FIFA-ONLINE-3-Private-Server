@@ -26,6 +26,19 @@ from contextlib import closing
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)  # `python -I` leaves the script dir off sys.path
 import gen_teams
+
+# The code this fork adds lives in modules/ (see modules/__init__.py for what is where and why),
+# imported here so every call site below reads as it did when it was inline. Inside those modules
+# `hc` is this file, resolved on first use -- these imports are what makes that resolution work,
+# and they do not depend on each other's order. Only the names the handlers below still call are
+# listed; the cup engines are reached from the modules themselves, not from here.
+from modules.cup_api import (cup_resources, ep_cup_leave, ep_cup_list, ep_cup_match, ep_cup_new,
+                             ep_cup_next, ep_cup_record, ep_cup_resume)
+from modules.localization import LANGUAGE, localize_pack_terms, localize_tuple_table, tr, trf
+from modules.team_picker import (club_index, ep_authentic_team, ep_sortleague, ep_sortnation,
+                                 ep_sortteam)
+from modules.tournaments import cup_lineup_side
+
 TLS = "--tls" in sys.argv
 _args = [a for a in sys.argv[1:] if a != "--tls"]
 PORT = int(_args[0]) if _args and _args[0].isdigit() else 8080  # (imported by tools: their own args)
@@ -70,42 +83,6 @@ def ep_locale(query, body):
     # it the client uses the dead Garena CDN, every refresh fails and crests show
     # "PLACE HOLDER" even though the files sit in its own _cache. Served by cdn_file().
     return _json({"result": True, "language": LANGUAGE, "url": f"https://APSEODESK172/{CDN_PREFIX}"})
-
-
-LANGUAGE = os.environ.get("FO3_LANGUAGE", "ind")
-
-# 本地化文本支持
-# --------------------------------------------------------------------------- #
-# Server-side text localization. Hardcoded UI strings in this file (item names,
-# descriptions, ...) live in responses/localization.json, keyed by LANGUAGE then
-# a dotted path: {"chi": {"ITEMS.501.name": "..."}}. Code keeps its literals as
-# the fallback, so a missing key/empty file never changes the shipped game.
-# --------------------------------------------------------------------------- #
-LOCALIZATION_FILE = os.path.join(HERE, "responses", "localization.json")
-_LOCALIZATION = None
-
-
-def localization():
-    """{language: {dotted_key: text}} from responses/localization.json (lazy, cached)."""
-    global _LOCALIZATION
-    if _LOCALIZATION is None:
-        try:
-            with open(LOCALIZATION_FILE, encoding="utf-8") as f:
-                _LOCALIZATION = json.load(f) or {}
-        except (OSError, ValueError):
-            _LOCALIZATION = {}
-    return _LOCALIZATION
-
-
-def tr(key, default=None):
-    """Translated text for `key` in the current LANGUAGE; `default` if absent."""
-    return localization().get(LANGUAGE, {}).get(key, default)
-
-
-def trf(key, default, **kw):
-    """`tr()` with str.format placeholders, e.g. trf("TEAMCOLOR.season.description",
-    "Pemain season {label}", label="07"). The literal default must carry the same names."""
-    return tr(key, default).format(**kw)
 
 
 GAME = os.environ.get("FO3_GAME", r"D:\FO3ID\32795")  # the FO3 ID client install
@@ -2593,160 +2570,6 @@ def ep_l2_achievement(query, body):
     return _json({"result": True, "level": 1, "missions": [{"mid": mid, "achievement": done, "progress": progress}]})
 
 
-# Club creation > "Tim lain" (StartupTeamCreationScreen + TeamSelectionUtil): nation -> league ->
-# club steppers from SORTNATION [nationid], SORTLEAGUE {nationid: [leagueid]} and SORTTEAM
-# {leagueid: [teamid]}; the picked club's squad is /static/info/authentic/team/licensed/<id>
-# ({teamid, summary, team}, built by gen_teams.team like the six recommended clubs).
-CLUB_MIN_PLAYERS = 16  # licensed 2017 cards a club needs to be listed
-# Authoritative league -> teams from the client's chi.db.db2 (its `team` table), exported by
-# tools/team_manager.py to gamedata/team_league.json as {leagueid: {chi_name, teamids}}. A card's
-# own leagueid is unreliable: a player once on loan in Italy keeps leagueid 31 on a later Sevilla
-# card (spid 88179645). The transfer market looks a club up by teamid, so do we: league membership
-# comes from this table, never from the card.
-TEAM_LEAGUE_FILE = os.path.join(HERE, "gamedata", "team_league.json")
-_TEAM_LEAGUE = None
-
-def team_league():
-    """The raw {leagueid: {chi_name, teamids}} map from gamedata/team_league.json."""
-    global _TEAM_LEAGUE
-    if _TEAM_LEAGUE is None:
-        try:
-            with open(TEAM_LEAGUE_FILE, encoding="utf-8") as f:
-                _TEAM_LEAGUE = json.load(f)
-        except (OSError, ValueError):
-            _TEAM_LEAGUE = {}
-    return _TEAM_LEAGUE
-
-def _team_league_lookup():
-    """{teamid: leagueid} reverse map built from team_league(), for club_index."""
-    return {tid: int(lid) for lid, info in team_league().items()
-            for tid in info.get("teamids", ())}
-
-REST_OF_WORLD = 999998  # FO3's team for players of unlicensed clubs (26 LIVE has 91 such cards): not a club
-# The picker's first wheel is a NATION name, so the national-team group (league 78) must not be
-# labelled with one country. fifadb has no row for 300 and the client's NATIONNAMES_CHI names it
-# "国家代表", which reads as the group header we want -- used for league 78 only.
-NATION_PLACEHOLDER = 300
-_CLUBS = []
-
-
-def club_index():
-    """[(nationid, [(leagueid, [teamid])])] of clubs with a full 2017 squad, strongest first (by
-    their best eleven); a league's nation is its players' most common nationality. National
-    teams are league 78 with their players' nationalteamid as the squad (gen_teams.team)."""
-    if not _CLUBS:
-        with closing(_db()) as c:  # current-season cards + 2017 cards of the players without one
-            rows = c.execute(f"""SELECT p.spid, p.leagueid, p.teamid, p.nationalteamid, p.nationality, {POSOVR}
-                                 FROM players p JOIN permid m ON m.spid = p.spid AND m.licensed = 1
-                                 WHERE p.spid / 1000000 = ?1 OR (p.spid / 1000000 = ?2 AND p.playerid NOT IN
-                                       (SELECT playerid FROM players WHERE spid / 1000000 = ?1))""",
-                             (gen_teams.CURRENT_SEASON, gen_teams.LEGACY_SEASON)).fetchall()
-        # League membership is authoritative from the team table, not the card's own leagueid.
-        # A club with no table row (e.g. a newly injected local team) falls back to its cards'
-        # league; national teams are keyed by nationalteamid as before.
-        tl = _team_league_lookup()
-        squads, nats = {}, {}
-        for spid, card_lid, tid, ntid, nat, ovr in rows:
-            lid = tl.get(tid, card_lid)
-            squads.setdefault((lid, tid), {})[spid] = ovr
-            if ntid > 0:  # -1 / 0 = none
-                squads.setdefault((gen_teams.NATIONAL_LEAGUE, ntid), {})[spid] = ovr
-            nats.setdefault(lid, collections.Counter())[nat] += 1
-        power = {k: sum(sorted(v.values())[-11:]) / 11 for k, v in squads.items()
-                 if len(v) >= CLUB_MIN_PLAYERS and k[1] != REST_OF_WORLD}
-        leagues = {}
-        for (lid, tid), p in power.items():
-            leagues.setdefault(lid, []).append((p, tid))
-        by_nation = {}
-        for lid, teams in leagues.items():
-            teams.sort(reverse=True)
-            # League 78 is not a country: label it with NATION_PLACEHOLDER ("国家代表") instead of
-            # its players' most common nationality (which made the wheel read "印度").
-            nat = (NATION_PLACEHOLDER if lid == gen_teams.NATIONAL_LEAGUE
-                   else nats[lid].most_common(1)[0][0])
-            by_nation.setdefault(nat, []).append((teams[0][0], lid, [t for _, t in teams]))
-        # the national teams' nation last (they made it the strongest; the picker opens on the first).
-        # One assignment: two first builds at once (a request and presence_loop) give the same list
-        _CLUBS[:] = [(n, [(lid, ts) for _, lid, ts in sorted(ls, reverse=True)])
-                     for n, ls in sorted(by_nation.items(), key=lambda kv: (
-                         any(l[1] == gen_teams.NATIONAL_LEAGUE for l in kv[1]), -max(l[0] for l in kv[1])))]
-    return _CLUBS
-
-
-def ep_sortnation(query, body):
-    """SORTNATION: the 3-wheel picker's first wheel. CupCreationScreen is the only client
-    screen carrying the three SORT urls (checked: no other SWF in the archives contains
-    SORTNATION/SORTLEAGUE/SORTTEAM), and the only cup that opens the picker is the World Cup
-    tile, whose teams are all national teams (league 78). So the wheel offers that one entry --
-    NATION_PLACEHOLDER (NATIONNAMES_CHI 300 "国家代表") -- and the player cannot scroll to a
-    club group."""
-    return _json([NATION_PLACEHOLDER])
-
-
-def ep_sortleague(query, body):
-    return _json({str(n): [lid for lid, _ in ls] for n, ls in club_index()})
-
-
-def national_teamids():
-    """league-78 ids the cup picker offers: every national side club_index can field, plus every
-    configured pot team appended in place (club_index files a nation by the cards that kept
-    nationalteamid, and the 14W set lost it on 547 of 1040, which drops Brazil). Appended rather
-    than merged so the wheel's default entry does not move. A national side being here is also what
-    tells ep_authentic_team that a teamid is a nation, not a club -- the picker offers China and
-    India too (joinable.allteams stays true), and those are in no cup's pots."""
-    base = next((ts for _, ls in club_index() for lid, ts in ls
-                 if lid == gen_teams.NATIONAL_LEAGUE), [])
-    have = set(base)
-    return base + [t for t in tournament_teamids() if t not in have]
-
-
-def ep_sortteam(query, body):
-    """/static/db/SORTTEAM {leagueid: [teamid]}: the club picker above; Liga's creation screen
-    counts my own league's clubs (the ones its calendar will use)."""
-    st = _state()
-    out = {str(lid): ts for _, ls in club_index() for lid, ts in ls}
-    nations = national_teamids()
-    if nations:
-        out[str(gen_teams.NATIONAL_LEAGUE)] = nations
-    if st["coaches"]:
-        teamid = my_teamid(st)
-        lid = roster_summary(teamid).get("league", {}).get("id", 0)
-        out[str(lid)] = league_teams(lid, teamid)
-    return _json(out)
-
-
-def ep_authentic_team(kind, teamid, query, body):
-    """/static/info/authentic/team/licensed|all/<teamid>: a team's starter squad {teamid, summary,
-    team} (responses/ files override for the recommended clubs). StartupPlayerSelectionScreen
-    (after "Tim lain") looks up team.captain among team.players by id and dresses its 3D player
-    in kit.availables.home/goalie.
-
-    A national side takes the other branch: with cup.teamselect == "authentic" the cup's team
-    picker previews the squad of the team under the cursor
-    (CupCreationTeamSelectionScene.updateSelectedTeamInfo -> setPlayerStepper), and asks here for
-    it -- the plain roster files one by teamid, which for a national team is empty. Every card
-    comes back state "first": setPlayerStepper keeps only Enums.isFirstTeam(state) and
-    getPlayerState(undefined) is SECOND team, i.e. an empty player wheel.
-
-    Not every national side the picker offers is in a cup's pots (China, India: the wheel stays
-    open via joinable.allteams), so tournament_entry_of_team has nothing for those; they borrow the
-    card sources of the tournament whose picker this is (the authentic one -- the request carries
-    no cup id)."""
-    t = int(teamid)
-    entry = tournament_entry_of_team(t)
-    if entry is None and t in national_teamids():
-        entry = next((e for e in tournament_config() if e.get("teamselect") == "authentic"), {})
-    if entry is not None:
-        r = tournament_roster(t, entry) or roster(t)
-        team = dict(r["team"], players=[dict(p, id=str(p["spid"]), state="first")
-                                        for p in r["team"]["players"]])
-    else:
-        r = roster(t)
-        team = dict(r["team"], players=[dict(p, id=str(p["spid"])) for p in r["team"]["players"]])
-    team["captain"] = str(team["squad"].get("captain") or "")
-    return _json({**r, "team": team, "teamid": t, "kit": team_kit(t)})
-
-
 def ep_recommendation(query, body):
     """/static/info/authentic/team/recommendation: the six quick-creation clubs, built from
     fifadb (responses/'s gen_teams.py file serves them while 2017 is the current season)."""
@@ -3410,44 +3233,6 @@ def set_card_grade(team, grade):
     return dict(team, players=[dict(p, grade=int(grade)) for p in team.get("players") or ()])
 
 
-# --------------------------------------------------------------------------- #
-# Tournament cups (PvE). Config-first: a cup is one entry in config/tournaments.json -- metaid,
-# name, the seeding pots (id + name per team), the card sources a team is built from, and the
-# format. A World Cup, a European Championship, a Copa America is a config entry, not code.
-#
-# The client has no worldcup button (MainMenuInfoDefines hardcodes league/cup/rtw) and its
-# competition creation scene cannot be reached, but CupFrontScreen draws any /cup/list tile -- so
-# a tournament is a cup-shaped instance: /cup/list (a pve tile) -> the shared 3-wheel team picker
-# (SORTNATION/SORTLEAGUE/SORTTEAM) -> POST /cup/new -> /cup/<id>, /cup/<id>/next, /cup/<id>/match,
-# the same CupProxy code as the club cups above. The player coaches a NATIONAL team;
-# nationalteamid -> nation is resolved by the client from its own static DB, the server only
-# carries the id, exactly as the club cups carry club teamids. The squad behind that id is picked
-# by NATIONALITY, not nationalteamid: 547 of the 1040 14W cards have nationalteamid -1 and the
-# whole of Italy's 2014 set does, so the id-keyed pool loses half the card set (gen_teams
-# .national_code / ._team_filter).
-#
-# This lives in config/ and not in responses/: responses/<path>.json is an HTTP response override
-# keyed by request path (see from_file), so a file there would shadow an endpoint; this is server
-# configuration for one handler.
-# --------------------------------------------------------------------------- #
-# The tournament engine -- config/tournaments.json, the draw, the squads, the format and the
-# instance -- lives in modules/tournaments.py. This file keeps the HTTP layer below; the names are
-# imported so every call site reads as before.
-from modules.tournaments import (apply_cup_lineup, cup_lineup_side, cup_or_tournament_meta,
-                                 new_tournament_cup, stored_lineup, tournament_card_sources,
-                                 tournament_config, tournament_draw, tournament_entry,
-                                 tournament_entry_of_team, tournament_group_stats,
-                                 tournament_knockout, tournament_meta, tournament_play_round,
-                                 tournament_qualifiers, tournament_roster, tournament_roster_team,
-                                 tournament_squad, tournament_strength, tournament_teamids)
-
-
-def ep_cup_list(query, body):
-    if "type=wcpve" in query:  # the native WCProxy list: only a client in WC mode asks for it
-        return _json([tournament_meta(e) for e in tournament_config()])
-    return _json(CUPS + [tournament_meta(e, "pve") for e in tournament_config() if e.get("listed", True)])
-
-
 def cup_club_ids(min_players=16):
     """Club teamids with >= min_players licensed CURRENT-season cards, strongest first.
 
@@ -3627,204 +3412,6 @@ def cup_play_round(st, cup, mine=None):
         cup["finished"] = True
         if me_state["state"] == "playing":
             me_state["state"] = "won" if my_idx in winners else "eliminated"  # CupMainScreen._cupState
-
-
-# --- Cup resources / resume ------------------------------------------------- #
-
-
-def cup_resources(cup):
-    """The cup with its meta's trophy and skin (issue #36: CupMainScreen draws
-    trophies/t<currentCup.trophy>.png, and cups saved without them asked for tundefined.png) and
-    teamselect (CupMainScreen/CupSquadSettingHandler ask currentCup.teamselect whether this is a
-    licensed side: it hides the squad screen's contract-extension button and the OVR rank)."""
-    uri = f"/cup/{cup['_id']}"
-    meta = cup_or_tournament_meta(cup.get("metaid")) or {}
-    return [{"resource": uri, "uri": uri, "body": {"trophy": meta.get("trophy"), "skin": meta.get("skin"),
-                                                  "teamselect": meta.get("teamselect"), **cup}}]
-
-
-def ongoing_cup(st, metaid):
-    """The cup of this meta that was not left yet, or None.
-
-    POST /cup/new is what the client sends right after the team picker, and it sends it every
-    time: the front screen knows a cup is already running only through CupProxy.cupPlayList, and
-    that list is filled from /coach/me's `cups` and refreshed only when that resource changes --
-    a cup created in this session stayed invisible to the picker until the next login, so leaving
-    the cup menu and opening it again re-picked a team and started a second, empty cup while the
-    one just played sat in the state (2026-11-25). Handing the running cup back instead of a new
-    one keeps the progress, and the reply carries /coach/me so the list is right from then on.
-
-    First match wins: /coach/me lists the cups in insertion order and the front screen resumes the
-    first entry whose metaid matches (ArrayUtil.findIndexOf), so the same cup must win here."""
-    for cup in (st.get("cups") or {}).values():
-        if int(cup.get("metaid") or 0) == int(metaid or 0):
-            return cup
-    return None
-
-
-def ep_cup_new(query, body):
-    """POST /cup/new {metaid, difficulty, teamid, lineup}. For a tournament meta the client
-    sends `teamid` = the national team picked in the 3-wheel picker, not the club.
-
-    A cup already running for that metaid is returned as it is (see ongoing_cup); the original
-    server answered "already this cup is in progress" here, which the client turns into an error
-    popup -- resuming is what a private server wants."""
-    req = json.loads(body or b"{}")
-    metaid = int(req.get("metaid") or 0)
-    meta = cup_or_tournament_meta(metaid)
-    if meta is None:
-        return _json({"result": False, "reason": "invalid metaid"})
-    st = _state()
-    cup = ongoing_cup(st, metaid)
-    if cup is None:
-        entry = tournament_entry(metaid)
-        if entry is not None:
-            nation = int(req.get("teamid") or 0) or my_teamid(st)
-            cup = new_tournament_cup(st, entry, int(req.get("difficulty") or 0), nation)
-        else:
-            cup = new_cup(st, meta, int(req.get("difficulty") or 0))
-        st.setdefault("cups", {})[cup["_id"]] = cup
-        r = coach_record(my_coach(st), "cup")
-        r["totalchallenges"] = r.get("totalchallenges", 0) + 1
-        _save(st)
-    return _json({"result": True, "resources":
-                  cup_resources(cup) + coach_me_resources(st, _default_slot(st))})
-
-
-def cup_step(cupid, fn):
-    st = _state(); cup = (st.get("cups") or {}).get(cupid)
-    if cup is None:
-        return _json({"result": False, "reason": "not exist cupid"})
-    out = fn(st, cup) or {}
-    _save(st)
-    return _json(dict({"result": True, "resources": cup_resources(cup)}, **out))
-
-
-def ep_cup_resume(cupid, query, body):
-    return cup_step(cupid, lambda st, cup: None)
-
-
-def ep_cup_next(cupid, query, body):
-    """PUT /cup/<id>/next: play out the current round (my result from the match just played,
-    if any) and advance (CupController.onMatchEndReceived -> ON_CUP_SCHEDULE_NEXT_ROUND)."""
-    def step(st, cup):
-        if cup.get("finished"):
-            return
-        play = tournament_play_round if cup.get("type") == "wcpve" else cup_play_round
-        play(st, cup, cup.pop("_mine", None))
-        cup_refresh_stats(cup)
-    return cup_step(cupid, step)
-
-
-def cup_reward_ep(cup):
-    """EP for an ended cup: the meta's prize for the champion, a share of it by the round
-    reached otherwise (group exit 10%, QF 20%, SF 35%, final 50%); 0 while still playing."""
-    state = cup["coaches"][0]["state"]
-    meta = cup_or_tournament_meta(cup["metaid"]) or CUPS[0]
-    prize = meta["bestrewards"][-1][0]["count"]
-    if state == "won":
-        return prize
-    if state != "eliminated":
-        return 0
-    ko = cup["phases"][1]["groups"][0] if len(cup["phases"]) > 1 else None
-    mine = next((i for i, t in enumerate(ko["teams"]) if t["coach"]), None) if ko else None
-    if mine is None:
-        return prize // 10
-    played = sum(1 for r in ko["rounds"] for p in r["pairs"]
-                 if mine in (p["legs"][0].get("homeidx"), p["legs"][0].get("awayidx")) and "score" in p["legs"][0])
-    return prize * (20, 35, 50)[max(0, min(played, 3) - 1)] // 100
-
-
-def ep_cup_leave(cupid, query, body):
-    """PUT /cup/<id>/leave: give up, or collect an ended cup's reward. CupReward*Scene.onItemExpand
-    reads body.rewards[]: itemid 1 = EP (count), anything else is an item card."""
-    st = _state(); cup = (st.get("cups") or {}).pop(cupid, None)
-    ep = cup_reward_ep(cup) if cup else 0
-    add_ep(st, ep)
-    if cup:  # Info Manager's cup record: given up, won (by AI level), prize money and the best
-        r, state = coach_record(my_coach(st), "cup"), cup["coaches"][0]["state"]
-        r["abandonments"] = r.get("abandonments", 0) + (state == "playing")
-        if state == "won":
-            r["totalwins"] = r.get("totalwins", 0) + 1
-            wins = r.setdefault("cupwins", [0] * CUP_LEVELS)
-            wins[min(CUP_LEVELS - 1, max(0, int(cup.get("difficulty", 0))))] += 1
-        r["totalprize"] = r.get("totalprize", 0) + ep
-        if ep > (r.get("best") or {}).get("prize", 0):
-            r["best"] = {"prize": ep, "metaid": cup["metaid"], "date": w3c(time.time())}
-    _save(st)
-    # /coach/me carries the remaining cups: feeding it makes CoachController raise onCupsChanged,
-    # so CupProxy.cupPlayList drops the cup the client just left instead of offering a resume.
-    return _json({"result": True, "rewards": [{"itemid": 1, "count": ep}] if ep else [],
-                  "resources": coach_me_resources(st, _default_slot(st))})
-
-
-def ep_cup_match(cupid, query, body):
-    """POST /cup/<id>/match -> my fixture of the current round as a /match/<id> resource."""
-    st = _state(); cup = (st.get("cups") or {}).get(cupid)
-    g, leg = cup_my_pair(cup) if cup else (None, None)
-    if leg is None or "score" in leg:
-        return _json({"result": False, "reason": "already played match"})
-    me = coach_me(st, _default_slot(st))
-    tournament = cup.get("type") == "wcpve"
-    # In a tournament cup the player coaches a national team, not his club: the side is
-    # cup["nation"] and its roster is the nation's, so home/away/opponent all key
-    # off that id instead of the coach's club teamid.
-    teamid = cup["nation"] if tournament else me["teamid"]
-    home = g["teams"][leg["homeidx"]]["teamid"]; away = g["teams"][leg["awayidx"]]["teamid"]
-    opp = away if home == teamid else home
-    user = {"id": me["id"], "name": me["name"], "levelinfo": me["levelinfo"]}
-    if tournament:
-        entry = tournament_entry(cup.get("metaid"))
-        # BOTH sides come from the cup's card sources (the event's own card season first), so the
-        # opponent really is the squad the draw put in this group; a nation the sources cannot
-        # make 11 players for falls back to its normal roster (tournament_roster_team does that).
-        #
-        # match type is Cup_PvE, NOT WorldCup_PvE: a tournament here is reached through the cup
-        # flow (CupFrontScreen -> CupCreationScreen -> CupSquadSettingScreen), and that flow ends on
-        # LeagueCupGameSettingScreen. Its onPlaying() branches on the match type and, for a
-        # WorldCup_* type, reads the native WC screens' data (WCProxy / the WC player-pack screen),
-        # which this flow never loads -- that object is null and it throws AS3 #1009 before
-        # StartSingleMatch ("Cannot access a property or method of a null object reference at
-        # LeagueCupGameSettingScreen/onPlaying", 2026-11-23). A Cup_PvE match keeps the same cup
-        # data and rules (drawMode 2 extra time, cup_pending scoring) without that branch.
-        # +N cards: a generated squad carries no grade (= +0), so an AI side would show every card
-        # unenhanced. Both ends of a tournament are generated, so both take the event's card_grade.
-        grade = (entry or {}).get("card_grade", CUP_AI_GRADE)
-        # My XI / formation as left on the pre-match squad screen (cup["lineup"], written by
-        # ep_match_squad): a fresh round otherwise starts from the generated 4-4-2 again. A copy,
-        # because tournament_squad is cached and shared with the draw and the other rounds.
-        mine = copy.deepcopy(tournament_squad(entry, teamid))
-        apply_cup_lineup(mine, cup.get("lineup"))
-        match = new_match("Cup_PvE", match_side(set_card_grade(mine, grade),
-                                                teamid, user, _tactics(st)[1]),
-                          match_side(set_card_grade(tournament_squad(entry, opp), grade), opp))
-    else:
-        match = new_match("Cup_PvE", match_side(st["teams"][str(_default_slot(st))], teamid, user, _tactics(st)[1]),
-                          # the AI clubs only; my own cards keep the grades I gave them
-                          match_side(set_card_grade(roster_team(opp), CUP_AI_GRADE), opp))
-    gs = match["gamesettings"]
-    gs["home"] = home == teamid
-    gs["kit"] = ["home", "away"] if gs["home"] else ["away", "home"]
-    apply_prematch(st, match)
-    gs["difficulty"] = cup.get("difficulty", 0)  # AI level 0..4
-    if cup["phases"][cup["current"]["phase"]]["system"] == "knock-out":
-        # native maps drawMode 1/2/3 to end rules 9/6/7 (0 = a draw stands). 2 plays extra time
-        # (FIRST_EXTRA_HALF seen in game); a draw after it is settled by cup_play_round
-        gs["drawMode"] = 2
-    st["match"] = match
-    st["cup_pending"] = {"id": match["id"], "cupid": cupid, "home": home, "away": away}
-    _save(st)
-    return _json({"result": True, "resources": [{"uri": f"/match/{match['id']}", "body": match}]})
-
-
-def ep_cup_record(query, body):
-    """GET /cup/record: CupProxy.onCupRecordResourceChanged takes resources[] entries whose
-    `resource` is /cup/record and body._id is my coach id."""
-    st = _state(); coach = my_coach(st)
-    r = coach.get("record", {}).get("cup", {})
-    return _json({"result": True, "resources": [{"resource": "/cup/record", "uri": "/cup/record",
-                  "body": {"_id": coach["_id"], "recordsbymetaid": [],
-                           **{k: r.get(k, 0) for k in ("totalchallenges", "totalwins", "totalprize")}}}]})
 
 
 # --------------------------------------------------------------------------- #
@@ -5426,27 +5013,6 @@ MONTHLY = {  # itemid: (name, icon, days, items now, daily items, description)
                "Langsung Kotak Platinum, lalu This Season Top 30 dan 500.000 EP tiap hari selama 30 hari."),
 }
 
-# 注入本地化文本
-def localize_tuple_table(table, prefix, slots):
-    """Overlay a table's tuple text fields from localization.json for the current LANGUAGE.
-
-    Keys are "<prefix>.<row_id>.<field>" (e.g. "ITEMS.501.name"); `slots` maps a field
-    name to its tuple index. Only fields present in the JSON are replaced, so every
-    hardcoded literal stays as the fallback and the table's structure is untouched.
-    """
-    for key, text in localization().get(LANGUAGE, {}).items():
-        parts = key.split(".")
-        if len(parts) != 3 or parts[0] != prefix or parts[2] not in slots:
-            continue
-        try:
-            row_id = int(parts[1])
-        except ValueError:
-            continue
-        if row_id in table:
-            row = list(table[row_id])
-            row[slots[parts[2]]] = text
-            table[row_id] = tuple(row)
-
 
 # item tuples: index 0 = name, 4 = description (icon/type/effect are data, not text)
 localize_tuple_table(ITEMS, "ITEMS", {"name": 0, "description": 4})
@@ -5454,28 +5020,6 @@ localize_tuple_table(ITEMS, "ITEMS", {"name": 0, "description": 4})
 localize_tuple_table(PACKAGES, "PACKAGES", {"name": 0, "description": 3})
 # monthly tuples: index 0 = name, 5 = description (index 2..4 = days/items, data not text)
 localize_tuple_table(MONTHLY, "MONTHLY", {"name": 0, "description": 5})
-
-
-def localize_pack_terms(packs, prefix="PACK_TERM."):
-    """Translate recurring words inside pack names for the current LANGUAGE.
-
-    Unlike whole-name overrides, this rewrites just the listed terms so a name like
-    "World Legend Draft Pick 3" becomes "世界传奇 选秀 3" while numbers/grade suffixes
-    survive. Keys are "<prefix><term>": "<translation>" in localization.json; terms are
-    applied longest-first so overlapping phrases (e.g. "Team of the Season" vs "Season")
-    resolve to the most specific one. `pool` (index 1) is never touched.
-    """
-    terms = {k[len(prefix):]: v for k, v in localization().get(LANGUAGE, {}).items()
-             if k.startswith(prefix) and isinstance(v, str)}
-    if not terms:
-        return
-    ordered = sorted(terms.items(), key=lambda kv: -len(kv[0]))  # longest phrase first
-    for itemid, (name, pool) in list(packs.items()):
-        new = name
-        for term, zh in ordered:
-            new = new.replace(term, zh)
-        if new != name:
-            packs[itemid] = (new, pool)
 
 
 localize_pack_terms(PACKS)

@@ -10,6 +10,7 @@ from collections import Counter
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import http_config as hc
+from modules.team_picker import REST_OF_WORLD
 
 # Cup 1's champion prize, read off its meta: the tile's reward is a balance number (it went 60k ->
 # 6M with the rest of the cup prizes), so a hardcoded copy here only goes stale.
@@ -253,7 +254,7 @@ def main():
         nations, leagues = (body(hc.ENDPOINTS[f"/static/db/{t}"]("", b"")) for t in ("SORTNATION", "SORTLEAGUE"))
         clubs = body(hc.ENDPOINTS["/static/db/SORTTEAM"]("", b""))
         assert nations and all(clubs[str(lg)] for n in nations for lg in leagues[str(n)])
-        assert not any(hc.REST_OF_WORLD in ts for ts in clubs.values())  # not a club to pick
+        assert not any(REST_OF_WORLD in ts for ts in clubs.values())  # not a club to pick
         # issue #30: Multiple > Rank's virtual managers, in LadderMatchController's shapes
         vms = hc.virtual_managers()
         assert len({m["name"] for m in vms}) == len(vms) >= hc.VM_COUNT and {m["grade"] for m in vms} <= set(range(1, 7))

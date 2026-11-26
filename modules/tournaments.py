@@ -1,14 +1,26 @@
-""" Tournament cups (PvE): the World Cup / European Championship engine.
-
-Split out of http_config.py (2026-11-26). That file is the upstream server's single 10k-line
-script -- every feature added on top of it used to land in the middle of it. Everything in this
-module is ours; the upstream cup code (the club cups: new_cup, cup_play_round, cup_refresh_stats,
-the /cup handlers) stays in http_config and is used from here through `hc`.
+"""Tournament cups (PvE): the World Cup / European Championship engine.
 
 An event is data: one entry of config/tournaments.json -- metaid, name, the seeding pots, the card
 sources a side is built from, and the format. This module turns that entry into a cup-shaped
 instance the client already knows how to draw (CupProxy / CupMainScreen), picks both squads, plays
 the AI rounds and builds the knock-out bracket.
+
+Why a cup at all: the client has no worldcup button (MainMenuInfoDefines hardcodes league/cup/rtw)
+and its competition creation scene cannot be reached, but CupFrontScreen draws any /cup/list tile.
+So a tournament goes through the ordinary cup flow -- /cup/list -> the 3-wheel team picker
+(SORTNATION / SORTLEAGUE / SORTTEAM) -> POST /cup/new -> /cup/<id>/match, /cup/<id>/next -- and the
+player coaches a NATIONAL team. The id travels, not the squad: the client resolves nationalteamid
+-> nation from its own static DB, and the squad behind the id is picked by NATIONALITY rather than
+nationalteamid, because 547 of the 1040 14W cards carry -1 and the whole of Italy's 2014 set does
+(gen_teams.national_code / ._team_filter).
+
+Where the rest lives: the /cup/* endpoints for both cup kinds are in modules/cup_api.py, which
+calls in here for a "wcpve" cup; the club cup engine (new_cup, cup_play_round, cup_refresh_stats) is
+upstream code and stays in http_config.py, reached through `hc`.
+
+This is a config entry and not a responses/ file on purpose: responses/<path>.json is an HTTP
+response override keyed by request path (see from_file in http_config), so a file there would
+shadow an endpoint.
 """
 import copy
 import json
@@ -19,30 +31,14 @@ from contextlib import closing
 
 import gen_teams
 
-
-class _Host:
-    """http_config, resolved on first use.
-
-    http_config imports this module in the middle of its own body (right where this block used to
-    live), so a plain `import http_config` at the top here would hand back a half-built module --
-    and `import modules.tournaments` before http_config would deadlock the other way round. Going
-    through __getattr__ makes both orders work: nothing is read off the host until a request calls
-    in, and by then http_config has finished importing."""
-
-    def __getattr__(self, name):
-        import http_config  # noqa: PLC0415 -- the point: late, never at module import
-
-        return getattr(http_config, name)
-
-
-hc = _Host()
+from modules import hc  # http_config, resolved lazily (see modules/__init__.py)
 
 TOURNAMENT_CONFIG = ("config", "tournaments.json")
 
 
 def tournament_config_file():
     """config/tournaments.json, resolved per call: importing this module must not read anything
-    off the host (see _Host)."""
+    off the host (see `hc` in modules/__init__.py)."""
     return os.path.join(hc.HERE, *TOURNAMENT_CONFIG)
 
 
