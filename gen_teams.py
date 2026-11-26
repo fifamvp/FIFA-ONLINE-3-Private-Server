@@ -37,6 +37,22 @@ FIT_BONUS = 4  # a natural player keeps the slot unless an out-of-position one r
 FORMATION_ID = 1
 # starting = [attacking participation, defensive participation, x, y]; 1 = medium
 PARTICIPATION = 1
+# The squad screen lets a player's participation go up to his own work rate and no higher
+# (PlayerListUtil: a higher starting[0]/[1] is clamped back down to staticdata.attackingworkrate /
+# defensiveworkrate). A generated squad used to write the flat medium/medium for every slot, so
+# every AI card (and a tournament side) showed 参与度 1/1 regardless of who it was. Take the card's
+# own work rate instead: 0 low, 1 medium, 2 high, the same 0..2 the DB stores.
+def workrate(row, column):
+    """One work-rate column of a players row (0..2), PARTICIPATION when the row has none."""
+    try:
+        return max(0, min(2, int(row[column] or 0)))
+    except (IndexError, KeyError, TypeError, ValueError):
+        return PARTICIPATION
+
+
+def participation(row):
+    """starting[0..1] of a squad slot: the card's own attacking / defensive work rate."""
+    return [workrate(row, "attackingworkrate"), workrate(row, "defensiveworkrate")]
 SELECTABLE = 18
 # summary text the client shows as-is (TeamStaticInfo: name, nation.name, rival.name); team and
 # nation names are not in fifadb. league/nation ids come from the roster.
@@ -283,7 +299,7 @@ def team(c, teamid, sources=None, national=None, min_players=SELECTABLE, min_lin
     for pos, _, _ in FORMATION:
         if pos not in pick:
             pick[pos] = max((i for i in range(len(rows)) if i not in pick.values()), key=lambda i: at(rows[i], pos))
-    positions = [{"spid": rows[pick[pos]]["spid"], "pos": pos, "starting": [PARTICIPATION, PARTICIPATION, x, y]}
+    positions = [{"spid": rows[pick[pos]]["spid"], "pos": pos, "starting": [*participation(rows[pick[pos]]), x, y]}
                  for pos, x, y in FORMATION]
     numbers = {p["spid"]: NUMBERS[p["pos"]] for p in positions}
     subs = iter(range(12, 99))

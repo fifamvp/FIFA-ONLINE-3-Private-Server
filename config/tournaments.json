@@ -60,7 +60,6 @@
       "group_rounds": 3,
       "qualify_per_group": 2,
       "best_thirds": 0,
-      "third_place_match": true,
       "knockout_pairs": []
     }
   },
