@@ -54,6 +54,10 @@ def participation(row):
     """starting[0..1] of a squad slot: the card's own attacking / defensive work rate."""
     return [workrate(row, "attackingworkrate"), workrate(row, "defensiveworkrate")]
 SELECTABLE = 18
+# A tournament side is a 23-man squad (the real World Cup roster): 11 + 7 named + 5 reserves.
+# modules/tournaments.py passes the cup's own squad_size; a club keeps the 30-card room below.
+ROSTER_SIZE = 23
+MAX_GK = 3  # a 23-man roster never carries more than three keepers (unless the pool has no one else)
 # summary text the client shows as-is (TeamStaticInfo: name, nation.name, rival.name); team and
 # nation names are not in fifadb. league/nation ids come from the roster.
 TEAM_INFO = {241: ("FC Barcelona", "Real Madrid"), 243: ("Real Madrid", "FC Barcelona"),
@@ -161,15 +165,16 @@ def current_rows(c, teamid, nation=None):
 
 
 def _source_rows(c, teamid, src, nation=None):
-    """The cards one card source offers, best first. {"team": T} means T's own cards whatever the
-    squad is (a club's, e.g. China's "2016 中国最强"); anything else follows the squad's own key
-    -- nationality for a national team, teamid for a club (see _team_filter)."""
+    """The cards one card source offers, best first, licensed only (an unlicensed card -- the
+    fake-name / no-likeness ones -- never joins a squad). {"team": T} means T's own cards whatever
+    the squad is (a club's, e.g. China's "2016 中国最强"); anything else follows the squad's own
+    key -- nationality for a national team, teamid for a club (see _team_filter)."""
     team = int(src["team"]) if src.get("team") else teamid
     nat = None if src.get("team") else nation
     if src.get("current"):
         return current_rows(c, team, nat)
     cond, args = _team_filter(team, nat)
-    return c.execute(f"""SELECT p.* FROM players p
+    return c.execute(f"""SELECT p.* FROM players p JOIN permid m ON m.spid = p.spid AND m.licensed = 1
                          WHERE {cond} AND p.spid / 1000000 = ?
                          ORDER BY p.overallrating DESC""",
                      args + (int(src["season"]),)).fetchall()
@@ -185,11 +190,11 @@ def squad_rows(c, teamid, sources=None, min_players=SELECTABLE, nation=None):
     """The cards a squad is built from, in priority order, one entry per card source:
     [{"season": 77}, {"season": 81, "team": 113395}, {"current": True}]
 
-    - {"season": N} = the team's own cards of season N, no permid filter (only 172 of the 1040
-      14W cards are licensed, so a licensed filter leaves ~13 per nation). For a national team
-      "own" means its nationality, not nationalteamid (see _team_filter). {"season": N, "team": T}
-      = another team's cards of that season -- China's best squad is "2016 中国最强" (team 113395,
-      39 cards), which is filed under that club, not under nationalteamid 1413.
+    - {"season": N} = the team's own cards of season N, licensed only (an unlicensed card never
+      joins a squad). For a national team "own" means its nationality, not nationalteamid (see
+      _team_filter). {"season": N, "team": T} = another team's cards of that season -- China's best
+      squad is "2016 中国最强" (team 113395, 39 cards), filed under that club, not under
+      nationalteamid 1413.
     - {"current": True} = the normal pool (current season + 2017, see current_rows).
 
     Sources are concatenated in order and de-duplicated by player (first source wins), so the
@@ -218,12 +223,20 @@ def player_line(pos):
     return "GK" if pos == 0 else ("DF" if pos in LINES["DF"] else ("MF" if pos in LINES["MF"] else "FW"))
 
 
+def slot_rating(row, pos):
+    """The client's rating of a card at one squad slot: the ROLE_WEIGHTS of that position over
+    his stats (the "Attr" the squad screens print). Used to pick the XI, and by
+    modules/tournaments.py to fill a slot a configured lineup leaves open."""
+    hc = _hc()
+    return sum(row[k] * w for k, w in hc.ROLE_WEIGHTS[hc.POS_ROLE[pos]].items()) // 100
+
+
 def fill_lines(c, teamid, sources, rows, mins, nation=None):
     """Append players until the squad meets the per-line minimums ({"GK": 1, "DF": 4, "MF": 5,
     "FW": 1}), taking the best ones still available. Picking 18 cards by rating does not give that
     for free: Austria's 14W set has no goalkeeper at all and Scotland's two defenders, so the XI
-    would put an outfielder in goal. Cards the sources skip (unlicensed, older seasons) are the
-    last resort -- an Austrian keeper exists in season 88 but not as a licensed card."""
+    would put an outfielder in goal. Cards the sources skip (older seasons) are the last resort --
+    an Austrian keeper exists in season 88 but not as a 14W card. Licensed only, like the sources."""
     have = [player_line(r["preferredposition1"]) for r in rows]
     seen = {r["playerid"] for r in rows}
     pools = squad_pool(c, teamid, sources, nation) + [None]
@@ -233,9 +246,11 @@ def fill_lines(c, teamid, sources, rows, mins, nation=None):
         for pool in pools:
             if short <= 0:
                 break
-            if pool is None:  # any card this team has, whatever its season or license
+            if pool is None:  # any licensed card this team has, whatever its season
                 cond, args = _team_filter(teamid, nation)
-                pool = c.execute(f"""SELECT p.* FROM players p WHERE {cond}
+                pool = c.execute(f"""SELECT p.* FROM players p
+                                     JOIN permid m ON m.spid = p.spid AND m.licensed = 1
+                                     WHERE {cond}
                                      ORDER BY p.overallrating DESC""", args).fetchall()
             for r in pool:
                 if short <= 0:
@@ -250,20 +265,70 @@ def fill_lines(c, teamid, sources, rows, mins, nation=None):
     return (rows[:max(0, 30 - len(extra))] + extra) if len(rows) + len(extra) > 30 else rows + extra
 
 
-def team(c, teamid, sources=None, national=None, min_players=SELECTABLE, min_lines=None, by_nation=False):
+def compose(rows, size, mins=None, max_gk=MAX_GK):
+    """Take `size` cards out of `rows` (already in priority order) for a real roster: the per-line
+    minimums first ("GK":1,"DF":4,"MF":5,"FW":1), at most `max_gk` keepers, then the best of the
+    rest. The result keeps the priority order of `rows`, so rows[0] is still the side's best card
+    (gen_teams.team names the default captain after it).
+
+    Needed because a rating-ordered cut does not respect a squad's shape: Brazil's 14W set has four
+    keepers and a nation can end up with two left backs and no striker. Only the minimums that the
+    pool cannot meet are skipped -- a side with three defenders still fields three."""
+    if size <= 0 or len(rows) <= size:
+        return rows
+    mins = {k: int(v) for k, v in (mins or {}).items()}
+    keep, counts = set(), {}
+
+    def line_of(r):
+        return player_line(r["preferredposition1"])
+
+    def add(i, ln):
+        keep.add(i)
+        counts[ln] = counts.get(ln, 0) + 1
+
+    for ln, need in mins.items():  # the shape first, best card of each line
+        for i, r in enumerate(rows):
+            if counts.get(ln, 0) >= need or len(keep) >= size:
+                break
+            if i in keep or line_of(r) != ln or (ln == "GK" and counts.get("GK", 0) >= max_gk):
+                continue
+            add(i, ln)
+    for i, r in enumerate(rows):  # then the best of the rest
+        if len(keep) >= size:
+            break
+        ln = line_of(r)
+        if i in keep or (ln == "GK" and counts.get("GK", 0) >= max_gk):
+            continue
+        add(i, ln)
+    for i, r in enumerate(rows):  # a pool of nothing but keepers still fills the roster
+        if len(keep) >= size:
+            break
+        if i not in keep:
+            add(i, line_of(r))
+    return [r for i, r in enumerate(rows) if i in keep]
+
+
+def team(c, teamid, sources=None, national=None, min_players=SELECTABLE, min_lines=None, by_nation=False,
+         squad_size=None):
     """A stored team {teamid, summary, team}. `sources` picks the card seasons (see squad_rows);
     `national` says the team is a national side even when its cards are filed under a club (China
     fields "2016 中国最强", whose cards carry nationalteamid -1), so the squad still counts as a
     national team for the league/nation fields; `min_lines` ({"GK": 1, "DF": 4, ...}) tops the
-    squad up per line, see fill_lines; `by_nation` builds a national squad from its players'
-    nationality instead of nationalteamid (which half the 14W cards lost)."""
+    squad up per line, see fill_lines; `squad_size` cuts the roster to that many cards with the
+    per-line shape above (a tournament's 23, see compose) -- None keeps the club default of 30 --
+    and asks for a few spare cards so the cut can drop surplus keepers; `by_nation` builds a
+    national squad from its players' nationality instead of nationalteamid (which half the 14W
+    cards lost)."""
     hc = _hc()
     if teamid <= 0:  # no card has one; nationalteamid -1 = none (would match 53k cards)
         return None
     nat = national_code(c, teamid) if by_nation else None
     if nat is not None:
         national = True  # a squad picked by nationality is a national side by construction
-    rows = squad_rows(c, teamid, sources, min_players, nat)
+    # A cut to `squad_size` needs spare cards to keep the shape: a nation whose pool is exactly 23
+    # cards cannot drop two of its five keepers without falling short (see compose).
+    want = max(min_players, int(squad_size) + 6) if squad_size else min_players
+    rows = squad_rows(c, teamid, sources, want, nat)
     inferred = national is None
     national = any(r["nationalteamid"] == teamid for r in rows) if inferred else bool(national)
     if sources:
@@ -283,13 +348,15 @@ def team(c, teamid, sources=None, national=None, min_players=SELECTABLE, min_lin
                 best.setdefault(r["playerid"], r)
         # current-season cards first (2017's overallrating column runs ~5 above the client's rating)
         rows = sorted(best.values(), key=lambda r: (r["spid"] // 1000000 != CURRENT_SEASON, -r["overallrating"]))[:30]
-    if len(rows) < 11:
-        return None
     if min_lines:  # 1 GK / 4 DF / 5 MF / 1 FW, before the XI is picked
         rows = fill_lines(c, teamid, sources, rows, min_lines, nat)
+    if squad_size:  # a tournament's 23: per-line minimums, at most three keepers
+        rows = compose(rows, int(squad_size), min_lines)
+    if len(rows) < 11:
+        return None
     # XI: best (player, slot) pairs by the client's rating at that slot (the "Attr" the squad
     # screens show); goalkeepers only in goal. A slot left over takes the best remaining player.
-    at = lambda r, pos: sum(r[k] * w for k, w in hc.ROLE_WEIGHTS[hc.POS_ROLE[pos]].items()) // 100
+    at = slot_rating
     pick = {}
     for _, i, pos in sorted(((at(r, pos) + FIT_BONUS * (r["preferredposition1"] in FITS[pos]), i, pos)
                              for i, r in enumerate(rows) for pos, _, _ in FORMATION
@@ -334,7 +401,8 @@ def team(c, teamid, sources=None, national=None, min_players=SELECTABLE, min_lin
     ovr = {p["spid"]: hc.card_ovr(p["spid"]) for p in positions}
     line = {k: round(sum(ovr[p["spid"]] for p in positions if p["pos"] in r) / sum(p["pos"] in r for p in positions))
             for k, r in LINES.items()}
-    summary = {"teamid": teamid, "id": teamid, "numofselectableplayers": SELECTABLE, "name": name,
+    summary = {"teamid": teamid, "id": teamid, "numofselectableplayers": int(squad_size or SELECTABLE),
+               "name": name,
                "league": league_info, "nation": {"id": nation, "name": NATION_NAMES.get(nation, "")},
                "rival": {"name": rival}, "ovr": line, "teamgrade": team_grade(sum(ovr.values()) / len(ovr))}
     return {"teamid": teamid, "summary": summary,

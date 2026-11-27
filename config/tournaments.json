@@ -17,10 +17,12 @@
     "              {\"season\": 81, \"team\": T}    = 另一支球队 T 的 81 赛季卡（中国的",
     "                                           「2016 中国最强」挂在 team 113395，不在 1413）。",
     "              {\"current\": true}            = 常规卡池（当前赛季 + 2017，见 gen_teams.current_rows）",
-    "squad_size    卡源累加到这个人数就停（客户端 numofselectableplayers 是 18，名单上限 30 张）。",
+    "squad_size    整份名单的人数，默认 23（11 首发 + 7 替补 + 5 后备，见 config/squads.json），",
+    "              也是客户端 numofselectableplayers。卡源累加到这个人数就停。",
     "min_players   硬下限：某队凑不到这个人数就不能踢，抽签时用 reserves 同档顶替。",
-    "squad_lines   阵容各线最低人数（门将/后卫/中场/前锋），不足时按评分补；14W 里奥地利没有",
-    "              门将、苏格兰只有 2 个后卫，不补就会把后卫塞进球门。",
+    "squad_lines   服务端自己补名单时各线的最低人数（门将/后卫/中场/前锋），不足时按评分补；",
+    "              14W 里奥地利没有门将、苏格兰只有 2 个后卫，不补就会把后卫塞进球门。",
+    "              门将另有上限 3（gen_teams.MAX_GK），23 人名单不会带 4 个门将。",
     "team_overrides 按国家队 teamid 覆盖 card_sources，其余队仍用杯自己的 card_sources。",
     "card_grade    生成的球员卡等级（+N）。AI 阵容是从 fifadb 现拼的，不带 grade = +0（无强化",
     "              加成，赛前阵容和卡价都按 0 算），所以默认 +1；改 0 就是全部裸卡。",
@@ -43,7 +45,7 @@
   ],
   "defaults": {
     "card_sources": [{"current": true}],
-    "squad_size": 18,
+    "squad_size": 23,
     "min_players": 11,
     "squad_lines": {"GK": 1, "DF": 4, "MF": 5, "FW": 1},
     "type": "wcpve",
@@ -76,7 +78,7 @@
         "（按国籍能查到，伊朗只有 2 张），但客户端查不到队名，所以下面用这些队当替身：",
         "  二档 奥地利/土耳其/波兰   三档 瑞典/挪威/苏格兰/巴拉圭/威尔士   四档 爱尔兰/罗马尼亚/捷克",
         "要让这 11 支真队上场，得往 chi.big 的 TEAMNAMES_CHI 里加 11 条队名（tools/lang_manager.py）。",
-        "赛事自己的卡源写在下面，不在 defaults：这一条 14W(77) 优先，不够用常规卡池补到 18 人。"
+        "赛事自己的卡源写在下面，不在 defaults：这一条 14W(77) 优先，不够用常规卡池补到 23 人。"
       ],
       "metaid": 10002,
       "name": "2014巴西世界杯",
@@ -84,6 +86,8 @@
       "listed": true,
       "quality": 5,
       "reward": 6000000,
+      "trophy": "10002",
+      "skin": "100213",
       "card_sources": [{"season": 77}, {"current": true}],
       "pots": [
         {

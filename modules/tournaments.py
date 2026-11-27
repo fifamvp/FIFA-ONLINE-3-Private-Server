@@ -27,6 +27,7 @@ import json
 import os
 import random
 import time
+import unicodedata
 from contextlib import closing
 
 import gen_teams
@@ -46,7 +47,14 @@ def tournament_config_file():
 # 2018 is another season code, and a config that puts one of them here would field 14W players in
 # every future tournament. A cup that says nothing falls back to the plain current pool.
 TOURNAMENT_DEFAULTS = {"card_sources": [{"current": True}],
-                       "squad_size": gen_teams.SELECTABLE, "min_players": 11, "type": "wcpve",
+                       # A tournament side is the real 23-man squad: 11 XI + 7 named + 5 reserves
+                       # (config/squads.json `reserves`), so squad_size is 23 unless a cup says
+                       # otherwise. squad_lines is the shape the server keeps when it fills the
+                       # roster itself: at least 4 defenders / 5 midfielders / 1 striker and at
+                       # most 3 keepers (gen_teams.compose).
+                       "squad_size": gen_teams.ROSTER_SIZE,
+                       "squad_lines": {"GK": 1, "DF": 4, "MF": 5, "FW": 1},
+                       "min_players": 11, "type": "wcpve",
                        # "authentic" = the player takes over a licensed side, so the team picker
                        # previews THAT side's squad instead of the coach's own club (see
                        # ep_authentic_team); "user" would lock the coach's club, "nation" opens the
@@ -154,17 +162,459 @@ def tournament_card_sources(entry, teamid):
             or TOURNAMENT_DEFAULTS["card_sources"])
 
 
+# --- configured squads (config/squads.json) -------------------------------- #
+#
+# A tournament side is generated: gen_teams picks the best XI of the event's card sources in a
+# 4-4-2. This section puts a hand-written lineup on top of it -- formation, XI, bench, shirt
+# numbers, captain, corner / free-kick / penalty takers, and optionally the CPU's tactic board.
+#
+# Why a config file and not responses/: same reason as config/tournaments.json (see the module
+# docstring) -- responses/<path>.json shadows a real endpoint.
+#
+# Shape, one entry per team, shared by every cup with a per-cup override:
+#   {"defaults": {...}, "teams": {"<teamid>": {...}},
+#    "cups": {"<metaid>": {"teams": {"<teamid>": {...}}}}}
+# A player is written as a name (looked up in that team's own `players` map, the 1:1 name ->
+# playerid roster of the team), as a playerid (an int), or as {"playerid": N, "season": S} to force
+# one card. Keeping the map per team means "R. Rodriguez" in Switzerland's block can only be the
+# Swiss one, without a global map having to spell out which Ricardo it means. Names are matched
+# folded: nameschi / nameseng full, short or shirt name, no case / spacing / accents (Höwedes =
+# Howedes). A name missing from the map falls back to the squad's own pool.
+#
+# The card a player gets: his card that the squad already has (the pool's first one), else the
+# event's own season (14W = 77), else the current pool's season (88 / 300), else his newest licensed
+# card whatever season it is -- a 2014 side fields Fred on his 2010 card rather than a hole. A
+# configured player the pool cannot offer at all is added to the squad from that season -- that is
+# how a lineup names someone outside its nation's pool, or a card of another season on purpose.
+#
+# The roster is 11 starters + 7 named subs + 5 `reserves` = the real 23, and the configured players
+# always make it: the server only fills what the config leaves open (see apply_lineup).
+LINEUP_FILE = ("config", "squads.json")
+LINEUP_SUBS = 7  # the bench the client expects (owned_team.fill_squad tops it up to 7)
+LINEUP_RESERVES = 5  # the rest of a 23-man squad; they are in players, not in squad.positions
+_LINEUP_CACHE = {"mtime": None, "data": {}}
+_FOLD = str.maketrans({"ø": "o", "Ø": "o", "ł": "l", "Ł": "l", "đ": "d", "Đ": "d", "ß": "ss",
+                       "æ": "ae", "Æ": "ae", "œ": "oe", "Œ": "oe", "þ": "th", "ð": "d"})
+
+
+def lineup_file():
+    """config/squads.json, resolved per call (importing this module reads nothing off the host)."""
+    return os.path.join(hc.HERE, *LINEUP_FILE)
+
+
+def lineup_config():
+    """config/squads.json, re-read when its mtime changes: editing a lineup needs no restart, and
+    the squad cache is dropped so the next draw / match builds the squads again."""
+    try:
+        mtime = os.stat(lineup_file()).st_mtime
+    except OSError:
+        return {}
+    if _LINEUP_CACHE["mtime"] != mtime:
+        try:
+            with open(lineup_file(), encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, ValueError) as e:
+            print("squads.json unavailable:", e, flush=True)
+            return {}
+        _LINEUP_CACHE.update(mtime=mtime, data=data if isinstance(data, dict) else {})
+        _TOUR_SQUADS.clear()
+    return _LINEUP_CACHE["data"]
+
+
+def lineup_entry(entry, teamid):
+    """The lineup of one team: defaults <- teams.<id> <- cups.<metaid>.teams.<id>. None when the
+    team has no entry anywhere (it then keeps the generated 4-4-2). `players` (the name -> playerid
+    roster) is merged key by key like `tactic`'s sub-objects, so a layer can add one name without
+    dropping the ones below it."""
+    cfg = lineup_config()
+    if not cfg:
+        return None
+    layers = [cfg.get("defaults") or {},
+              (cfg.get("teams") or {}).get(str(teamid)) or {},
+              (((cfg.get("cups") or {}).get(str((entry or {}).get("metaid"))) or {})
+               .get("teams") or {}).get(str(teamid)) or {}]
+    out, roster = {}, {}
+    for layer in layers:
+        out.update({k: v for k, v in layer.items() if k != "players"})
+        roster.update(layer.get("players") or {})
+    if out or roster:
+        out["players"] = roster
+    return out or None
+
+
+def _formation(ref):
+    """One entry of the client's own formation table, by formationname ("4-2-3-1(1)") or id."""
+    if ref is None or ref == "":
+        return None
+    forms = hc.formation_table().get("common") or []
+    if isinstance(ref, int) or str(ref).isdigit():
+        return next((f for f in forms if f["formationid"] == int(ref)), None)
+    return next((f for f in forms if f["formationname"] == str(ref)), None)
+
+
+def _name_key(s):
+    """A name folded for matching: no accents, no punctuation, lower case (Höwedes = Howedes)."""
+    s = unicodedata.normalize("NFKD", str(s or "").translate(_FOLD))
+    return "".join(ch for ch in s.lower() if ch.isalnum())
+
+
+def lineup_players(cfg):
+    """A team entry's own `players` roster, folded name -> playerid. Per team on purpose: "R.
+    Rodriguez" cannot be the Swiss and the Colombian at once, and three de Jongs stop being a
+    problem. A name missing here falls back to the pool's own name index."""
+    return {key: pid for key, pid in ((_name_key(k), v)
+                                      for k, v in ((cfg or {}).get("players") or {}).items())
+            if key and isinstance(pid, int) and not isinstance(pid, bool)}
+
+
+def _default_seasons(entry, teamid):
+    """The seasons a configured player is looked up in when the squad's own pool has no card for
+    him: the event's own season(s) first (14W = 77), then the current pool's. Read off the same
+    card sources the squad is built from, so a European Championship asks Euro's cards first."""
+    out = []
+    for src in tournament_card_sources(entry, teamid):
+        season = src.get("season")
+        if season is not None and int(season) not in out:
+            out.append(int(season))
+    if gen_teams.CURRENT_SEASON not in out:
+        out.append(gen_teams.CURRENT_SEASON)
+    return out
+
+
+def _licensed_spid(c, spid):
+    """The card at one exact spid, licensed only (None when the spid is absent or unlicensed)."""
+    return c.execute("""SELECT p.* FROM players p JOIN permid m ON m.spid = p.spid AND m.licensed = 1
+                        WHERE p.spid = ?""", (int(spid),)).fetchone()
+
+
+def _fallback_card(c, playerid, seasons):
+    """A player's card from the first of `seasons` that has a licensed one; failing that his newest
+    licensed card of any season (a 2014 side fields Fred on his 2010 card rather than a hole, and the
+    player the file names stays the player on the pitch). Licensed only: an unlicensed card cannot
+    join a squad (see gen_teams)."""
+    for season in seasons:
+        r = c.execute("""SELECT p.* FROM players p JOIN permid m ON m.spid = p.spid AND m.licensed = 1
+                         WHERE p.playerid = ? AND p.spid / 1000000 = ?
+                         ORDER BY p.overallrating DESC LIMIT 1""", (playerid, int(season))).fetchone()
+        if r is not None:
+            return r
+    return c.execute("""SELECT p.* FROM players p JOIN permid m ON m.spid = p.spid AND m.licensed = 1
+                        WHERE p.playerid = ?
+                        ORDER BY p.spid / 1000000 DESC, p.overallrating DESC LIMIT 1""",
+                     (playerid,)).fetchone()
+
+
+def _playerid(ref, names, players=None):
+    """A configured player to (playerid, forced season). The team's own roster wins over the pool,
+    so a name means the same man everywhere in that block; a bare number under a million is a
+    playerid; a number at or above a million is a full spid and is stripped to its playerid (the
+    season prefix is NOT a forced season -- pick() tries the exact spid first, then falls back to
+    the playerid through the season chain); a dict forces a card."""
+    if isinstance(ref, bool) or ref is None:
+        return None, None
+    if isinstance(ref, dict):
+        return _playerid(ref.get("playerid", ref.get("id")), names, players)[0], ref.get("season")
+    if isinstance(ref, int) or (isinstance(ref, str) and ref.isdigit()):
+        n = int(ref)
+        # A full spid (52065662, or China's 81182224): keep its playerid; the exact card is tried
+        # in pick() and, if absent or unlicensed, the season chain takes over from the playerid.
+        return (n % 1_000_000, None) if n >= 1_000_000 else (n, None)
+    key = _name_key(ref)
+    pid = (players or {}).get(key)
+    if pid is not None:
+        return pid, None
+    pids = names.get(key) or []
+    return (pids[0], None) if pids else (None, None)
+
+
+def _pool(c, team, entry, teamid):
+    """(rows by spid, playerid -> spids in pool order, folded name -> playerids, shirt name) of a
+    side's cards: every card of its card sources plus the ones already in the squad, so a
+    configured player the 30-card cut dropped can still be put into the XI."""
+    rows = {}
+    nat = gen_teams.national_code(c, teamid)
+    for r in gen_teams.squad_rows(c, teamid, tournament_card_sources(entry, teamid),
+                                  int((entry or {}).get("squad_size") or gen_teams.ROSTER_SIZE), nat):
+        rows.setdefault(str(r["spid"]), r)
+    extra = [int(p["spid"]) for p in team.get("players") or () if str(p["spid"]) not in rows]
+    if extra:
+        q = ",".join("?" * len(extra))
+        for r in c.execute(f"""SELECT spid, playerid, preferredposition1, attackingworkrate,
+                                      defensiveworkrate, overallrating
+                               FROM players WHERE spid IN ({q})""", extra):
+            rows.setdefault(str(r["spid"]), r)  # keyed by str like every other spid in here
+    pids = sorted({r["playerid"] for r in rows.values()})
+    names_of = {}
+    if pids:
+        q = ",".join("?" * len(pids))
+        for table in ("nameschi", "nameseng"):
+            for r in c.execute(f"""SELECT playerid, full, short, jersey, full_eng, short_eng
+                                   FROM {table} WHERE playerid IN ({q})""", pids):
+                names_of.setdefault(r["playerid"], []).extend(
+                    n for n in (r["full"], r["short"], r["jersey"], r["full_eng"], r["short_eng"]) if n)
+    pid_spids, names, jersey = {}, {}, {}
+    for spid, r in rows.items():  # dict order = card source order (season 77 before the current pool)
+        pid_spids.setdefault(r["playerid"], []).append(spid)
+        for n in names_of.get(r["playerid"], ()):
+            key = _name_key(n)
+            if key:
+                names.setdefault(key, [])
+                if r["playerid"] not in names[key]:
+                    names[key].append(r["playerid"])
+    for pid, spids in pid_spids.items():  # the shirt name, for a card added to the squad
+        name = next((n for n in names_of.get(pid, ()) if n and " " not in n), "")
+        for spid in spids:
+            jersey[spid] = name
+    return rows, pid_spids, names, jersey
+
+
+def _best(rows, used, pos):
+    """The best unused card for a slot, on the line that slot belongs to (a missing left back is
+    replaced by another defender, not by the best striker), scored like gen_teams does it: rating
+    at the slot plus FIT_BONUS for a natural position. A squad with no keeper left still gets a
+    body in goal rather than a hole."""
+    free = {s: r for s, r in rows.items() if s not in used}
+    line = gen_teams.player_line(pos)
+    tiers = ({s: r for s, r in free.items() if (r["preferredposition1"] == 0) == (pos == 0)
+              and gen_teams.player_line(r["preferredposition1"]) == line},
+             {s: r for s, r in free.items() if (r["preferredposition1"] == 0) == (pos == 0)}, free)
+    for pool in tiers:
+        if pool:
+            return max(pool, key=lambda s: (
+                gen_teams.slot_rating(pool[s], pos)
+                + gen_teams.FIT_BONUS * (pool[s]["preferredposition1"] in gen_teams.FITS.get(pos, ())),
+                pool[s]["overallrating"]))
+    return None
+
+
+def _best_sub(rows, used):
+    """The best unused card for the bench, by the rating the client shows (any position)."""
+    free = [(r["overallrating"], str(s)) for s, r in rows.items() if s not in used]
+    return max(free)[1] if free else None
+
+
+def _line_counts(rows, spids):
+    """{line: count} over the given spids, so a filler respects the squad's shape (see
+    config/tournaments.json `squad_lines`: at most MAX_GK keepers, a minimum per outfield line)."""
+    out = {}
+    for s in spids:
+        r = rows.get(str(s))
+        if r is None:
+            continue
+        ln = ("GK" if r["preferredposition1"] == 0
+              else gen_teams.player_line(r["preferredposition1"]))
+        out[ln] = out.get(ln, 0) + 1
+    return out
+
+
+def _best_sub_shaped(rows, used, lines):
+    """_best_sub, but it first tops up any line below its floor (the server filling the 23-man
+    roster must not drop a side below its required midfield/defence, unless the pool has no one
+    left). `lines` is the `squad_lines` dict ({"GK":1,"DF":4,"MF":5,"FW":1})."""
+    got = _line_counts(rows, used)
+    for ln, floor in sorted((lines or {}).items(), key=lambda kv: -int(kv[1])):
+        need = int(floor) - got.get(ln, 0)
+        if need <= 0:
+            continue
+        free = [s for s, r in rows.items()
+                if s not in used and gen_teams.player_line(r["preferredposition1"]) == ln]
+        if free:  # the best of that line (overallrating, then a fuller row as a tiebreak)
+            return max(free, key=lambda s: (rows[s]["overallrating"], s))
+    return _best_sub(rows, used)
+
+
+def apply_lineup(team, entry, teamid):
+    """Put the configured formation / XI / bench / numbers / captain / kickers of a team on its
+    generated squad (see the section banner). Returns the squad unchanged when the team has no
+    entry; numbers, captain and kickers still apply when the entry names no XI."""
+    cfg = lineup_entry(entry, teamid)
+    if not cfg or not team or not team.get("players"):
+        return team
+    warned = set()
+    with closing(hc._db()) as c:
+        rows, pid_spids, names, jersey = _pool(c, team, entry, teamid)
+        by_spid = {str(p["spid"]): p for p in team["players"]}
+        seasons = _default_seasons(entry, teamid)
+        players = lineup_players(cfg)
+
+        def ensure(spid):
+            p = by_spid.get(spid)
+            if p is None:  # a configured player neither the 30-card cut nor the pool offers
+                r = rows[spid]
+                p = {"spid": r["spid"], "expandme": "player", "price": r["overallrating"],
+                     "jersey": 0, "jerseyname": jersey.get(spid) or gen_teams.jersey_name(c, r["playerid"])}
+                team["players"].append(p)
+                by_spid[spid] = p
+            return p
+
+        def pick(ref, used=None):
+            """A configured player to a spid of this side: a full spid in the config is tried as
+            that exact card first (licensed), then the card the pool already has, else the event's
+            season, else the current season, else his newest licensed card (see _fallback_card),
+            else None."""
+            pid, season = _playerid(ref, names, players)
+            spid = None
+            if pid is not None:
+                if isinstance(ref, (int, str)) and not isinstance(ref, bool) \
+                        and str(ref).isdigit() and int(ref) >= 1_000_000:
+                    r = _licensed_spid(c, int(ref))  # the exact spid, licensed only
+                    if r is not None:
+                        spid = str(r["spid"])
+                        if spid not in rows:
+                            rows[spid] = r
+                            pid_spids.setdefault(pid, []).append(spid)
+                            jersey.setdefault(spid, gen_teams.jersey_name(c, pid))
+                if spid is None and season is None:
+                    spid = next(iter(pid_spids.get(pid) or ()), None)
+                if spid is None:  # not in this side's pool (or another season was forced)
+                    r = _fallback_card(c, pid, [int(season)] if season else seasons)
+                    if r is not None:
+                        spid = str(r["spid"])
+                        if spid not in rows:
+                            rows[spid] = r
+                            pid_spids.setdefault(pid, []).append(spid)
+                            jersey.setdefault(spid, gen_teams.jersey_name(c, pid))
+            if spid is None:
+                if str(ref) not in warned:
+                    warned.add(str(ref))
+                    print(f"squads.json: {teamid}: no card for {ref!r}", flush=True)
+            elif used is not None and spid in used:
+                return None
+            return spid
+
+        form, starters = _formation(cfg.get("formation")), cfg.get("starters") or []
+        roster = []
+        if form and starters:
+            # Two passes: every name first, then the holes. A single pass let the substitute for one
+            # missing card steal a player another slot names (Djeugoue out -> Nkoulou pushed to right
+            # back, Chedjou to Nkoulou's place, ...), which shifted half the XI.
+            used, xi = set(), [None] * len(form["positions"])
+            for i in range(len(xi)):
+                spid = pick(starters[i]) if i < len(starters) else None
+                if spid and spid not in used:
+                    used.add(spid)
+                    xi[i] = spid
+            for i, pos in enumerate(form["positions"]):
+                if xi[i] is None:  # no card for that name: the best of the pool on that line takes it
+                    xi[i] = _best(rows, used, pos)
+                    used.add(xi[i])
+            if any(s is None for s in xi):
+                print(f"squads.json: {teamid}: cannot fill {form['formationname']}", flush=True)
+                return team
+            bench = []
+            for ref in cfg.get("subs") or ():
+                spid = pick(ref, used)
+                if spid and len(bench) < LINEUP_SUBS:
+                    used.add(spid)
+                    bench.append(spid)
+            while len(bench) < LINEUP_SUBS:
+                spid = _best_sub(rows, used)
+                if spid is None:
+                    break
+                used.add(spid)
+                bench.append(spid)
+            positions = []
+            for i, spid in enumerate(xi):
+                ensure(spid)
+                r = rows[spid]
+                positions.append({"spid": spid, "pos": form["positions"][i],
+                                  "starting": [gen_teams.workrate(r, "attackingworkrate"),
+                                               gen_teams.workrate(r, "defensiveworkrate"),
+                                               form["offsets"][i]["x"], form["offsets"][i]["y"]]})
+            for spid in bench:
+                ensure(spid)
+                positions.append({"spid": spid, "pos": hc.POS_SUB})
+            team["squad"] = dict(team.get("squad") or {}, positions=positions, formation=form["formationid"])
+            team["formations"] = [form]  # the client's formation list of this side, not gen_teams' fake 4-4-2
+            # The rest of the 23: `reserves` first, then the best of the pool, so a roster is a full
+            # squad even when the config names fewer. A configured player always makes the roster;
+            # the server only fills what the config leaves open.
+            reserves = []
+            for ref in cfg.get("reserves") or ():
+                if len(reserves) >= LINEUP_RESERVES:
+                    break
+                spid = pick(ref, used)
+                if spid:
+                    used.add(spid)
+                    reserves.append(spid)
+            roster = [s for s in xi + bench + reserves if s]
+            size = int((entry or {}).get("squad_size") or gen_teams.ROSTER_SIZE)
+            shape = (entry or {}).get("squad_lines")
+            while len(roster) < size:
+                spid = _best_sub_shaped(rows, used, shape)
+                if spid is None:
+                    break
+                used.add(spid)
+                roster.append(spid)
+            team["players"] = [ensure(spid) for spid in roster]
+        sq = team["squad"]
+        # Shirt numbers: the configured ones first, then the lowest free 1..99 for whoever is left.
+        # gen_teams numbers its own XI 1..11 and the bench 12+, so a configured XI next to it
+        # collided (two 7s) unless every single slot were configured.
+        explicit = {}
+        for ref, n in (cfg.get("numbers") or {}).items():
+            spid = pick(ref)
+            if spid is None:
+                continue
+            if spid in explicit or not isinstance(n, int) or not 0 < n < 100:
+                print(f"squads.json: {teamid}: bad number {n!r} for {ref!r}", flush=True)
+                continue
+            explicit[spid] = n
+        used, spare = set(), []
+        for spid in (roster or [str(p["spid"]) for p in sq.get("positions") or ()]):
+            n = explicit.get(spid)
+            if n is not None and n not in used:
+                used.add(n)
+                if spid in by_spid:
+                    by_spid[spid]["jersey"] = n
+            else:
+                spare.append(spid)
+        free = [n for n in range(1, 100) if n not in used]
+        # the top of 1..23 first: a filler for a missing striker must not end up wearing 1
+        free = sorted((n for n in free if n <= 23), reverse=True) + [n for n in free if n > 23]
+        for spid, n in zip(spare, free):
+            if spid in by_spid:
+                by_spid[spid]["jersey"] = n
+        xi_ids = {str(p["spid"]) for p in sq.get("positions") or () if p.get("pos", hc.POS_SUB) < hc.POS_SUB}
+        cap = pick(cfg["captain"]) if cfg.get("captain") else None
+        if cap in xi_ids:
+            sq["captain"] = cap
+        elif cfg.get("captain"):
+            print(f"squads.json: {teamid}: captain {cfg['captain']!r} is not a starter", flush=True)
+        kick = [pick((cfg.get("kickers") or {}).get(k)) if (cfg.get("kickers") or {}).get(k) else None
+                for k in ("leftcorner", "rightcorner", "freekick", "penalty", "freekick2")]
+        kick = [k for k in kick if k in xi_ids]  # owned_team drops a taker who is not in the XI
+        if kick:
+            sq["kickers"] = (kick + [""] * hc.KICKERS)[:hc.KICKERS]
+    return team
+
+
+def lineup_tactic(entry, teamid):
+    """The CPU side's tactic board: hc.default_tactic(0) with the entry's `tactic` merged in, one
+    slider at a time (bus / cc / def are dicts). An entry without one keeps the default board."""
+    cfg = lineup_entry(entry, teamid) or {}
+    t = hc.default_tactic(0)
+    for k, v in (cfg.get("tactic") or {}).items():
+        t[k] = {**t[k], **v} if isinstance(v, dict) and isinstance(t.get(k), dict) else v
+    return hc.fix_radios(t)
+
+
 def tournament_roster(teamid, entry=None):
     """{summary, team} of a tournament side, or None when even the sources cannot make 11 players
     for it: the configured card sources, so both my side and the opponents field the real players
     of that competition instead of the best cards this DB happens to have for that nation. Picked
     by nationality (see gen_teams._team_filter), so a nation whose cards lost nationalteamid still
-    gets its full set."""
+    gets its full set. Its formation / XI / bench come from config/squads.json when the team has an
+    entry (apply_lineup), the generated 4-4-2 otherwise."""
     with closing(hc._db()) as c:
-        return gen_teams.team(c, teamid, tournament_card_sources(entry, teamid), national=True,
+        team = gen_teams.team(c, teamid, tournament_card_sources(entry, teamid), national=True,
                               by_nation=True,
-                              min_players=int((entry or {}).get("squad_size") or gen_teams.SELECTABLE),
-                              min_lines=(entry or {}).get("squad_lines"))
+                              min_players=int((entry or {}).get("squad_size") or gen_teams.ROSTER_SIZE),
+                              min_lines=(entry or {}).get("squad_lines"),
+                              squad_size=int((entry or {}).get("squad_size") or gen_teams.ROSTER_SIZE))
+    if team:
+        apply_lineup(team["team"], entry, teamid)
+    return team
 
 
 def tournament_roster_team(teamid, entry=None):

@@ -16,6 +16,9 @@ The checks are grouped by what they protect:
                  (a second one there killed the 淘汰赛 tab with AS3 #1010), no third-place match
     lineup       the XI / formation left on the pre-match screen survives into the next round,
                  and my cards keep the event's +N grade (they dropped to +0 on every PUT)
+    squads       config/squads.json: every configured team comes out with the formation, XI, bench,
+                 numbers, captain and takers asked for, the three layers win in the right order,
+                 and a team without an entry keeps the generated 4-4-2
     endpoints    /cup/list -> /cup/new -> /cup/<id>/match -> next/leave, with every resources
                  entry carrying `resource` (missing one is the same #1010)
     modules      every hc.<name> a module reaches for exists on http_config, and no module
@@ -29,11 +32,13 @@ import subprocess
 import sys
 import tempfile
 import time
+from contextlib import closing
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 import http_config as hc  # noqa: E402
+import gen_teams  # noqa: E402
 
 from modules import cup_api, localization, team_picker, tournaments  # noqa: E402
 
@@ -329,7 +334,203 @@ def check_lineup():
 
 
 # --------------------------------------------------------------------------- #
-# 5. endpoints: the exact calls the cup screens make
+# 5. configured squads: config/squads.json on top of the generated 4-4-2
+# --------------------------------------------------------------------------- #
+
+def _with_lineup_file(data, fn):
+    """Run fn() with config/squads.json replaced by `data` (the real file is never touched)."""
+    path = os.path.join(tempfile.mkdtemp(), "squads.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False)
+    old = tournaments.lineup_file
+    tournaments.lineup_file = lambda: path
+    tournaments._LINEUP_CACHE.update(mtime=None, data={})
+    try:
+        return fn()
+    finally:
+        tournaments.lineup_file = old
+        tournaments._LINEUP_CACHE.update(mtime=None, data={})  # re-read the real file next time
+
+
+def check_squads():
+    """Every configured team comes out of the generator with the formation, XI, bench, reserves,
+    numbers, captain and takers the file asks for -- and a team without an entry keeps its 4-4-2."""
+    cfg = tournaments.lineup_config()
+    assert cfg.get("_slots"), "config/squads.json lost its slot reference"
+    assert not (cfg.get("teams") or {}), "teams.<id> is the any-cup layer; 2014's sides live in cups.10002"
+    assert not cfg.get("players"), "players lives in each team's own block now, not at the top level"
+    entry = tournaments.tournament_entry(10002)
+    teams = ((cfg.get("cups") or {}).get("10002") or {}).get("teams") or {}
+    assert len(teams) >= 20, "the 2014 cup should configure its participants, got %d" % len(teams)
+    size = int(entry.get("squad_size") or 0)
+    assert size == 23, "a 2014 side is a 23-man squad (config/tournaments.json), got %r" % size
+    lines = entry.get("squad_lines") or {}
+    assert lines.get("GK") == 1 and lines.get("DF") == 4 and lines.get("MF") >= 4 \
+        and lines.get("FW") == 1, lines
+    pinned = 0
+    for tid, spec in teams.items():
+        roster = spec.get("players") or {}
+        assert roster, "%s: no per-team name -> playerid roster" % tid
+        assert all(isinstance(pid, int) for pid in roster.values()), "%s: a roster value is not a playerid" % tid
+        folded = {}
+        for name in roster:
+            key = tournaments._name_key(name)
+            assert key not in folded, "%s: two names fold to the same key: %r / %r" % (
+                tid, folded.get(key), name)
+            folded[key] = name
+        pinned += len(roster)
+        names_in_file = list(spec["starters"]) + list(spec.get("subs") or ()) + list(spec.get("reserves") or ())
+        assert len(spec["starters"]) == 11, "%s: starters must be 11, not %d" % (tid, len(spec["starters"]))
+        assert len(spec.get("subs") or ()) == 7, "%s: subs must be 7, not %d" % (tid, len(spec.get("subs") or ()))
+        if tid != "1413":  # China has no real 2014 list: the server tops its 18 up
+            assert len(spec.get("reserves") or ()) == 5, "%s: reserves must be 5" % tid
+            assert len(names_in_file) == 23, "%s: a squad list is 23 names, not %d" % (tid, len(names_in_file))
+        assert sorted((spec.get("numbers") or {}).values()) == list(range(1, 24)) or tid == "1413", \
+            "%s: shirt numbers are %s, not 1..23" % (tid, sorted((spec.get('numbers') or {}).values()))
+
+        team = tournaments.tournament_roster(int(tid), entry)["team"]
+        squad = team["squad"]
+        form = tournaments._formation(spec["formation"])
+        assert form, "%s: unknown formation %r" % (tid, spec["formation"])
+        xi = [p for p in squad["positions"] if p["pos"] < hc.POS_SUB]
+        bench = [p for p in squad["positions"] if p["pos"] == hc.POS_SUB]
+        assert [p["pos"] for p in xi] == form["positions"], "%s: XI does not follow %s" % (tid, form["formationname"])
+        assert len(bench) == 7, "%s: bench is %d, the client expects 7" % (tid, len(bench))
+        assert squad["formation"] == form["formationid"], tid
+        spids = [str(p["spid"]) for p in squad["positions"]]
+        assert len(set(spids)) == len(spids), "%s: a card is in two slots" % tid
+        assert set(spids) <= {str(p["spid"]) for p in team["players"]}, "%s: slot without a card" % tid
+        xi_ids = {str(p["spid"]) for p in xi}
+        assert str(squad["captain"]) in xi_ids, "%s: captain is not a starter" % tid
+        assert all(not k or k in xi_ids for k in squad["kickers"]), "%s: a taker is not a starter" % tid
+        for p in xi:  # participation + the slot's x/y, read by SquadScreenHandler / native
+            assert len(p["starting"]) == 4 and 0 <= p["starting"][2] <= 1 and 0 <= p["starting"][3] <= 1, tid
+        # the 23-man roster: the client treats everyone outside squad.positions as a reserve
+        assert len(team["players"]) == size, "%s: roster is %d, the cup asks for %d" % (
+            tid, len(team["players"]), size)
+        with closing(hc._db()) as c:
+            rows, pid_spids, poolnames, _ = tournaments._pool(c, team, entry, int(tid))
+            by_spid = {str(p["spid"]): p for p in team["players"]}
+            players = tournaments.lineup_players(spec)
+            for ref, n in (spec.get("numbers") or {}).items():
+                pid, _ = tournaments._playerid(ref, poolnames, players)
+                if not pid:
+                    continue  # a name with no card at all (Fred, Ozil, ...): the slot is filled
+                # spid = season * 1e6 + playerid, and a configured player may sit on a card the pool
+                # never offered (the season fallback in apply_lineup)
+                cards = [s for s in by_spid if int(s) % 1000000 == pid]
+                if not cards:
+                    continue  # no card of him anywhere: the slot is filled from the pool
+                assert by_spid[cards[0]]["jersey"] == n, "%s: %r wears %s, not %s" % (
+                    tid, ref, by_spid[cards[0]]["jersey"], n)
+            # shirt numbers: 23 distinct ones, exactly 1..23 (reserves included)
+            worn = [by_spid[str(p["spid"])]["jersey"] for p in team["players"]]
+            assert len(set(worn)) == 23, "%s: duplicate shirt numbers %s" % (tid, sorted(worn))
+            assert sorted(set(worn)) == list(range(1, 24)), "%s: %s" % (tid, sorted(worn))
+            # licensed only: an unauthorised card never joins a squad
+            for s in [str(p["spid"]) for p in team["players"]]:
+                r = c.execute("SELECT licensed FROM permid WHERE spid = ?", (int(s),)).fetchone()
+                assert r and r[0] == 1, "%s: spid %s is not licensed" % (tid, s)
+            # the shape of a server-filled 23: never four keepers, never a squad without lines
+            lines_of = {}
+            for s in [str(p["spid"]) for p in team["players"]]:
+                pos = rows[s]["preferredposition1"]
+                key = ("GK" if pos == 0 else "DF" if pos in gen_teams.LINES["DF"]
+                       else "MF" if pos in gen_teams.LINES["MF"] else "FW")
+                lines_of[key] = lines_of.get(key, 0) + 1
+            assert lines_of.get("GK", 0) <= gen_teams.MAX_GK, "%s: %d keepers" % (tid, lines_of.get("GK", 0))
+            for key in ("DF", "MF", "FW"):
+                floor = int(lines.get(key, 0))
+                assert lines_of.get(key, 0) >= min(floor, len(team["players"]) - 1), \
+                    "%s: only %d %s (floor %d)" % (tid, lines_of.get(key, 0), key, floor)
+    assert pinned > 450, "the rosters lost entries, got %d names" % pinned
+
+    # a name the pool has no card for does not push the players behind it out of their slots
+    germany = tournaments.tournament_roster(1337, entry)["team"]
+    slot = {str(p["spid"]): p["pos"] for p in germany["squad"]["positions"]}
+    gotze = next(p for p in germany["players"] if p.get("jerseyname") == "M. Gotze")
+    assert slot[str(gotze["spid"])] == 25, "Ozil is missing from the DB; that moved Gotze off the striker slot"
+
+    # the season fallback: Valdivia has no 14W card, so he comes back on his newest licensed one
+    chile = tournaments.tournament_roster(111459, entry)["team"]
+    valdivia = next(p for p in chile["players"] if p.get("jerseyname") == "Valdivia")
+    assert valdivia["spid"] // 1000000 != 77, "the 14W pool offered him after all"
+    assert valdivia["jersey"] == 10, valdivia
+    assert str(valdivia["spid"]) in [str(p["spid"]) for p in chile["squad"]["positions"]
+                                     if p["pos"] < hc.POS_SUB], "the fallback card did not reach the XI"
+
+    # a number at or above a million is a full spid: the exact card is tried first, then the
+    # playerid is pulled out and found through the season chain (the prefix is not a forced season)
+    with closing(hc._db()) as c:
+        chain = tournaments._default_seasons(entry, 1370)
+        assert tournaments._licensed_spid(c, 77009676)["spid"] == 77009676  # exact hit, licensed
+        pid, season = tournaments._playerid("52009676", {}, {})  # 52 = a season that does not exist
+        assert pid == 9676 and season is None, (pid, season)
+        assert tournaments._fallback_card(c, pid, chain)["spid"] == 77009676  # 14W, not season 52
+        pid, _ = tournaments._playerid(20231942, {}, {})  # an unlicensed 20-season spid
+        assert pid == 231942
+        assert tournaments._licensed_spid(c, 20231942) is None  # unlicensed: the exact spid is refused
+        got = tournaments._fallback_card(c, pid, chain)
+        assert got["spid"] // 1000000 == 88, "the unlicensed card leaked through"  # only his 88 is licensed
+        assert tournaments._playerid(65662, {}, {}) == (65662, None)  # a plain playerid stays put
+        # China: playerids resolve against its own card source (season 81), not the cup's 77
+        assert tournaments._default_seasons(entry, 1413) == [81, 88]
+        wang = next(iter(tournaments.lineup_entry(entry, 1413)["players"].values()))
+        assert tournaments._fallback_card(c, wang, [81, 88])["spid"] // 1000000 == 81
+
+    # a team with no entry keeps what gen_teams makes (4-4-2, XI only) -- and still gets a legal 23
+    plain = tournaments.tournament_roster(1322, entry)["team"]  # Austria: not in the config
+    assert plain["squad"]["formation"] == 1 and len(plain["squad"]["positions"]) == 11
+    assert len(plain["players"]) == int(entry["squad_size"]), "the generated roster is not 23"
+    with closing(hc._db()) as c:
+        got = {"GK": 0, "DF": 0, "MF": 0, "FW": 0}
+        for p in plain["players"]:
+            pos = c.execute("SELECT preferredposition1 FROM players WHERE spid = ?",
+                            (int(p["spid"]),)).fetchone()[0]
+            got["GK" if pos == 0 else "DF" if pos in gen_teams.LINES["DF"]
+                else "MF" if pos in gen_teams.LINES["MF"] else "FW"] += 1
+    assert got["GK"] <= gen_teams.MAX_GK, "compose left %d keepers in a 23-man roster" % got["GK"]
+    assert got["DF"] >= 4 and got["MF"] >= 4 and got["FW"] >= 1, got
+
+    # China sits in the cup (it only ever plays this tournament) on the 4-2-3-1(2) the side used
+    china = teams["1413"]
+    assert china["formation"] == "4-2-3-1(2)", china["formation"]
+    assert tournaments._formation(china["formation"])["formationid"] == 47
+
+    # the three layers: defaults <- teams <- cups.<metaid>.teams, one field at a time
+    def layers():
+        mine = tournaments.tournament_roster(1370, entry)["team"]
+        with closing(hc._db()) as c:
+            rows, pid_spids, names, _ = tournaments._pool(c, mine, entry, 1370)
+        return mine, (tournaments._playerid("Neymar Jr", names)[0] or 0)
+
+    def neymar_spid(mine):
+        return str(next(p["spid"] for p in mine["players"] if p.get("jerseyname") == "Neymar Jr"))
+
+    def merged():
+        return _with_lineup_file({
+            "defaults": {"formation": "4-3-3(1)",
+                         "starters": ["Julio Cesar", "Dani Alves", "T.Silva", "David Luiz", "Marcelo",
+                                      "L. Gustavo", "Paulinho", "Oscar", "Hulk", "Neymar Jr", "Bernard"],
+                         "captain": "Oscar", "numbers": {"Neymar Jr": 22}},
+            "teams": {"1370": {"captain": "Hulk"}},
+            "cups": {"10002": {"teams": {"1370": {"captain": "Neymar Jr"}}}}}, layers)
+
+    mine, _ = merged()
+    assert mine["squad"]["formation"] == 19, "cups.<metaid> did not override defaults.formation"
+    assert str(mine["squad"]["captain"]) == neymar_spid(mine), "cups.<metaid>.captain lost to teams.captain"
+    worn = next(p for p in mine["players"] if str(p["spid"]) == neymar_spid(mine))["jersey"]
+    assert worn == 22, "defaults.numbers lost, got %s" % worn
+
+    # no cups entry: teams.<id> wins over defaults
+    mine, _ = _with_lineup_file({
+        "defaults": {"captain": "Oscar"}, "teams": {"1370": {"captain": "Hulk"}}}, layers)
+    hulk = next(p for p in mine["players"] if p.get("jerseyname") == "Hulk")
+    assert str(mine["squad"]["captain"]) == str(hulk["spid"]), "teams.<id> lost to defaults"
+
+
+# --------------------------------------------------------------------------- #
+# 6. endpoints: the exact calls the cup screens make
 # --------------------------------------------------------------------------- #
 
 def new_state_with_coach(tmp):
@@ -438,7 +639,7 @@ def check_endpoints(tmp):
 
 
 # --------------------------------------------------------------------------- #
-# 6. the module boundary itself
+# 7. the module boundary itself
 # --------------------------------------------------------------------------- #
 
 def check_modules():
@@ -490,6 +691,7 @@ def main():
     run("qualifiers", check_qualifiers)
     run("engine", check_engine)
     run("lineup", check_lineup)
+    run("squads", check_squads)
     tmp = tempfile.mkdtemp()
     run("endpoints", check_endpoints, tmp)
     print("ALL PASS")

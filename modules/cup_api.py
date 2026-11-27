@@ -17,9 +17,9 @@ import json
 import time
 
 from modules import hc  # http_config, resolved lazily (see modules/__init__.py)
-from modules.tournaments import (apply_cup_lineup, cup_or_tournament_meta, new_tournament_cup,
-                                 tournament_config, tournament_entry, tournament_meta,
-                                 tournament_play_round, tournament_squad)
+from modules.tournaments import (apply_cup_lineup, cup_or_tournament_meta, lineup_tactic,
+                                 new_tournament_cup, tournament_config, tournament_entry,
+                                 tournament_meta, tournament_play_round, tournament_squad)
 
 
 def ep_cup_list(query, body):
@@ -195,9 +195,16 @@ def ep_cup_match(cupid, query, body):
         # because tournament_squad is cached and shared with the draw and the other rounds.
         mine = copy.deepcopy(tournament_squad(entry, teamid))
         apply_cup_lineup(mine, cup.get("lineup"))
+        # The CPU side gets what my side gets: the event's +N cards, the team colors its XI meets
+        # (match_side leaves an AI side empty on purpose -- "an AI side is a whole club, +4 for
+        # free" -- so a World Cup opponent played without the club / nation / season bonuses) and
+        # the tactic board configured for it (lineup_tactic; the default board otherwise).
+        theirs = hc.match_side(hc.set_card_grade(tournament_squad(entry, opp), grade), opp,
+                               tactics=[lineup_tactic(entry, opp)])
+        theirs["team"]["teamcolors"] = hc.active_teamcolors(theirs["team"])
         match = hc.new_match("Cup_PvE",
                              hc.match_side(hc.set_card_grade(mine, grade), teamid, user, hc._tactics(st)[1]),
-                             hc.match_side(hc.set_card_grade(tournament_squad(entry, opp), grade), opp))
+                             theirs)
     else:
         match = hc.new_match("Cup_PvE",
                              hc.match_side(st["teams"][str(hc._default_slot(st))], teamid, user,
